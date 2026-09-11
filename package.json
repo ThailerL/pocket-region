@@ -1,5 +1,8 @@
 {
   "name": "pocket-region",
   "type": "module",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "pyodide": "314.0.6"
+  }
 }
