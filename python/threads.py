@@ -2,13 +2,9 @@
 # inline instead: fire-and-forget workers (S3 event fanout, SNS delivery) complete during
 # the request that triggered them, and loop-forever workers hit the first sleep and are
 # deferred. Must run before ministack is imported.
+import sys
 import threading
 import time
-
-
-# What the shim did with each worker it saw, for the boot report
-DEFERRED = []
-FAILED = []
 
 
 class _Deferred(BaseException):
@@ -24,10 +20,10 @@ def _inline_start(self):
     time.sleep = _no_sleep
     try:
         self.run()
-    except _Deferred as deferred:
-        DEFERRED.append(f"{self.name} ({deferred})")
+    except _Deferred:
+        pass
     except Exception as error:
-        FAILED.append(f"{self.name}: {error!r}")
+        print(f"Background worker {self.name} failed: {error!r}", file=sys.stderr)
     finally:
         time.sleep = real_sleep
 

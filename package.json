@@ -2,13 +2,24 @@
   "name": "pocket-region",
   "type": "module",
   "license": "MIT",
+  "exports": {
+    ".": {
+      "types": "./dist/region.d.ts",
+      "default": "./dist/region.js"
+    }
+  },
   "scripts": {
-    "test": "vitest run"
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc",
+    "test": "vitest run",
+    "vendor": "node scripts/vendor.mjs"
   },
   "dependencies": {
     "pyodide": "314.0.6"
   },
   "devDependencies": {
+    "@types/node": "^24.13.4",
+    "typescript": "^7.0.2",
     "vitest": "^5.0.0"
   }
 }

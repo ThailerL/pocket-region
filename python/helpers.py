@@ -1,17 +1,16 @@
 # The emulator and the plumbing to call it. Python owns no socket under Pyodide, so the
-# ASGI app is driven directly: every "request" is an in-process function call. All Python
-# file IO stays in MEMFS - writes through a Vivari node mount return corrupt lengths - and
-# the bridge copies bytes between MEMFS and the persistent data dir.
+# ASGI app is driven directly: every "request" is an in-process function call.
 import asyncio
 import json
 import os
 import tempfile
 from collections import namedtuple
 
+# Temp files stay in MEMFS: under Vivari, writes through a node mount are corrupt
 os.makedirs("/tmp", exist_ok=True)
 tempfile.tempdir = "/tmp"
 
-# STATE_ROOT is injected by the bridge before this file runs. Object bodies persist through
+# STATE_ROOT is set by createRegion before this file runs. Object bodies persist through
 # a switch of their own: with only PERSIST_STATE the buckets come back empty
 STATE_DIR = f"{STATE_ROOT}/state"
 S3_DATA_DIR = f"{STATE_ROOT}/objects"
@@ -22,8 +21,6 @@ os.environ.update(
     STATE_DIR=STATE_DIR,
     S3_PERSIST="1",
     S3_DATA_DIR=S3_DATA_DIR,
-    # The queue URLs the emulator mints are dialled directly by the AWS SDK, so they have
-    # to name the port the bridge actually listens on
     GATEWAY_PORT=str(REGION_PORT),
 )
 

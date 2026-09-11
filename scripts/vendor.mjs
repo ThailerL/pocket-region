@@ -1,4 +1,4 @@
-// Generates static/vendor/aws-region/: every wheel the emulator needs. The runtime itself is
+// Generates vendor/: every wheel the emulator needs, beside meta.json. The runtime itself is
 // the pyodide dependency. The set is resolved by really installing it under the pinned
 // Pyodide and freezing the environment.
 //
@@ -25,17 +25,17 @@ const EMULATOR_NAME = EMULATOR_SPEC.split('==')[0];
 
 // Resolved as the emulator's dependency but left out of the tree. botocore is half the
 // payload and the slowest wheel to install, and nothing we serve imports it: it is lazy,
-// reached only from the glue, lambda-runtime and IAM paths. Code that wants an AWS client
-// installs its own from PyPI, which works in the VM - as the templates' npm install already
-// does. Verified by booting the region and exercising S3, SQS and DynamoDB without it
-const EXCLUDED_PACKAGES = ['botocore'];
+// reached only from the glue, lambda-runtime and IAM paths. Verified by booting the region
+// and exercising S3, SQS and DynamoDB without it
+// micropip only resolves the set here; the region loads the wheels without it
+const EXCLUDED_PACKAGES = ['botocore', 'micropip'];
 
 const ROOT = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
-const OUTPUT_DIRECTORY = path.join(ROOT, 'static', 'vendor', 'aws-region');
+const OUTPUT_DIRECTORY = path.join(ROOT, 'vendor');
 const METADATA_FILE = path.join(OUTPUT_DIRECTORY, 'meta.json');
 
 const force = process.argv.includes('--force');
-const log = (message) => process.stderr.write(`[vendor-aws-region] ${message}\n`);
+const log = (message) => process.stderr.write(`[vendor] ${message}\n`);
 
 function fail(message) {
 	log(message);
@@ -65,7 +65,7 @@ if (installedVersion !== PYODIDE_VERSION) {
 	fail(`pyodide ${installedVersion} is installed but ${PYODIDE_VERSION} is pinned: run npm install`);
 }
 
-const work = fs.mkdtempSync(path.join(os.tmpdir(), 'aws-region-vendor-'));
+const work = fs.mkdtempSync(path.join(os.tmpdir(), 'pocket-region-vendor-'));
 try {
 
 	// Wheel-loading noise goes to stdout, so the child writes its result to a file instead
@@ -110,19 +110,13 @@ fs.writeFileSync(${JSON.stringify(listFile)}, result);
 	const distEntries = indexByName(distributionLock.packages);
 
 	fs.rmSync(OUTPUT_DIRECTORY, { recursive: true, force: true });
-	const wheelsDir = path.join(OUTPUT_DIRECTORY, 'wheels');
-	fs.mkdirSync(wheelsDir, { recursive: true });
+	fs.mkdirSync(OUTPUT_DIRECTORY, { recursive: true });
 
-	const distPackages = [];
-	const pypiWheels = [];
+	const wheels = [];
 	const downloads = [];
-	// Every relative path and size in the tree, so the page can copy it into the VM
-	// without directory listings and the region can verify the copy
-	const files = [];
 	let totalBytes = 0;
 	const writeWheel = (file, bytes) => {
-		fs.writeFileSync(path.join(wheelsDir, file), bytes);
-		files.push({ path: `wheels/${file}`, bytes: bytes.length });
+		fs.writeFileSync(path.join(OUTPUT_DIRECTORY, file), bytes);
 		totalBytes += bytes.length;
 	};
 	const excluded = new Set(EXCLUDED_PACKAGES.map(canonical));
@@ -136,7 +130,7 @@ fs.writeFileSync(${JSON.stringify(listFile)}, result);
 			if (!fs.existsSync(cached)) fail(`cached wheel missing: ${file}`);
 			const bytes = fs.readFileSync(cached);
 			if (dist.sha256 && sha256(bytes) !== dist.sha256) fail(`checksum mismatch: ${file}`);
-			distPackages.push(entry.name);
+			wheels.push(file);
 			writeWheel(file, bytes);
 		} else {
 			const frozen = frozenEntries.get(canonical(entry.name));
@@ -144,7 +138,7 @@ fs.writeFileSync(${JSON.stringify(listFile)}, result);
 				fail(`no download URL for ${entry.name} (source: ${entry.source})`);
 			}
 			const file = decodeURIComponent(frozen.file_name.split('/').pop());
-			pypiWheels.push(file);
+			wheels.push(file);
 			downloads.push(async () => {
 				log(`downloading ${file}`);
 				const response = await fetch(frozen.file_name);
@@ -164,20 +158,15 @@ fs.writeFileSync(${JSON.stringify(listFile)}, result);
 			{
 				pyodideVersion: PYODIDE_VERSION,
 				emulatorSpec: EMULATOR_SPEC,
-				ministackVersion: emulator.version,
-				distPackages,
-				pypiWheels,
-				files: files.sort((a, b) => a.path.localeCompare(b.path)),
-				megabytes: Number(megabytes)
+				wheels: wheels.sort()
 			},
 			null,
 			2
 		)}\n`
 	);
-	const kept = distPackages.length + pypiWheels.length;
 	log(
-		`wrote ${kept} wheels - ${megabytes} MB, ${EMULATOR_NAME} ${emulator.version}` +
-			(kept < packages.length ? ` (excluded ${EXCLUDED_PACKAGES.join(', ')})` : '')
+		`wrote ${wheels.length} wheels - ${megabytes} MB, ${EMULATOR_NAME} ${emulator.version}` +
+			(wheels.length < packages.length ? ` (excluded ${EXCLUDED_PACKAGES.join(', ')})` : '')
 	);
 } finally {
 	fs.rmSync(work, { recursive: true, force: true });
