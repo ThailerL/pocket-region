@@ -1,6 +1,5 @@
 // The manager under real Node: the same code the VM runs, minus the VM
 import { afterEach, describe, expect, it } from 'vitest';
-import { EVENT_PREFIX } from '../aws-region/lib.js';
 import http from 'node:http';
 import net from 'node:net';
 import readline from 'node:readline';
@@ -11,6 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const MANAGER = fileURLToPath(new URL('./manager.mjs', import.meta.url));
+const EVENT_PREFIX = 'gg:event ';
 // What a test's manager runs with unless it says otherwise
 const DEFAULT_MAX_CONCURRENCY = 5;
 const DEFAULT_CONFIG = { timeout: 3, maxConcurrency: DEFAULT_MAX_CONCURRENCY, triggers: [] };

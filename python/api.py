@@ -2,14 +2,8 @@
 # python files is already in this namespace.
 import glob
 import time
-from xml.etree.ElementTree import Element, SubElement, fromstring, tostring
 
 from pyodide.ffi import to_js
-
-S3_NAMESPACE = "http://s3.amazonaws.com/doc/2006-03-01/"
-# What a bucket tells a function about, as a Lambda trigger's default does
-NOTIFIED_EVENTS = ("s3:ObjectCreated:*", "s3:ObjectRemoved:*")
-
 
 # One data-plane request: the caller's method/path/headers/body, forwarded verbatim. body
 # arrives as a JS Uint8Array; the return converts to a JS array of
@@ -81,107 +75,3 @@ async def gg_stats():
 # Lifespan shutdown persists on its way out; the bridge copies the files afterwards
 async def gg_stop():
     await lifespan("shutdown")
-
-
-# config carries the service-specific create-time settings a node's definition sends
-# (queue attributes, table key schema); everything else gets a teachable default
-async def gg_provision(service, name, config_json):
-    config = json.loads(config_json or "{}")
-    if service == "s3":
-        created = await s3_request("put", f"/{name}")
-        # 409 is BucketAlreadyOwnedByYou territory: provisioning is idempotent
-        if created.status not in (200, 409):
-            raise RuntimeError(f"CreateBucket answered {created.status}")
-        # Absent leaves the configuration alone: start provisions with launch config only and
-        # must not wipe what update wrote
-        if "notifications" in config:
-            await put_bucket_notifications(name, config["notifications"])
-        return json.dumps({"bucket": name})
-    if service == "sqs":
-        # Created bare and then configured, rather than created with its attributes: a
-        # CreateQueue naming attributes that differ from an existing queue is an error, and
-        # provisioning runs again every time the node starts with edited settings
-        status, created = await json_api("sqs", "AmazonSQS.CreateQueue", {"QueueName": name})
-        if status != 200:
-            raise RuntimeError(f"CreateQueue failed: {created}")
-        url = created.get("QueueUrl")
-        attributes = config.get("attributes") or {}
-        if attributes:
-            status, updated = await json_api(
-                "sqs",
-                "AmazonSQS.SetQueueAttributes",
-                {"QueueUrl": url, "Attributes": {k: str(v) for k, v in attributes.items()}},
-            )
-            if status != 200:
-                raise RuntimeError(f"SetQueueAttributes failed: {updated}")
-        return json.dumps({"queueUrl": url})
-    if service == "dynamodb":
-        status, created = await json_api(
-            "dynamodb",
-            "DynamoDB_20120810.CreateTable",
-            {
-                "TableName": name,
-                "KeySchema": config.get("keySchema")
-                or [{"AttributeName": "pk", "KeyType": "HASH"}],
-                "AttributeDefinitions": config.get("attributeDefinitions")
-                or [{"AttributeName": "pk", "AttributeType": "S"}],
-                "BillingMode": "PAY_PER_REQUEST",
-            },
-        )
-        if status == 200 or created.get("__type", "").endswith("ResourceInUseException"):
-            return json.dumps({"table": name})
-        raise RuntimeError(f"CreateTable failed: {created}")
-    raise RuntimeError(f"unknown service {service}")
-
-
-# One QueueConfiguration per queue; an empty list clears. The ARN's region and account are
-# what the emulator validates the destination against, and match the URLs the host mints
-async def put_bucket_notifications(bucket, queues):
-    root = Element("NotificationConfiguration", xmlns=S3_NAMESPACE)
-    for queue in queues:
-        configuration = SubElement(root, "QueueConfiguration")
-        SubElement(configuration, "Id").text = queue["id"]
-        arn = f"arn:aws:sqs:us-east-1:000000000000:{queue['queueName']}"
-        SubElement(configuration, "Queue").text = arn
-        for event in NOTIFIED_EVENTS:
-            SubElement(configuration, "Event").text = event
-    body = tostring(root, encoding="utf-8")
-    response = await s3_request(
-        "put", f"/{bucket}?notification", body, {"content-type": "application/xml"}
-    )
-    if response.status != 200:
-        raise RuntimeError(
-            f"PutBucketNotificationConfiguration answered {response.status}: "
-            f"{response.body.decode()}"
-        )
-
-
-async def gg_deprovision(service, name):
-    if service == "s3":
-        while True:
-            keys = await _bucket_key_page(name)
-            if keys is None:
-                return
-            if not keys:
-                break
-            for key in keys:
-                await s3_request("delete", object_path(name, key))
-        await s3_request("delete", f"/{name}")
-        return
-    if service == "sqs":
-        status, found = await json_api("sqs", "AmazonSQS.GetQueueUrl", {"QueueName": name})
-        if status == 200:
-            await json_api("sqs", "AmazonSQS.DeleteQueue", {"QueueUrl": found["QueueUrl"]})
-        return
-    if service == "dynamodb":
-        await json_api("dynamodb", "DynamoDB_20120810.DeleteTable", {"TableName": name})
-        return
-    raise RuntimeError(f"unknown service {service}")
-
-
-# One page of object keys, for the drain loop. None when the bucket does not exist
-async def _bucket_key_page(bucket):
-    listing = await s3_request("get", f"/{bucket}?list-type=2")
-    if listing.status == 404:
-        return None
-    return [key.text or "" for key in fromstring(listing.body).iter(f"{{{S3_NAMESPACE}}}Key")]

@@ -7,7 +7,6 @@ import json
 import os
 import tempfile
 from collections import namedtuple
-from urllib.parse import quote
 
 os.makedirs("/tmp", exist_ok=True)
 tempfile.tempdir = "/tmp"
@@ -97,39 +96,3 @@ async def asgi_request(method, target, headers, body=b""):
     start = next(m for m in sent if m["type"] == "http.response.start")
     payload = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
     return Response(start["status"], start.get("headers", []), payload)
-
-
-def auth_header(service):
-    return (
-        "AWS4-HMAC-SHA256 Credential=GGINTERNAL/20260101/us-east-1/"
-        f"{service}/aws4_request, SignedHeaders=host, Signature=internal"
-    )
-
-
-def _internal_headers(service, extra=None):
-    merged = {"host": "localhost", "authorization": auth_header(service)}
-    merged.update(extra or {})
-    return list(merged.items())
-
-
-# The JSON protocol SQS and DynamoDB speak; the app routes on the credential scope
-async def json_api(service, target, body):
-    response = await asgi_request(
-        "POST",
-        "/",
-        _internal_headers(
-            service, {"x-amz-target": target, "content-type": "application/x-amz-json-1.0"}
-        ),
-        json.dumps(body).encode(),
-    )
-    return response.status, (json.loads(response.body) if response.body else {})
-
-
-async def s3_request(method, path, data=b"", extra_headers=None):
-    return await asgi_request(
-        method.upper(), path, _internal_headers("s3", extra_headers), data
-    )
-
-
-def object_path(bucket, key):
-    return f"/{bucket}/{quote(key, safe='/')}"
