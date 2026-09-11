@@ -1,4 +1,5 @@
 {
-  "name": "aws-region",
-  "type": "module"
+  "name": "pocket-region",
+  "type": "module",
+  "license": "MIT"
 }
