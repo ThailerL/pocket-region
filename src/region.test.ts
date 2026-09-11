@@ -1,3 +1,5 @@
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createRegion, type Region } from './region.ts';
 
@@ -42,6 +44,17 @@ async function jsonApi(service: 'sqs' | 'dynamodb', target: string, body: object
 }
 
 describe('createRegion', () => {
+  it('lets Node exit once stopped', async () => {
+    const module = JSON.stringify(new URL('./region.ts', import.meta.url).href);
+    const child = spawn(
+      process.execPath,
+      ['--input-type=module', '-e', `import { createRegion } from ${module}; await (await createRegion()).stop();`],
+      { stdio: 'ignore', signal: AbortSignal.timeout(20_000) },
+    );
+    const [code] = await once(child, 'exit');
+    expect(code).toBe(0);
+  }, 30_000);
+
   it('round-trips an S3 object', async () => {
     expect((await s3('PUT', '/photos')).status).toBe(200);
     expect((await s3('PUT', '/photos/cat.txt', 'meow')).status).toBe(200);

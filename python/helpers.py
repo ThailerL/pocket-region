@@ -60,7 +60,8 @@ async def lifespan(phase):
         )
     reached = _lifespan_reached.setdefault(phase, asyncio.Event())
     await _lifespan_queue.put({"type": f"lifespan.{phase}"})
-    await asyncio.wait_for(reached.wait(), timeout=120)
+    # No timeout: under Pyodide a cancelled asyncio timer still holds Node open for its delay
+    await reached.wait()
 
 
 Response = namedtuple("Response", ("status", "headers", "body"))
