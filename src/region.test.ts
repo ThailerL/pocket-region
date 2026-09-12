@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -35,19 +35,28 @@ function s3(method: string, key: string, body?: string) {
   return s3On(region, method, key, body);
 }
 
-async function jsonApi(service: 'sqs' | 'dynamodb', target: string, body: object) {
-  const response = await region.dispatch({
+async function jsonApiOn(
+  target: Region,
+  service: 'sqs' | 'dynamodb',
+  operation: string,
+  body: object,
+) {
+  const response = await target.dispatch({
     method: 'POST',
     path: '/',
     headers: {
       host: 'localhost:4566',
       authorization: authorization(service),
       'content-type': 'application/x-amz-json-1.0',
-      'x-amz-target': target,
+      'x-amz-target': operation,
     },
     body: encoder.encode(JSON.stringify(body)),
   });
   return { status: response.status, body: JSON.parse(decoder.decode(response.body)) };
+}
+
+function jsonApi(service: 'sqs' | 'dynamodb', operation: string, body: object) {
+  return jsonApiOn(region, service, operation, body);
 }
 
 describe('createRegion', () => {
@@ -116,6 +125,32 @@ describe('createRegion', () => {
     expect(decoder.decode(kept.body)).toBe('kept');
     expect((await s3On(second, 'GET', '/saved/gone.txt')).status).toBe(404);
     await second.stop();
+    await rm(stateDir, { recursive: true, force: true });
+  }, 60_000);
+
+  it('keeps a state file it cannot read instead of saving over it', async () => {
+    const stateDir = await mkdtemp(path.join(tmpdir(), 'pocket-region-refused-'));
+    // Stamped by a release this build does not understand, which it refuses to load
+    const file = path.join(stateDir, 'state', 'sqs.json');
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(
+      file,
+      JSON.stringify({ __ministack_format__: 99, payload: { queues: 'from-the-future' } }),
+    );
+
+    const output: string[] = [];
+    const second = await createRegion({ stateDir, onOutput: (line) => output.push(line) });
+    expect(output.join('\n')).toContain('sqs.json was not loaded');
+    const lookup = await jsonApiOn(second, 'sqs', 'AmazonSQS.GetQueueUrl', {
+      QueueName: 'from-the-future',
+    });
+    expect(lookup.status).toBe(400);
+    await second.save();
+    await second.stop();
+
+    const kept = await readFile(`${file}.refused`, 'utf8');
+    expect(JSON.parse(kept).__ministack_format__).toBe(99);
+    expect(kept).toContain('from-the-future');
     await rm(stateDir, { recursive: true, force: true });
   }, 60_000);
 });

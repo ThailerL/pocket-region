@@ -1,6 +1,7 @@
 # The emulator and the plumbing to call it. Python owns no socket under Pyodide, so the
 # ASGI app is driven directly: every "request" is an in-process function call.
 import asyncio
+import glob
 import json
 import os
 import tempfile
@@ -23,6 +24,31 @@ os.environ.update(
     S3_DATA_DIR=S3_DATA_DIR,
     GATEWAY_PORT=str(REGION_PORT),
 )
+
+from ministack.core.persistence import load_state
+
+
+def _move_aside(path):
+    # Never overwrite an earlier quarantine: that is the loss this exists to prevent
+    kept = path + ".refused"
+    index = 2
+    while os.path.exists(kept):
+        kept = f"{path}.refused-{index}"
+        index += 1
+    os.rename(path, kept)
+    print(f"state file {os.path.basename(path)} was not loaded; kept as {os.path.basename(kept)}")
+
+
+# A file the emulator refuses leaves that service empty, and the next save would write that
+# emptiness over it. load_state is asked rather than copied, so its rule stays its own; it
+# says why on its own logger, and must run before the import below
+def _quarantine_refused_state():
+    for path in sorted(glob.glob(f"{STATE_DIR}/*.json")):
+        if load_state(os.path.basename(path)[: -len(".json")]) is None:
+            _move_aside(path)
+
+
+_quarantine_refused_state()
 
 # Each service reads its own state file as it imports, so this line is the restore
 from ministack.app import app, _build_persistence_save_dict
