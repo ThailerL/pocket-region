@@ -106,6 +106,42 @@ afterAll(() => region.stop());
 A region with a `stateDir` keeps its files until the next `save` or `stop`, which writes the
 empty state over them.
 
+## Lambda
+
+Create a function the way you would on AWS, with a zipped deployment package, and invoke it.
+The handler runs in a Node child process, one per concurrent invocation, kept warm for a
+minute of idleness.
+
+```js
+import { createRegion, requestHandler, serve } from 'pocket-region';
+import { LambdaClient, CreateFunctionCommand, InvokeCommand } from '@aws-sdk/client-lambda';
+
+const region = await createRegion();
+// A handler runs in another process, so its own SDK calls need an endpoint to dial
+const server = await serve(region);
+
+const lambda = new LambdaClient({ /* as above */ requestHandler: requestHandler(region) });
+await lambda.send(new CreateFunctionCommand({
+  FunctionName: 'hello',
+  Runtime: 'nodejs22.x',
+  Handler: 'index.handler',
+  Role: 'arn:aws:iam::000000000000:role/lambda',
+  Code: { ZipFile: zipOfYourCode },
+}));
+const { Payload } = await lambda.send(new InvokeCommand({ FunctionName: 'hello', Payload: '{}' }));
+```
+
+Inside the handler `AWS_ENDPOINT_URL`, `AWS_REGION` and test credentials are set, so an SDK
+client built with no arguments reaches the region. `Timeout`, `ReservedConcurrentExecutions`,
+`Environment`, `InvocationType: 'Event'` and `LogType: 'Tail'` behave as on Lambda; a thrown
+handler comes back as `FunctionError: 'Unhandled'`.
+
+Node runtimes only, and only in Node — a page has no processes to run a handler in. The
+deployment package is used as is: the AWS SDK is not preinstalled for it the way Lambda's
+runtime provides it, so bundle it or ship `node_modules` in the zip. Event sources (S3
+notifications, SNS, EventBridge) deliver once, with no retries or dead-lettering yet; SQS
+event source mappings do not poll.
+
 ## What works
 
 | Service | Status |
@@ -113,11 +149,11 @@ empty state over them.
 | S3 | Tested, including bucket notifications into SQS |
 | SQS | Tested |
 | DynamoDB | Tested |
+| Lambda | Tested: Node functions, synchronous and `Event` invokes, in Node only |
 | The rest of [ministack](https://pypi.org/project/ministack/)'s services | Unverified: they may answer, nothing here exercises them |
 
 Not yet: scheduled EventBridge rules and the DynamoDB TTL reaper never fire, because Pyodide
-has no threads and their loops are deferred. Lambda has a working runtime in this repository
-but it is not part of the published API yet.
+has no threads and their loops are deferred.
 
 ## How it works
 

@@ -4,10 +4,12 @@ import { fileURLToPath } from 'node:url';
 import type { PyodideAPI } from 'pyodide';
 import {
   bootRegion,
+  DEFAULT_PORT,
   type Region,
   type RegionSettings,
   type VendorManifest,
 } from './core.ts';
+import { createLambdaHost } from './lambda/host.ts';
 
 export type { OutputStream, Region, RegionRequest, RegionResponse } from './core.ts';
 
@@ -62,7 +64,13 @@ export function createRegion(options: NodeRegionOptions = {}): Promise<Region> {
   const manifest: VendorManifest = JSON.parse(
     fs.readFileSync(path.join(packageCacheDir, 'meta.json'), 'utf8'),
   );
-  const { stateDir } = options;
+  const { stateDir, onOutput } = options;
+  const port = options.port ?? DEFAULT_PORT;
+  // A handler runs in its own process, so its SDK calls need the region served on its port
+  const lambda = createLambdaHost({
+    endpoint: `http://127.0.0.1:${port}`,
+    onOutput: onOutput && ((line) => onOutput(line, 'stdout')),
+  });
 
   return bootRegion(
     {
@@ -71,7 +79,7 @@ export function createRegion(options: NodeRegionOptions = {}): Promise<Region> {
       stdLib: path.join(packageCacheDir, manifest.stdlib),
       wheels: manifest.wheels.map((file) => path.join(packageCacheDir, file)),
     },
-    options,
+    { ...options, port },
     stateDir === undefined
       ? undefined
       : {
@@ -83,5 +91,6 @@ export function createRegion(options: NodeRegionOptions = {}): Promise<Region> {
             mirrorToDisk(py, stateRoot, stateDir);
           },
         },
+    lambda,
   );
 }

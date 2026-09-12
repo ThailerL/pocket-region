@@ -1,5 +1,5 @@
 import http from 'node:http';
-import type { Dispatcher } from './core.ts';
+import { DEFAULT_PORT, type Dispatcher } from './core.ts';
 
 export type ServeOptions = {
   // Defaults to the port the region mints its queue URLs with, so a client following one
@@ -70,7 +70,7 @@ export function serve(
 
   return new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen(options.port ?? region.port ?? 4566, host, () => {
+    server.listen(options.port ?? region.port ?? DEFAULT_PORT, host, () => {
       const { port } = server.address() as { port: number };
       resolve({
         url: `http://${host}:${port}`,

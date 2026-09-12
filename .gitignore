@@ -2,3 +2,4 @@ node_modules/
 dist/
 vendor/
 src/python.generated.ts
+src/lambda/runtime.generated.ts

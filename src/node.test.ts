@@ -5,12 +5,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createRegion, type Region } from './node.ts';
+import { authorization } from './test-support.ts';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
-
-const authorization = (service: string) =>
-  `AWS4-HMAC-SHA256 Credential=test/20260101/us-east-1/${service}/aws4_request, SignedHeaders=host, Signature=test`;
 
 let region: Region;
 

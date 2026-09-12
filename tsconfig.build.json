@@ -6,5 +6,5 @@
     "rootDir": "src",
     "outDir": "dist"
   },
-  "exclude": ["src/**/*.test.ts", "src/test-support.ts"]
+  "exclude": ["src/**/*.test.ts", "src/test-support.ts", "src/lambda/runtime.ts"]
 }

@@ -55,7 +55,7 @@
   },
   "scripts": {
     "prepack": "npm run vendor && npm run build",
-    "embed": "node scripts/embed-python.mjs",
+    "embed": "node scripts/embed-python.mjs && node scripts/embed-runtime.mjs",
     "build": "npm run embed && node -e \"fs.rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.build.json",
     "check": "npm run embed && tsc",
     "pretest": "npm run vendor",
@@ -68,6 +68,7 @@
   },
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "^3.1131.0",
+    "@aws-sdk/client-lambda": "^3.1131.0",
     "@aws-sdk/client-s3": "^3.1131.0",
     "@aws-sdk/client-sns": "^3.1131.0",
     "@aws-sdk/client-sqs": "^3.1131.0",

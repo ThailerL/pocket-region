@@ -10,6 +10,11 @@ export const clientConfig = (extra: object = {}) => ({
   ...extra,
 });
 
+// SigV4's shape without a signature: the region routes on the credential scope and never
+// verifies one
+export const authorization = (service: string) =>
+  `AWS4-HMAC-SHA256 Credential=test/20260101/us-east-1/${service}/aws4_request, SignedHeaders=host, Signature=test`;
+
 // A region has to be told its port before it mints a queue URL, which is before a server
 // over it exists, so the port is claimed and released first
 export function freePort(): Promise<number> {

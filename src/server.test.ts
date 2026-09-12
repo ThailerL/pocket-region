@@ -13,12 +13,9 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createRegion, type Region } from './node.ts';
 import { serve, type RegionServer } from './server.ts';
-import { clientConfig, freePort } from './test-support.ts';
+import { authorization, clientConfig, freePort } from './test-support.ts';
 
-const SIGNED = {
-  authorization:
-    'AWS4-HMAC-SHA256 Credential=test/20260101/us-east-1/s3/aws4_request, SignedHeaders=host, Signature=test',
-};
+const SIGNED = { authorization: authorization('s3') };
 
 let region: Region;
 let server: RegionServer;

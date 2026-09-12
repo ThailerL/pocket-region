@@ -46,6 +46,49 @@ export type RegionPersistence = {
   mirror(py: PyodideAPI, stateRoot: string): Promise<void> | void;
 };
 
+// One file of a function's deployment package, as the emulator read it out of the zip
+export type CodeEntry = [path: string, contents: Uint8Array, mode: number];
+
+// The function's configuration as the emulator holds it: the API's own names, with its
+// defaults already applied
+export type FunctionConfig = {
+  FunctionName: string;
+  FunctionArn: string;
+  Version: string;
+  Runtime: string;
+  Handler: string;
+  Timeout: number;
+  MemorySize: number;
+  CodeSha256: string;
+  Environment?: { Variables?: Record<string, string> };
+};
+
+// What the emulator hands the host for one run of a function's code
+export type Invocation = {
+  requestId: string;
+  config: FunctionConfig;
+  // Set through PutFunctionConcurrency
+  reservedConcurrency: number | null;
+  // The event as JSON text, handed to the runtime verbatim
+  event: string;
+  // Present only when the host answered needsCode(CodeSha256) with true
+  code?: CodeEntry[];
+};
+
+// payload is JSON text: the handler's result, or Lambda's { errorType, errorMessage } shape
+export type InvocationOutcome = {
+  status: 'ok' | 'error' | 'throttled';
+  payload: string | null;
+  log: string;
+};
+
+// Supplied by an entry point that can run function code: node.ts, not browser.ts yet
+export type LambdaExecutor = {
+  needsCode(codeSha256: string): boolean;
+  execute(invocation: Invocation): Promise<InvocationOutcome>;
+  stop(): Promise<void>;
+};
+
 // What scripts/vendor.mjs writes beside the wheels
 export type VendorManifest = { wheels: string[]; stdlib: string; pyodideVersion: string };
 
@@ -63,12 +106,13 @@ type PythonDispatch = (
 ) => Promise<RegionResponse>;
 
 const STATE_ROOT = '/state';
-const DEFAULT_PORT = 4566;
+export const DEFAULT_PORT = 4566;
 
 export async function bootRegion(
   assets: RegionAssets,
   settings: RegionSettings,
   persistence?: RegionPersistence,
+  lambda?: LambdaExecutor,
 ): Promise<Region> {
   const onOutput = settings.onOutput ?? (() => {});
 
@@ -89,6 +133,7 @@ export async function bootRegion(
   const port = settings.port ?? DEFAULT_PORT;
   py.globals.set('STATE_ROOT', STATE_ROOT);
   py.globals.set('REGION_PORT', port);
+  py.globals.set('LAMBDA_EXECUTOR', lambda ?? null);
   await persistence?.restore(py, STATE_ROOT);
   // One shared namespace, in the generated order
   for (const source of PYTHON_SOURCES) {
@@ -130,6 +175,7 @@ export async function bootRegion(
       // Lifespan shutdown writes the state files; the mirror follows
       await lifespan('shutdown');
       await persistence?.mirror(py, STATE_ROOT);
+      await lambda?.stop();
     },
   };
 }
