@@ -13,9 +13,10 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "check": "tsc",
-    "test": "vitest run",
+    "embed": "node scripts/embed-python.mjs",
+    "build": "npm run embed && tsc -p tsconfig.build.json",
+    "check": "npm run embed && tsc",
+    "test": "npm run embed && vitest run",
     "vendor": "node scripts/vendor.mjs"
   },
   "dependencies": {

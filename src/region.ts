@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadPyodide, type PyodideAPI } from 'pyodide';
+import { PYTHON_SOURCES } from './python.generated.ts';
 
 export type OutputStream = 'stdout' | 'stderr';
 
@@ -44,9 +45,6 @@ type PythonDispatch = (
   body: Uint8Array,
 ) => Promise<RegionResponse>;
 
-const PYTHON_DIRECTORY = new URL('../python/', import.meta.url);
-// One shared namespace, in this order: threads.py must land before helpers.py imports the emulator
-const PYTHON_FILES = ['threads.py', 'helpers.py', 'api.py'];
 const STATE_ROOT = '/state';
 const DEFAULT_PORT = 4566;
 
@@ -120,8 +118,9 @@ export async function createRegion(options: RegionOptions = {}): Promise<Region>
     fs.mkdirSync(stateDir, { recursive: true });
     copyDiskToMemfs(py, stateDir, STATE_ROOT);
   }
-  for (const file of PYTHON_FILES) {
-    await py.runPythonAsync(fs.readFileSync(new URL(file, PYTHON_DIRECTORY), 'utf8'));
+  // One shared namespace, in the generated order
+  for (const source of PYTHON_SOURCES) {
+    await py.runPythonAsync(source);
   }
   const lifespan: (phase: 'startup' | 'shutdown') => Promise<void> = py.globals.get('lifespan');
   await lifespan('startup');
