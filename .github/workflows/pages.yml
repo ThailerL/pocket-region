@@ -36,6 +36,8 @@ jobs:
           mkdir -p _site
           cp demo/index.html _site/
           cp -r dist vendor _site/
+          # Without this in the artifact, a deploy clears the custom domain in repo settings
+          echo pocket-region.dev > _site/CNAME
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

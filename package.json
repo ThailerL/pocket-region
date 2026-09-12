@@ -1,5 +1,25 @@
 {
   "name": "pocket-region",
+  "version": "0.1.0",
+  "description": "Real S3, SQS and DynamoDB inside Node or a browser tab, reached with the ordinary AWS SDK",
+  "keywords": [
+    "aws",
+    "localstack",
+    "s3",
+    "sqs",
+    "dynamodb",
+    "emulator",
+    "testing",
+    "browser",
+    "pyodide",
+    "aws-sdk"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ThailerL/pocket-region.git"
+  },
+  "homepage": "https://pocket-region.dev",
+  "bugs": "https://github.com/ThailerL/pocket-region/issues",
   "type": "module",
   "license": "MIT",
   "exports": {
@@ -16,9 +36,19 @@
       "default": "./dist/request-handler.js"
     }
   },
+  "files": [
+    "dist",
+    "vendor",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
+    "prepack": "npm run vendor && npm run build",
     "embed": "node scripts/embed-python.mjs",
-    "build": "npm run embed && tsc -p tsconfig.build.json",
+    "build": "npm run embed && node -e \"fs.rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.build.json",
     "check": "npm run embed && tsc",
     "test": "npm run embed && vitest run",
     "vendor": "node scripts/vendor.mjs",
