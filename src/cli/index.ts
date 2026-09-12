@@ -1,9 +1,10 @@
 import type { Dispatcher } from '../core.ts';
 import { parseArgs, tokenize } from './args.ts';
-import { clientsFor, dispatch } from './dispatch.ts';
+import { dispatch, servicesFor, type Modules } from './dispatch.ts';
 import { report, USAGE } from './errors.ts';
 import { runS3Verb, type Files } from './s3-verbs.ts';
 
+export type { Modules, SdkModule } from './dispatch.ts';
 export type { Files } from './s3-verbs.ts';
 
 export type CliResult = { stdout: string; stderr: string; code: number };
@@ -13,6 +14,12 @@ export type AwsCliOptions = {
   throwOnError?: boolean;
   // Where `s3 cp` reads and writes local paths; Node finds its own, a page has none
   files?: Files;
+  // SDK client packages, keyed by resolved SDK name - `s3`, not `s3api`. Without them a
+  // service is imported on demand, which no bundler can follow, so a bundle needs these
+  modules?: Modules;
+  // Merged into every client's config, so a caller can move the endpoint and the credentials.
+  // The addressing a service needs wins over it: S3 stays path-style whatever this says
+  client?: object;
 };
 
 export class CliError extends Error {
@@ -27,7 +34,7 @@ export class CliError extends Error {
 // The AWS CLI over a region: `const aws = awsCli(region); await aws('s3api list-buckets')`.
 // Output is returned rather than printed, since a page renders it and a test asserts on it
 export function awsCli(region: Dispatcher, options: AwsCliOptions = {}) {
-  const clients = clientsFor(region);
+  const services = servicesFor(region, options);
   return async function aws(command: string | string[]): Promise<CliResult> {
     const argv = typeof command === 'string' ? tokenize(command) : command;
     let result: CliResult;
@@ -36,8 +43,8 @@ export function awsCli(region: Dispatcher, options: AwsCliOptions = {}) {
       const stdout = askedForHelp
         ? USAGE
         : argv[0] === 's3'
-          ? await runS3Verb(argv.slice(1), clients, options.files)
-          : await dispatch(parseArgs(argv), clients);
+          ? await runS3Verb(argv.slice(1), services, options.files)
+          : await dispatch(parseArgs(argv), services);
       result = { stdout, stderr: '', code: 0 };
     } catch (error) {
       result = { stdout: '', ...report(error) };

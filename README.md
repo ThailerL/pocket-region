@@ -57,6 +57,25 @@ command is a non-zero `code`, as it is in the real CLI, or pass `{ throwOnError:
 Any service works as long as its client is installed: a command naming `sns` needs
 `@aws-sdk/client-sns`, and says so if it is missing.
 
+### Supplying the clients yourself
+
+A client is imported when a command first names it, and no bundler can follow an import like
+that — so in a bundle, a page or a worker, hand the modules over instead. They are keyed by
+the *resolved* SDK name, so `s3` covers `s3api` too. `client` is merged into every client's
+config, for an endpoint and credentials of your own:
+
+```js
+import * as s3 from '@aws-sdk/client-s3';
+import * as sqs from '@aws-sdk/client-sqs';
+
+const aws = awsCli(region, {
+  modules: { s3, sqs },
+  client: { credentials: { accessKeyId: 'node-7', secretAccessKey: 'shh' } },
+});
+```
+
+Both are optional, and neither can lose the addressing a service needs — S3 stays path-style.
+
 ## Persistence
 
 State lives in memory unless you give it somewhere to write. Nothing is saved on a timer —

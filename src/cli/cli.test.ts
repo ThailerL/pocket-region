@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { RegionRequest } from '../core.ts';
 import { createRegion, type Region } from '../node.ts';
 import { kebabCase, parseArgs, parseValue, pascalCase, tokenize } from './args.ts';
 import { decoded } from './dispatch.ts';
@@ -160,19 +161,75 @@ describe('s3 formatting', () => {
   });
 });
 
+// Records what the signed request looked like, and answers every command the same way
+function recorder(body = '{}') {
+  const seen: RegionRequest[] = [];
+  return {
+    seen,
+    async dispatch(request: RegionRequest) {
+      seen.push(request);
+      return {
+        status: 200,
+        headers: { 'content-type': 'application/x-amz-json-1.0' },
+        body: new TextEncoder().encode(body),
+      };
+    },
+  };
+}
+
 describe('awsCli against a stub', () => {
   it('needs nothing but a dispatch, so no region has to boot', async () => {
-    const aws = awsCli({
-      async dispatch() {
-        return {
-          status: 200,
-          headers: { 'content-type': 'application/x-amz-json-1.0' },
-          body: new TextEncoder().encode('{"QueueUrl":"http://stub/orders"}'),
-        };
-      },
-    });
+    const aws = awsCli(recorder('{"QueueUrl":"http://stub/orders"}'));
     const created = await aws('sqs create-queue --queue-name orders');
     expect(JSON.parse(created.stdout).QueueUrl).toBe('http://stub/orders');
+  });
+});
+
+describe('caller-supplied clients', () => {
+  it('serves a command from an injected module, with nothing to import', async () => {
+    const region = recorder();
+    // A name no package is published under, so only the map can answer for it
+    const aws = awsCli(region, { modules: { teapot: await import('@aws-sdk/client-sqs') } });
+
+    expect((await aws('teapot list-queues')).code).toBe(0);
+    expect(region.seen).toHaveLength(1);
+  });
+
+  it('signs with the credentials it is given', async () => {
+    const region = recorder();
+    const aws = awsCli(region, {
+      client: { credentials: { accessKeyId: 'node-7', secretAccessKey: 'shh' } },
+    });
+
+    await aws('sqs create-queue --queue-name orders');
+    expect(region.seen[0].headers.authorization).toContain('Credential=node-7/');
+  });
+
+  it('answers an alias from the module its resolved name is keyed by', async () => {
+    const region = recorder();
+    const aws = awsCli(region, { modules: { s3: await import('@aws-sdk/client-s3') } });
+
+    expect((await aws('s3api create-bucket --bucket notes')).code).toBe(0);
+    expect(region.seen[0].path).toBe('/notes/');
+  });
+
+  it('keeps path-style addressing under a caller-supplied client', async () => {
+    const region = recorder();
+    // forcePathStyle is the one thing `client` must not be able to take away
+    const aws = awsCli(region, {
+      client: { endpoint: 'http://region.test:9999', forcePathStyle: false },
+    });
+
+    await aws('s3api put-object --bucket notes --key hello.txt --body hi');
+    expect(region.seen[0].path).toContain('/notes/hello.txt');
+    expect(region.seen[0].headers.host).toBe('region.test:9999');
+  });
+
+  it('names both remedies for a service it cannot reach', async () => {
+    const aws = awsCli(recorder());
+    const result = await aws('s4 list-buckets');
+    expect(result.stderr).toContain('npm install @aws-sdk/client-s4');
+    expect(result.stderr).toContain("modules: { s4: await import('@aws-sdk/client-s4') }");
   });
 });
 

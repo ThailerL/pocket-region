@@ -3,10 +3,18 @@ import { requestHandler } from '../request-handler.ts';
 import { kebabCase, type Invocation } from './args.ts';
 import { UsageError } from './errors.ts';
 
-type SdkModule = Record<string, unknown>;
+export type SdkModule = Record<string, unknown>;
 export type SdkClient = { send(command: unknown): Promise<Record<string, unknown>> };
-// One client per service, built on first use and kept for the life of the `aws` it belongs to
-export type Clients = (service: string) => Promise<SdkClient>;
+
+// Keyed by the resolved SDK name, so one entry serves a service and its aliases
+export type Modules = Record<string, SdkModule>;
+
+// A service's module and its client. Both are needed per command: the operation's Command
+// class comes off the module, and only the module can name the client class
+export type Services = {
+  module(service: string): Promise<SdkModule>;
+  client(service: string): Promise<SdkClient>;
+};
 
 // SDK v3 input shapes are the CLI's --cli-input-json shapes, so a service needs no code here:
 // the client is @aws-sdk/client-<service>, imported only when a command names it, which keeps
@@ -34,16 +42,19 @@ export const resolve = (service: string) => PACKAGES[service] ?? service;
 
 export const packageFor = (service: string) => `@aws-sdk/client-${resolve(service)}`;
 
-export async function moduleFor(service: string): Promise<SdkModule> {
+export async function moduleFor(service: string, modules?: Modules): Promise<SdkModule> {
   if (!SERVICE_PATTERN.test(service)) throw new UsageError(`"${service}" is not a service name`);
+  const given = modules?.[resolve(service)];
+  if (given) return given;
   const name = packageFor(service);
   try {
     return (await import(/* @vite-ignore */ name)) as SdkModule;
   } catch (error) {
     // Anything else is a client that is installed and broken, which install advice would bury
     if ((error as { code?: string }).code !== 'ERR_MODULE_NOT_FOUND') throw error;
-    throw new UsageError(`unknown service "${service}", or its client is not installed:
-  npm install ${name}`);
+    throw new UsageError(`unknown service "${service}", or its client is neither installed nor given:
+  npm install ${name}
+  or awsCli(region, { modules: { ${resolve(service)}: await import('${name}') } })`);
   }
 }
 
@@ -59,31 +70,41 @@ function clientClass(module: SdkModule, service: string) {
 
 // Rebuilding a client per command costs about a quarter of a command's time, so an `aws`
 // keeps the ones it has built
-export function clientsFor(region: Dispatcher): Clients {
+export function servicesFor(
+  region: Dispatcher,
+  options: { modules?: Modules; client?: object } = {},
+): Services {
   const built = new Map<string, Promise<SdkClient>>();
-  return (service) => {
-    const name = resolve(service);
-    const existing = built.get(name);
-    if (existing) return existing;
-    const building = (async () => {
-      const Client = clientClass(await moduleFor(service), service);
-      return new Client({
-        region: 'us-east-1',
-        endpoint: 'http://localhost:4566',
-        credentials: CREDENTIALS,
-        requestHandler: requestHandler(region),
-        ...OPTIONS[name],
-      });
-    })();
-    built.set(name, building);
-    // A failure is not the answer for the rest of the session
-    building.catch(() => built.delete(name));
-    return building;
+  const module = (service: string) => moduleFor(service, options.modules);
+  return {
+    module,
+    client(service) {
+      const name = resolve(service);
+      const existing = built.get(name);
+      if (existing) return existing;
+      const building = (async () => {
+        const Client = clientClass(await module(service), service);
+        return new Client({
+          region: 'us-east-1',
+          endpoint: 'http://localhost:4566',
+          credentials: CREDENTIALS,
+          requestHandler: requestHandler(region),
+          ...options.client,
+          // Last, so a caller can move the endpoint and the credentials without being able to
+          // lose the addressing a service needs
+          ...OPTIONS[name],
+        });
+      })();
+      built.set(name, building);
+      // A failure is not the answer for the rest of the session
+      building.catch(() => built.delete(name));
+      return building;
+    },
   };
 }
 
-export async function commandFor(service: string, operation: string) {
-  const module = await moduleFor(service);
+export async function commandFor(service: string, operation: string, services: Services) {
+  const module = await services.module(service);
   const Command = module[`${operation}Command`];
   if (typeof Command !== 'function') {
     throw new UsageError(`unknown operation "${kebabCase(operation)}" for "${service}"`, service);
@@ -91,9 +112,9 @@ export async function commandFor(service: string, operation: string) {
   return Command as new (params: object) => unknown;
 }
 
-export async function dispatch({ service, operation, params }: Invocation, clients: Clients) {
-  const Command = await commandFor(service, operation);
-  const client = await clients(service);
+export async function dispatch({ service, operation, params }: Invocation, services: Services) {
+  const Command = await commandFor(service, operation, services);
+  const client = await services.client(service);
   const { $metadata, ...rest } = await client.send(new Command(params));
 
   let stdout = '';
