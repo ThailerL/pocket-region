@@ -77,7 +77,8 @@ def _patch_lambda(lambda_svc):
             return await _execute(lambda_svc, *args)
         return await original_run_reentrant(fn, *args, thread_name=thread_name)
 
-    # One attempt: no retries or dead-lettering yet
+    # One attempt: no retries or dead-lettering yet. ministack's own loop cannot serve, since
+    # the thread shim defers its backoff sleeps
     def invoke_async_with_retry(func, event):
         async def attempt():
             try:

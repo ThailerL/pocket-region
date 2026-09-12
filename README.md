@@ -1,7 +1,8 @@
 # Pocket Region
 
-Real S3, SQS and DynamoDB, running inside your Node process or a browser tab. No Docker, no
-container to start, no port to wait on: requests from the AWS SDK become function calls.
+Pocket Region runs S3, SQS and DynamoDB inside your Node process or a browser tab, and you
+call them with the ordinary AWS SDK. There's no Docker container to start and no port to wait on, because each
+SDK request becomes a function call.
 
 ```js
 import { createRegion, requestHandler } from 'pocket-region';
@@ -11,7 +12,7 @@ const region = await createRegion();
 
 const s3 = new S3Client({
   region: 'us-east-1',
-  endpoint: 'http://localhost:4566', // never dialled; nothing listens
+  endpoint: 'http://localhost:4566', // not used, since nothing listens here
   credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
   forcePathStyle: true,
   requestHandler: requestHandler(region),
@@ -25,8 +26,8 @@ await region.stop();
 
 ## In a browser
 
-Serve the package's `vendor/` directory from your origin and point the browser entry at it.
-Pyodide's own runtime comes from jsDelivr at the version the tree was built against, unless
+The browser entry loads the emulator from the package's `vendor/` directory, served from your
+site at the address you give it. Pyodide itself loads from jsDelivr, at the version the package was built with, unless
 you pass `indexURL`.
 
 ```js
@@ -36,13 +37,14 @@ import { requestHandler } from 'pocket-region/sdk';
 const region = await createRegion({ assetsBaseUrl: '/vendor' });
 ```
 
-There's a live demo at [pocket-region.dev](https://pocket-region.dev), and its source is in
+Try it at [pocket-region.dev](https://pocket-region.dev). The demo's source is in
 [`demo/`](demo/index.html).
 
 ## The `aws` CLI
 
-Commands are the real CLI's, so they paste out of AWS documentation. Output comes back rather
-than being printed, because a terminal renders it and a test asserts on it.
+`awsCli` runs commands written the same way as for the real AWS CLI, so you can paste them
+from AWS's documentation. It returns the output instead of printing it, so you can show it
+in a page or check it in a test.
 
 ```js
 import { awsCli } from 'pocket-region/cli';
@@ -52,17 +54,17 @@ await aws('s3api create-bucket --bucket notes');
 const { stdout } = await aws('sqs create-queue --queue-name orders');
 ```
 
-It takes a typed line or an argument array, and resolves `{ stdout, stderr, code }` — a bad
-command is a non-zero `code`, as it is in the real CLI, or pass `{ throwOnError: true }`.
-Any service works as long as its client is installed: a command naming `sns` needs
-`@aws-sdk/client-sns`, and says so if it is missing.
+Pass a command as a string or as an array of arguments. It resolves to
+`{ stdout, stderr, code }`. A failed command gives a non-zero `code`, like the real CLI,
+unless you pass `{ throwOnError: true }` to make it throw. Any service works if its SDK client
+is installed. An `sns` command needs `@aws-sdk/client-sns`, and tells you if it's missing.
 
 ### Supplying the clients yourself
 
-A client is imported when a command first names it, and no bundler can follow an import like
-that — so in a bundle, a page or a worker, hand the modules over instead. They are keyed by
-the *resolved* SDK name, so `s3` covers `s3api` too. `client` is merged into every client's
-config, for an endpoint and credentials of your own:
+The CLI imports each client the first time a command uses it. Bundlers can't see those
+imports, so in a bundle, a page or a worker, pass the client modules in yourself. Key them by
+SDK name, so `s3` also covers `s3api`. Anything in `client` is added to every client's config,
+such as your own endpoint and credentials.
 
 ```js
 import * as s3 from '@aws-sdk/client-s3';
@@ -74,26 +76,27 @@ const aws = awsCli(region, {
 });
 ```
 
-Both are optional, and neither can lose the addressing a service needs — S3 stays path-style.
+You can pass either, both or neither. S3 always uses path-style addressing, whatever you
+put in `client`.
 
 ## Persistence
 
-State lives in memory unless you give it somewhere to write. Nothing is saved on a timer —
-you decide when, because you know when a good moment is.
+State is kept in memory unless you give the region a directory. It never saves on its own,
+so call `save` when you want the state written.
 
 ```js
 const region = await createRegion({ stateDir: './.region' });
 // ... requests ...
-await region.save();   // write the emulator's state to that directory
-await region.stop();   // saves on the way out
+await region.save();   // writes the state to ./.region
+await region.stop();   // saves, then shuts down
 ```
 
-A page has nowhere to write, so `save` is not offered there.
+A browser has nowhere to write, so the browser region has no `save`.
 
 ## A clean region per test
 
-Boot once, then reset between tests. A reset empties every service in well under a
-millisecond for a typical test and about 3 ms for a region holding 20 resources, where a boot
+One region can serve a whole test file, reset to empty before each test. A reset takes under
+a millisecond for a typical test and about 3 ms with 20 resources, while booting a region
 takes 300-500 ms.
 
 ```js
@@ -103,21 +106,21 @@ beforeEach(() => region.reset());
 afterAll(() => region.stop());
 ```
 
-A region with a `stateDir` keeps its files until the next `save` or `stop`, which writes the
-empty state over them.
+If the region has a `stateDir`, its files stay on disk until the next `save` or `stop`, which
+overwrites them with the empty state.
 
 ## Lambda
 
-Create a function the way you would on AWS, with a zipped deployment package, and invoke it.
-The handler runs in a Node child process, one per concurrent invocation, kept warm for a
-minute of idleness.
+Functions are created from a zipped deployment package and invoked the same way as on AWS.
+Each concurrent invocation runs the handler in its own Node child process, which stays warm until
+it has been idle for a minute.
 
 ```js
 import { createRegion, requestHandler, serve } from 'pocket-region';
 import { LambdaClient, CreateFunctionCommand, InvokeCommand } from '@aws-sdk/client-lambda';
 
 const region = await createRegion();
-// A handler runs in another process, so its own SDK calls need an endpoint to dial
+// The handler runs in another process, so its SDK calls need a real endpoint
 const server = await serve(region);
 
 const lambda = new LambdaClient({ /* as above */ requestHandler: requestHandler(region) });
@@ -131,16 +134,15 @@ await lambda.send(new CreateFunctionCommand({
 const { Payload } = await lambda.send(new InvokeCommand({ FunctionName: 'hello', Payload: '{}' }));
 ```
 
-Inside the handler `AWS_ENDPOINT_URL`, `AWS_REGION` and test credentials are set, so an SDK
-client built with no arguments reaches the region. `Timeout`, `ReservedConcurrentExecutions`,
-`Environment`, `InvocationType: 'Event'` and `LogType: 'Tail'` behave as on Lambda; a thrown
-handler comes back as `FunctionError: 'Unhandled'`.
+The handler gets `AWS_ENDPOINT_URL`, `AWS_REGION` and test credentials in its environment, so
+an SDK client created with no options reaches the region. `Timeout`,
+`ReservedConcurrentExecutions`, `Environment`, `InvocationType: 'Event'` and `LogType: 'Tail'`
+work as they do on Lambda. A handler that throws comes back with `FunctionError: 'Unhandled'`.
 
-Node runtimes only, and only in Node — a page has no processes to run a handler in. The
-deployment package is used as is: the AWS SDK is not preinstalled for it the way Lambda's
-runtime provides it, so bundle it or ship `node_modules` in the zip. Event sources (S3
-notifications, SNS, EventBridge) deliver once, with no retries or dead-lettering yet; SQS
-event source mappings do not poll.
+Only Node runtimes work, and only when the region runs in Node, because a browser can't start
+processes. The AWS SDK isn't preinstalled the way it is on Lambda, so bundle it into your code
+or include `node_modules` in the zip. S3 notifications, SNS and EventBridge deliver each event
+once, with no retries or dead-letter queues yet. SQS event source mappings don't poll.
 
 ## What works
 
@@ -149,18 +151,18 @@ event source mappings do not poll.
 | S3 | Tested, including bucket notifications into SQS |
 | SQS | Tested |
 | DynamoDB | Tested |
-| Lambda | Tested: Node functions, synchronous and `Event` invokes, in Node only |
-| The rest of [ministack](https://pypi.org/project/ministack/)'s services | Unverified: they may answer, nothing here exercises them |
+| Lambda | Tested with Node functions, synchronous and `Event` invokes, when the region runs in Node |
+| The rest of [ministack](https://pypi.org/project/ministack/)'s services | Untested. They may respond, but nothing here checks them |
 
-Not yet: scheduled EventBridge rules and the DynamoDB TTL reaper never fire, because Pyodide
-has no threads and their loops are deferred.
+Scheduled EventBridge rules and the DynamoDB TTL reaper never run. Pyodide has no threads, so
+the loops that drive them never start.
 
 ## How it works
 
 [ministack](https://pypi.org/project/ministack/), a Python AWS emulator, runs under
-[Pyodide](https://pyodide.org). Python cannot open a socket there, so JavaScript owns the
-transport and calls the emulator's ASGI app in-process — which is why `dispatch` is the core
-API and the SDK adapter needs no server:
+[Pyodide](https://pyodide.org). Python can't open a socket under Pyodide, so JavaScript takes
+each request and passes it to the emulator directly. That call is `dispatch`. The SDK adapter
+is built on it, which is why no server is needed.
 
 ```js
 const response = await region.dispatch({
@@ -170,5 +172,5 @@ const response = await region.dispatch({
 });
 ```
 
-The AWS wire protocol is the contract, so anything that speaks it works, and a service could
-later be reimplemented without breaking callers.
+Anything that speaks the AWS wire protocol works with it, and a service could later be
+rewritten without changing how you call it.

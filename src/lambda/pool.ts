@@ -302,6 +302,7 @@ export class FunctionPool {
       (env) =>
         new Promise<void>((done) => {
           if (!env.child) return done();
+          // An idle child is unref'd, and Node would exit before stop() settles
           this.hold(env, true);
           env.child.once('exit', () => done());
           this.reap(env, 'the region stopped');

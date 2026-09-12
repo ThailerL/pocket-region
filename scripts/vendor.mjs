@@ -75,7 +75,9 @@ if (installedVersion !== PYODIDE_VERSION) {
 // Pyodide compiles every module it imports from source on each boot and never caches the
 // bytecode, so an unchecked-hash pyc beside each source it touched takes that off the boot.
 // Only what the boot imports, to keep the payload down; a service's lazy imports compile
-// once on its first request
+// once on its first request. The pycs are tied to the pinned CPython, and the installer
+// keeping them is measured, not documented: after a Pyodide bump, a boot over 0.6 s means
+// they are ignored
 const PRECOMPILE = `
 import importlib.util, os, sys, zipfile
 from importlib._bootstrap_external import _code_to_hash_pyc
