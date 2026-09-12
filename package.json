@@ -1,6 +1,6 @@
 {
   "name": "pocket-region",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Real S3, SQS and DynamoDB inside Node or a browser tab, reached with the ordinary AWS SDK",
   "keywords": [
     "aws",
