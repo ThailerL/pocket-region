@@ -1,5 +1,8 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createRegion, type Region } from './region.ts';
 
@@ -19,13 +22,17 @@ afterAll(async () => {
   await region?.stop();
 });
 
-function s3(method: string, path: string, body?: string) {
-  return region.dispatch({
+function s3On(target: Region, method: string, key: string, body?: string) {
+  return target.dispatch({
     method,
-    path,
+    path: key,
     headers: { host: 'localhost:4566', authorization: authorization('s3') },
     body: body === undefined ? undefined : encoder.encode(body),
   });
+}
+
+function s3(method: string, key: string, body?: string) {
+  return s3On(region, method, key, body);
 }
 
 async function jsonApi(service: 'sqs' | 'dynamodb', target: string, body: object) {
@@ -91,4 +98,24 @@ describe('createRegion', () => {
     });
     expect(read.body.Item).toEqual(item);
   });
+
+  it('saves state that a later region reads back', async () => {
+    const stateDir = await mkdtemp(path.join(tmpdir(), 'pocket-region-state-'));
+    const first = await createRegion({ stateDir });
+    await s3On(first, 'PUT', '/saved');
+    await s3On(first, 'PUT', '/saved/keep.txt', 'kept');
+    await s3On(first, 'PUT', '/saved/gone.txt', 'deleted after the first save');
+    await first.save();
+    expect((await readdir(stateDir, { recursive: true })).length).toBeGreaterThan(0);
+    await s3On(first, 'DELETE', '/saved/gone.txt');
+    await first.stop();
+
+    const second = await createRegion({ stateDir });
+    const kept = await s3On(second, 'GET', '/saved/keep.txt');
+    expect(kept.status).toBe(200);
+    expect(decoder.decode(kept.body)).toBe('kept');
+    expect((await s3On(second, 'GET', '/saved/gone.txt')).status).toBe(404);
+    await second.stop();
+    await rm(stateDir, { recursive: true, force: true });
+  }, 60_000);
 });
