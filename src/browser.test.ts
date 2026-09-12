@@ -6,6 +6,7 @@ import { CreateBucketCommand, GetObjectCommand, PutObjectCommand, S3Client } fro
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createRegion, type PageRegion } from './browser.ts';
 import { requestHandler } from './request-handler.ts';
+import { clientConfig } from './test-support.ts';
 
 const VENDOR = fileURLToPath(new URL('../vendor', import.meta.url));
 let server: http.Server;
@@ -43,13 +44,9 @@ afterAll(async () => {
 
 describe('createRegion in a page', () => {
   it('serves an SDK client from assets fetched over HTTP', async () => {
-    const s3 = new S3Client({
-      region: 'us-east-1',
-      endpoint: 'http://localhost:4566',
-      credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
-      forcePathStyle: true,
-      requestHandler: requestHandler(region),
-    });
+    const s3 = new S3Client(
+      clientConfig({ forcePathStyle: true, requestHandler: requestHandler(region) }),
+    );
     await s3.send(new CreateBucketCommand({ Bucket: 'pages' }));
     await s3.send(new PutObjectCommand({ Bucket: 'pages', Key: 'hello.txt', Body: 'from a page' }));
     const read = await s3.send(new GetObjectCommand({ Bucket: 'pages', Key: 'hello.txt' }));

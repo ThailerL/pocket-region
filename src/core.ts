@@ -17,6 +17,8 @@ export type RegionResponse = {
 };
 
 export type Region = {
+  // The port its queue URLs name, which an HTTP server over it has to answer on
+  port: number;
   dispatch(request: RegionRequest): Promise<RegionResponse>;
   save(): Promise<void>;
   stop(): Promise<void>;
@@ -82,8 +84,9 @@ export async function bootRegion(
     errorCallback: (line) => onOutput(line, 'stderr'),
   });
 
+  const port = settings.port ?? DEFAULT_PORT;
   py.globals.set('STATE_ROOT', STATE_ROOT);
-  py.globals.set('REGION_PORT', settings.port ?? DEFAULT_PORT);
+  py.globals.set('REGION_PORT', port);
   await persistence?.restore(py, STATE_ROOT);
   // One shared namespace, in the generated order
   for (const source of PYTHON_SOURCES) {
@@ -95,6 +98,7 @@ export async function bootRegion(
   const savePython: () => void = py.globals.get('region_save');
 
   return {
+    port,
     dispatch({ method, path, headers, body = new Uint8Array() }) {
       return dispatchPython(
         method,

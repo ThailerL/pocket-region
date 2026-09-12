@@ -21,6 +21,7 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createRegion, type Region } from './node.ts';
 import { requestHandler } from './request-handler.ts';
+import { clientConfig } from './test-support.ts';
 
 let region: Region;
 let s3: S3Client;
@@ -29,12 +30,7 @@ let dynamodb: DynamoDBClient;
 
 beforeAll(async () => {
   region = await createRegion();
-  const config = {
-    region: 'us-east-1',
-    endpoint: 'http://localhost:4566',
-    credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
-    requestHandler: requestHandler(region),
-  };
+  const config = clientConfig({ requestHandler: requestHandler(region) });
   s3 = new S3Client({ ...config, forcePathStyle: true });
   sqs = new SQSClient(config);
   dynamodb = new DynamoDBClient(config);
