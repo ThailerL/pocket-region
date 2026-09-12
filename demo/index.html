@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pocket Region in a page</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --line: color-mix(in srgb, currentColor 15%, transparent);
+      }
+      body {
+        margin: 0 auto;
+        padding: 2rem 1rem 4rem;
+        max-width: 52rem;
+        font: 16px/1.5 system-ui, sans-serif;
+      }
+      h1 {
+        font-size: 1.5rem;
+        margin-bottom: 0.25rem;
+      }
+      p.lede {
+        margin-top: 0;
+        opacity: 0.75;
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin: 1.5rem 0 1rem;
+      }
+      button {
+        font: inherit;
+        padding: 0.4rem 0.9rem;
+        border: 1px solid var(--line);
+        border-radius: 0.4rem;
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      pre {
+        border: 1px solid var(--line);
+        border-radius: 0.4rem;
+        padding: 1rem;
+        overflow-x: auto;
+        white-space: pre-wrap;
+        min-height: 12rem;
+        margin: 0;
+      }
+      code {
+        font-family: ui-monospace, monospace;
+      }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "pocket-region/browser": "./dist/browser.js",
+          "pocket-region/sdk": "./dist/request-handler.js",
+          "pyodide": "https://cdn.jsdelivr.net/npm/pyodide@314.0.6/pyodide.mjs",
+          "@aws-sdk/client-s3": "https://cdn.jsdelivr.net/npm/@aws-sdk/client-s3@3.1131.0/+esm",
+          "@aws-sdk/client-sqs": "https://cdn.jsdelivr.net/npm/@aws-sdk/client-sqs@3.1131.0/+esm",
+          "@aws-sdk/client-dynamodb": "https://cdn.jsdelivr.net/npm/@aws-sdk/client-dynamodb@3.1131.0/+esm"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <h1>Pocket Region in a page</h1>
+    <p class="lede">
+      Real S3, SQS and DynamoDB, running in this tab. No server answers any of it: the AWS SDK
+      below talks to an emulator in your browser, not over the network.
+    </p>
+
+    <div class="row">
+      <button id="boot">Boot the region</button>
+      <button id="s3" disabled>S3: write and read an object</button>
+      <button id="sqs" disabled>SQS: send and receive</button>
+      <button id="dynamodb" disabled>DynamoDB: put and get</button>
+    </div>
+
+    <pre id="log"><code>Nothing yet. Boot the region to start.</code></pre>
+
+    <script type="module">
+      import { createRegion } from 'pocket-region/browser';
+      import { requestHandler } from 'pocket-region/sdk';
+      import {
+        CreateBucketCommand,
+        GetObjectCommand,
+        PutObjectCommand,
+        S3Client,
+      } from '@aws-sdk/client-s3';
+      import {
+        CreateQueueCommand,
+        ReceiveMessageCommand,
+        SendMessageCommand,
+        SQSClient,
+      } from '@aws-sdk/client-sqs';
+      import {
+        CreateTableCommand,
+        DynamoDBClient,
+        GetItemCommand,
+        PutItemCommand,
+      } from '@aws-sdk/client-dynamodb';
+
+      const log = document.querySelector('#log code');
+      const buttons = {
+        boot: document.querySelector('#boot'),
+        s3: document.querySelector('#s3'),
+        sqs: document.querySelector('#sqs'),
+        dynamodb: document.querySelector('#dynamodb'),
+      };
+      const write = (line) => {
+        log.textContent = `${log.textContent === 'Nothing yet. Boot the region to start.' ? '' : `${log.textContent}\n`}${line}`;
+      };
+
+      let clients;
+
+      async function run(button, work) {
+        button.disabled = true;
+        try {
+          await work();
+        } catch (error) {
+          write(`error: ${error.message}`);
+        } finally {
+          button.disabled = false;
+        }
+      }
+
+      buttons.boot.addEventListener('click', () =>
+        run(buttons.boot, async () => {
+          write('booting: fetching the runtime from jsDelivr and the wheels from ./vendor...');
+          const started = performance.now();
+          // Relative, so the page works under a Pages project subpath as well as at the root
+          const region = await createRegion({ assetsBaseUrl: './vendor' });
+          write(`booted in ${Math.round(performance.now() - started)} ms`);
+
+          const config = {
+            region: 'us-east-1',
+            endpoint: 'http://localhost:4566',
+            credentials: { accessKeyId: 'demo', secretAccessKey: 'demo' },
+            requestHandler: requestHandler(region),
+          };
+          clients = {
+            s3: new S3Client({ ...config, forcePathStyle: true }),
+            sqs: new SQSClient(config),
+            dynamodb: new DynamoDBClient(config),
+          };
+          for (const name of ['s3', 'sqs', 'dynamodb']) buttons[name].disabled = false;
+          buttons.boot.textContent = 'Region is running';
+        }),
+      );
+
+      buttons.s3.addEventListener('click', () =>
+        run(buttons.s3, async () => {
+          await clients.s3.send(new CreateBucketCommand({ Bucket: 'notes' }));
+          await clients.s3.send(
+            new PutObjectCommand({ Bucket: 'notes', Key: 'hello.txt', Body: 'written in a tab' }),
+          );
+          const read = await clients.s3.send(
+            new GetObjectCommand({ Bucket: 'notes', Key: 'hello.txt' }),
+          );
+          write(`S3 GetObject notes/hello.txt -> ${await read.Body.transformToString()}`);
+        }),
+      );
+
+      buttons.sqs.addEventListener('click', () =>
+        run(buttons.sqs, async () => {
+          const { QueueUrl } = await clients.sqs.send(
+            new CreateQueueCommand({ QueueName: 'orders' }),
+          );
+          await clients.sqs.send(
+            new SendMessageCommand({ QueueUrl, MessageBody: 'one flat white' }),
+          );
+          const received = await clients.sqs.send(new ReceiveMessageCommand({ QueueUrl }));
+          write(`SQS ReceiveMessage -> ${received.Messages?.[0]?.Body}`);
+        }),
+      );
+
+      buttons.dynamodb.addEventListener('click', () =>
+        run(buttons.dynamodb, async () => {
+          await clients.dynamodb
+            .send(
+              new CreateTableCommand({
+                TableName: 'people',
+                KeySchema: [{ AttributeName: 'pk', KeyType: 'HASH' }],
+                AttributeDefinitions: [{ AttributeName: 'pk', AttributeType: 'S' }],
+                BillingMode: 'PAY_PER_REQUEST',
+              }),
+            )
+            .catch(() => {});
+          await clients.dynamodb.send(
+            new PutItemCommand({
+              TableName: 'people',
+              Item: { pk: { S: 'ada' }, name: { S: 'Ada Lovelace' } },
+            }),
+          );
+          const read = await clients.dynamodb.send(
+            new GetItemCommand({ TableName: 'people', Key: { pk: { S: 'ada' } } }),
+          );
+          write(`DynamoDB GetItem people/ada -> ${read.Item?.name?.S}`);
+        }),
+      );
+    </script>
+  </body>
+</html>
