@@ -7,6 +7,7 @@ import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { buffer, text } from 'node:stream/consumers';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
@@ -514,18 +515,14 @@ function sqs(action, payload, signal) {
         },
         timeout: RECEIVE_TIMEOUT_MS,
       },
-      (res) => {
-        const chunks = [];
-        res.on('data', (chunk) => chunks.push(chunk));
-        res.on('end', () => {
-          const text = Buffer.concat(chunks).toString('utf8');
-          if (res.statusCode >= 400) return reject(new Error(awsErrorMessage(text, res.statusCode)));
-          try {
-            resolve(text ? JSON.parse(text) : {});
-          } catch {
-            reject(new Error(`the region answered ${action} with something other than JSON`));
-          }
-        });
+      async (res) => {
+        const answer = await text(res);
+        if (res.statusCode >= 400) return reject(new Error(awsErrorMessage(answer, res.statusCode)));
+        try {
+          resolve(answer ? JSON.parse(answer) : {});
+        } catch {
+          reject(new Error(`the region answered ${action} with something other than JSON`));
+        }
       },
     );
     req.on('timeout', () => req.destroy(new Error(`${action} timed out`)));
@@ -715,9 +712,7 @@ try {
 
   const server = http.createServer(async (req, res) => {
     try {
-      const chunks = [];
-      for await (const chunk of req) chunks.push(chunk);
-      const body = Buffer.concat(chunks);
+      const body = await buffer(req);
       const url = new URL(req.url, 'http://localhost');
       if (url.pathname.startsWith(RUNTIME_API_PREFIX)) {
         handleRuntimeApi(req, res, url.pathname.slice(RUNTIME_API_PREFIX.length), body);

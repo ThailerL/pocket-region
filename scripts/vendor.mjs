@@ -16,6 +16,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { loadPyodide } from 'pyodide';
 
 const require = createRequire(import.meta.url);
 const PYODIDE_VERSION = require('../package.json').dependencies.pyodide;
@@ -33,6 +34,8 @@ const EXCLUDED_PACKAGES = ['botocore', 'micropip'];
 const ROOT = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
 const OUTPUT_DIRECTORY = path.join(ROOT, 'vendor');
 const METADATA_FILE = path.join(OUTPUT_DIRECTORY, 'meta.json');
+// The runtime's own stdlib zip, with bytecode added beside what the region imports
+const STDLIB_FILE = 'python_stdlib.zip';
 
 const force = process.argv.includes('--force');
 const log = (message) => process.stderr.write(`[vendor] ${message}\n`);
@@ -53,7 +56,11 @@ function canonical(name) {
 
 if (!force && fs.existsSync(METADATA_FILE)) {
 	const metadata = JSON.parse(fs.readFileSync(METADATA_FILE, 'utf8'));
-	if (metadata.pyodideVersion === PYODIDE_VERSION && metadata.emulatorSpec === EMULATOR_SPEC) {
+	if (
+		metadata.pyodideVersion === PYODIDE_VERSION &&
+		metadata.emulatorSpec === EMULATOR_SPEC &&
+		metadata.stdlib === STDLIB_FILE
+	) {
 		log(`up to date - pyodide ${PYODIDE_VERSION}, ${EMULATOR_SPEC} (--force to rebuild)`);
 		process.exit(0);
 	}
@@ -63,6 +70,71 @@ if (!force && fs.existsSync(METADATA_FILE)) {
 const installedVersion = require('pyodide/package.json').version;
 if (installedVersion !== PYODIDE_VERSION) {
 	fail(`pyodide ${installedVersion} is installed but ${PYODIDE_VERSION} is pinned: run npm install`);
+}
+
+// Pyodide compiles every module it imports from source on each boot and never caches the
+// bytecode, so an unchecked-hash pyc beside each source it touched takes that off the boot.
+// Only what the boot imports, to keep the payload down; a service's lazy imports compile
+// once on its first request
+const PRECOMPILE = `
+import importlib.util, os, sys, zipfile
+from importlib._bootstrap_external import _code_to_hash_pyc
+
+SITE = next(p for p in sys.path if p.endswith("site-packages")) + "/"
+STDLIB = next(p for p in sys.path if p.endswith(".zip")) + "/"
+used = {m.__file__ for m in list(sys.modules.values()) if getattr(m, "__file__", None)}
+
+def precompile(source, target, root, cache_path):
+    count = 0
+    with zipfile.ZipFile(source) as src, zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as dst:
+        for info in src.infolist():
+            data = src.read(info)
+            dst.writestr(info, data)
+            if info.filename.endswith(".py") and root + info.filename in used:
+                code = compile(data, root + info.filename, "exec", dont_inherit=True)
+                pyc = _code_to_hash_pyc(code, importlib.util.source_hash(data), checked=False)
+                dst.writestr(cache_path(info.filename), pyc)
+                count += 1
+    return count
+
+count = 0
+for name in os.listdir("/in/wheels"):
+    count += precompile(f"/in/wheels/{name}", f"/out/wheels/{name}", SITE, importlib.util.cache_from_source)
+# zipimport takes a pyc beside its source, with no __pycache__ directory
+count += precompile("/in/stdlib.zip", "/out/stdlib.zip", STDLIB, lambda name: name[:-3] + ".pyc")
+count
+`;
+
+// Boots the region as createRegion does, from the wheels just written, and rewrites them and
+// the stdlib zip with bytecode for what that boot imported
+async function precompile(wheels) {
+	const py = await loadPyodide({ packageCacheDir: OUTPUT_DIRECTORY });
+	py.setStdout({ batched() {} });
+	py.setStderr({ batched() {} });
+	await py.loadPackage(
+		wheels.map((file) => path.join(OUTPUT_DIRECTORY, file)),
+		{ messageCallback() {} }
+	);
+	py.globals.set('STATE_ROOT', '/state');
+	py.globals.set('REGION_PORT', 4566);
+	for (const file of ['threads.py', 'helpers.py', 'api.py']) {
+		await py.runPythonAsync(fs.readFileSync(path.join(ROOT, 'python', file), 'utf8'));
+	}
+	await py.runPythonAsync('await lifespan("startup")');
+
+	py.FS.mkdirTree('/in/wheels');
+	py.FS.mkdirTree('/out/wheels');
+	for (const file of wheels) {
+		py.FS.writeFile(`/in/wheels/${file}`, fs.readFileSync(path.join(OUTPUT_DIRECTORY, file)));
+	}
+	py.FS.writeFile('/in/stdlib.zip', fs.readFileSync(path.join(PYODIDE_DIRECTORY, 'python_stdlib.zip')));
+	const count = await py.runPythonAsync(PRECOMPILE);
+	for (const file of wheels) {
+		fs.writeFileSync(path.join(OUTPUT_DIRECTORY, file), py.FS.readFile(`/out/wheels/${file}`));
+	}
+	fs.writeFileSync(path.join(OUTPUT_DIRECTORY, STDLIB_FILE), py.FS.readFile('/out/stdlib.zip'));
+	await py.runPythonAsync('await lifespan("shutdown")');
+	return count;
 }
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'pocket-region-vendor-'));
@@ -114,11 +186,7 @@ fs.writeFileSync(${JSON.stringify(listFile)}, result);
 
 	const wheels = [];
 	const downloads = [];
-	let totalBytes = 0;
-	const writeWheel = (file, bytes) => {
-		fs.writeFileSync(path.join(OUTPUT_DIRECTORY, file), bytes);
-		totalBytes += bytes.length;
-	};
+	const writeWheel = (file, bytes) => fs.writeFileSync(path.join(OUTPUT_DIRECTORY, file), bytes);
 	const excluded = new Set(EXCLUDED_PACKAGES.map(canonical));
 	for (const entry of packages) {
 		if (excluded.has(canonical(entry.name))) continue;
@@ -150,7 +218,14 @@ fs.writeFileSync(${JSON.stringify(listFile)}, result);
 		}
 	}
 	await Promise.all(downloads.map((download) => download()));
+	wheels.sort();
 
+	log(`precompiling what the region imports`);
+	const compiled = await precompile(wheels);
+
+	const totalBytes = [...wheels, STDLIB_FILE]
+		.map((file) => fs.statSync(path.join(OUTPUT_DIRECTORY, file)).size)
+		.reduce((sum, size) => sum + size, 0);
 	const megabytes = (totalBytes / 1e6).toFixed(1);
 	fs.writeFileSync(
 		METADATA_FILE,
@@ -158,14 +233,16 @@ fs.writeFileSync(${JSON.stringify(listFile)}, result);
 			{
 				pyodideVersion: PYODIDE_VERSION,
 				emulatorSpec: EMULATOR_SPEC,
-				wheels: wheels.sort()
+				wheels,
+				stdlib: STDLIB_FILE
 			},
 			null,
 			2
 		)}\n`
 	);
 	log(
-		`wrote ${wheels.length} wheels - ${megabytes} MB, ${EMULATOR_NAME} ${emulator.version}` +
+		`wrote ${wheels.length} wheels and the stdlib zip - ${megabytes} MB, ${EMULATOR_NAME} ${emulator.version}, ` +
+			`${compiled} modules precompiled` +
 			(wheels.length < packages.length ? ` (excluded ${EXCLUDED_PACKAGES.join(', ')})` : '')
 	);
 } finally {

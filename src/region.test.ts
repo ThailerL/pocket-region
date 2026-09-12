@@ -22,7 +22,8 @@ afterAll(async () => {
   await region?.stop();
 });
 
-function s3On(target: Region, method: string, key: string, body?: string) {
+// The region defaults at call time, once beforeAll has booted it
+function s3(method: string, key: string, body?: string, target: Region = region) {
   return target.dispatch({
     method,
     path: key,
@@ -31,15 +32,11 @@ function s3On(target: Region, method: string, key: string, body?: string) {
   });
 }
 
-function s3(method: string, key: string, body?: string) {
-  return s3On(region, method, key, body);
-}
-
-async function jsonApiOn(
-  target: Region,
+async function jsonApi(
   service: 'sqs' | 'dynamodb',
   operation: string,
   body: object,
+  target: Region = region,
 ) {
   const response = await target.dispatch({
     method: 'POST',
@@ -53,10 +50,6 @@ async function jsonApiOn(
     body: encoder.encode(JSON.stringify(body)),
   });
   return { status: response.status, body: JSON.parse(decoder.decode(response.body)) };
-}
-
-function jsonApi(service: 'sqs' | 'dynamodb', operation: string, body: object) {
-  return jsonApiOn(region, service, operation, body);
 }
 
 describe('createRegion', () => {
@@ -111,19 +104,19 @@ describe('createRegion', () => {
   it('saves state that a later region reads back', async () => {
     const stateDir = await mkdtemp(path.join(tmpdir(), 'pocket-region-state-'));
     const first = await createRegion({ stateDir });
-    await s3On(first, 'PUT', '/saved');
-    await s3On(first, 'PUT', '/saved/keep.txt', 'kept');
-    await s3On(first, 'PUT', '/saved/gone.txt', 'deleted after the first save');
+    await s3('PUT', '/saved', undefined, first);
+    await s3('PUT', '/saved/keep.txt', 'kept', first);
+    await s3('PUT', '/saved/gone.txt', 'deleted after the first save', first);
     await first.save();
     expect((await readdir(stateDir, { recursive: true })).length).toBeGreaterThan(0);
-    await s3On(first, 'DELETE', '/saved/gone.txt');
+    await s3('DELETE', '/saved/gone.txt', undefined, first);
     await first.stop();
 
     const second = await createRegion({ stateDir });
-    const kept = await s3On(second, 'GET', '/saved/keep.txt');
+    const kept = await s3('GET', '/saved/keep.txt', undefined, second);
     expect(kept.status).toBe(200);
     expect(decoder.decode(kept.body)).toBe('kept');
-    expect((await s3On(second, 'GET', '/saved/gone.txt')).status).toBe(404);
+    expect((await s3('GET', '/saved/gone.txt', undefined, second)).status).toBe(404);
     await second.stop();
     await rm(stateDir, { recursive: true, force: true });
   }, 60_000);
@@ -141,9 +134,12 @@ describe('createRegion', () => {
     const output: string[] = [];
     const second = await createRegion({ stateDir, onOutput: (line) => output.push(line) });
     expect(output.join('\n')).toContain('sqs.json was not loaded');
-    const lookup = await jsonApiOn(second, 'sqs', 'AmazonSQS.GetQueueUrl', {
-      QueueName: 'from-the-future',
-    });
+    const lookup = await jsonApi(
+      'sqs',
+      'AmazonSQS.GetQueueUrl',
+      { QueueName: 'from-the-future' },
+      second,
+    );
     expect(lookup.status).toBe(400);
     await second.save();
     await second.stop();

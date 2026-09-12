@@ -2,7 +2,6 @@
 # ASGI app is driven directly: every "request" is an in-process function call.
 import asyncio
 import glob
-import json
 import os
 import tempfile
 from collections import namedtuple
@@ -69,10 +68,6 @@ _lifespan_reached = {}
 _lifespan_task = None
 
 
-async def _lifespan_receive():
-    return await _lifespan_queue.get()
-
-
 async def _lifespan_send(message):
     # "lifespan.startup.complete" -> "startup"
     _lifespan_reached.setdefault(message["type"].split(".")[1], asyncio.Event()).set()
@@ -82,7 +77,7 @@ async def lifespan(phase):
     global _lifespan_task
     if _lifespan_task is None:
         _lifespan_task = asyncio.ensure_future(
-            app({"type": "lifespan", "asgi": {"version": "3.0"}}, _lifespan_receive, _lifespan_send)
+            app({"type": "lifespan", "asgi": {"version": "3.0"}}, _lifespan_queue.get, _lifespan_send)
         )
     reached = _lifespan_reached.setdefault(phase, asyncio.Event())
     await _lifespan_queue.put({"type": f"lifespan.{phase}"})
@@ -93,7 +88,7 @@ async def lifespan(phase):
 Response = namedtuple("Response", ("status", "headers", "body"))
 
 
-async def asgi_request(method, target, headers, body=b""):
+async def asgi_request(method, target, headers, body):
     path, _, query = target.partition("?")
     scope = {
         "type": "http",
@@ -103,7 +98,7 @@ async def asgi_request(method, target, headers, body=b""):
         "path": path,
         "raw_path": path.encode(),
         "query_string": query.encode(),
-        "headers": [(str(k).lower().encode(), str(v).encode()) for k, v in headers],
+        "headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()],
         "client": ("127.0.0.1", 1),
         "server": ("127.0.0.1", 443),
         "scheme": "http",

@@ -7,6 +7,8 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { text } from 'node:stream/consumers';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
 const MANAGER = fileURLToPath(new URL('./manager.mjs', import.meta.url));
@@ -52,7 +54,6 @@ const freePort = () =>
     });
   });
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const CONFIG_POLL_MS = 100;
 // Long enough for the manager to have re-read config.json more than once
 const CONFIG_POLLS_MS = CONFIG_POLL_MS * 3;
@@ -77,10 +78,8 @@ const waitForCall = (region, action) =>
 function fakeRegion(answer) {
   const calls = [];
   const server = http.createServer(async (req, res) => {
-    const chunks = [];
-    for await (const chunk of req) chunks.push(chunk);
     const action = req.headers['x-amz-target']?.replace('AmazonSQS.', '');
-    const payload = JSON.parse(Buffer.concat(chunks).toString() || '{}');
+    const payload = JSON.parse((await text(req)) || '{}');
     calls.push({ action, payload, authorization: req.headers.authorization });
     const reply = await answer(action, payload);
     res.writeHead(reply.status ?? 200, { 'content-type': 'application/x-amz-json-1.0' });

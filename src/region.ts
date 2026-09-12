@@ -35,7 +35,7 @@ export type Region = {
   stop(): Promise<void>;
 };
 
-type VendorManifest = { wheels: string[] };
+type VendorManifest = { wheels: string[]; stdlib: string };
 
 type PythonDispatch = (
   method: string,
@@ -71,15 +71,6 @@ function listMemfsFiles(py: PyodideAPI, memDir: string, found: string[] = []) {
   return found;
 }
 
-function listDiskFiles(diskDir: string, found: string[] = []) {
-  for (const entry of fs.readdirSync(diskDir, { withFileTypes: true })) {
-    const disk = path.join(diskDir, entry.name);
-    if (entry.isDirectory()) listDiskFiles(disk, found);
-    else found.push(disk);
-  }
-  return found;
-}
-
 // Deletions count as much as writes: a deleted object whose file survived on disk would
 // come back at the next boot
 function mirrorToDisk(py: PyodideAPI, stateDir: string) {
@@ -90,8 +81,9 @@ function mirrorToDisk(py: PyodideAPI, stateDir: string) {
     fs.mkdirSync(path.dirname(disk), { recursive: true });
     fs.writeFileSync(disk, py.FS.readFile(mem));
   }
-  for (const disk of listDiskFiles(stateDir)) {
-    if (!written.has(disk)) fs.rmSync(disk);
+  for (const entry of fs.readdirSync(stateDir, { recursive: true, withFileTypes: true })) {
+    const disk = path.join(entry.parentPath, entry.name);
+    if (entry.isFile() && !written.has(disk)) fs.rmSync(disk);
   }
 }
 
@@ -103,7 +95,12 @@ export async function createRegion(options: RegionOptions = {}): Promise<Region>
   );
   const onOutput = options.onOutput ?? (() => {});
 
-  const py = await loadPyodide({ packageCacheDir, indexURL: options.indexURL });
+  const py = await loadPyodide({
+    packageCacheDir,
+    indexURL: options.indexURL,
+    // The vendored copy carries bytecode; the runtime's own would compile on every boot
+    stdLibURL: path.join(packageCacheDir, manifest.stdlib),
+  });
   // Before any Python runs: print throws EBADF without these
   py.setStdout({ batched: (line) => onOutput(line, 'stdout') });
   py.setStderr({ batched: (line) => onOutput(line, 'stderr') });
@@ -126,10 +123,10 @@ export async function createRegion(options: RegionOptions = {}): Promise<Region>
   for (const file of PYTHON_FILES) {
     await py.runPythonAsync(fs.readFileSync(new URL(file, PYTHON_DIRECTORY), 'utf8'));
   }
-  await py.runPythonAsync('await region_start()');
+  const lifespan: (phase: 'startup' | 'shutdown') => Promise<void> = py.globals.get('lifespan');
+  await lifespan('startup');
   const dispatchPython: PythonDispatch = py.globals.get('region_dispatch');
   const savePython: () => void = py.globals.get('region_save');
-  const stopPython: () => Promise<void> = py.globals.get('region_stop');
 
   return {
     dispatch({ method, path, headers, body = new Uint8Array() }) {
@@ -142,15 +139,13 @@ export async function createRegion(options: RegionOptions = {}): Promise<Region>
       );
     },
     async save() {
-      // Without a state directory the emulator's files would only reach MEMFS, where
-      // nothing can read them
       if (stateDir === undefined) return;
       savePython();
       mirrorToDisk(py, stateDir);
     },
     async stop() {
       // Lifespan shutdown writes the state files; the mirror follows
-      await stopPython();
+      await lifespan('shutdown');
       if (stateDir !== undefined) mirrorToDisk(py, stateDir);
     },
   };

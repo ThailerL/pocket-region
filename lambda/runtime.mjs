@@ -4,6 +4,7 @@
 import http from 'node:http';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
+import { text } from 'node:stream/consumers';
 import { pathToFileURL } from 'node:url';
 
 const [host, apiPort] = (process.env.AWS_LAMBDA_RUNTIME_API ?? '').split(':');
@@ -27,17 +28,8 @@ function request(method, route, body) {
           ...(body !== undefined && { 'content-length': Buffer.byteLength(body) }),
         },
       },
-      (res) => {
-        const chunks = [];
-        res.on('data', (chunk) => chunks.push(chunk));
-        res.on('end', () =>
-          resolve({
-            status: res.statusCode,
-            headers: res.headers,
-            body: Buffer.concat(chunks).toString('utf8'),
-          }),
-        );
-      },
+      async (res) =>
+        resolve({ status: res.statusCode, headers: res.headers, body: await text(res) }),
     );
     req.on('error', reject);
     req.end(body);

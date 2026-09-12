@@ -22,8 +22,6 @@ export type RegionRequestHandler = {
   httpHandlerConfigs(): Record<string, never>;
 };
 
-const encoder = new TextEncoder();
-
 function queryString(query: SdkHttpRequest['query']) {
   const parts: string[] = [];
   for (const [key, value] of Object.entries(query ?? {})) {
@@ -38,23 +36,12 @@ function queryString(query: SdkHttpRequest['query']) {
 
 async function requestBytes(body: unknown): Promise<Uint8Array | undefined> {
   if (body === undefined || body === null) return undefined;
-  if (typeof body === 'string') return encoder.encode(body);
   if (body instanceof Uint8Array) return body;
-  const chunks: Uint8Array[] = [];
-  let total = 0;
+  const chunks: BlobPart[] = [];
+  if (typeof body === 'string') chunks.push(body);
   // A stream upload: Node's Readable and a web ReadableStream are both async iterable
-  for await (const chunk of body as AsyncIterable<Uint8Array | string>) {
-    const bytes = typeof chunk === 'string' ? encoder.encode(chunk) : chunk;
-    chunks.push(bytes);
-    total += bytes.length;
-  }
-  const joined = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    joined.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return joined;
+  else for await (const chunk of body as AsyncIterable<BlobPart>) chunks.push(chunk);
+  return new Blob(chunks).bytes();
 }
 
 // The SDK reads a streaming response (GetObject) through Stream.Readable in Node or a
