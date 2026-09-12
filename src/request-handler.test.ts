@@ -19,7 +19,7 @@ import {
   PutItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createRegion, type Region } from './region.ts';
+import { createRegion, type Region } from './node.ts';
 import { requestHandler } from './request-handler.ts';
 
 let region: Region;

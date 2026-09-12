@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createRegion, type Region } from './region.ts';
+import { createRegion, type Region } from './node.ts';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -54,7 +54,7 @@ async function jsonApi(
 
 describe('createRegion', () => {
   it('lets Node exit once stopped', async () => {
-    const module = JSON.stringify(new URL('./region.ts', import.meta.url).href);
+    const module = JSON.stringify(new URL('./node.ts', import.meta.url).href);
     const child = spawn(
       process.execPath,
       ['--input-type=module', '-e', `import { createRegion } from ${module}; await (await createRegion()).stop();`],

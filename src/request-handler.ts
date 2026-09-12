@@ -1,4 +1,7 @@
-import type { Region } from './region.ts';
+import type { Region } from './core.ts';
+
+// Only dispatch is needed, so a page's region fits too
+type Dispatcher = Pick<Region, 'dispatch'>;
 
 // The AWS SDK's shapes, structurally: taking @smithy/types as a dependency would put the
 // SDK's release cadence in front of this package's
@@ -56,7 +59,7 @@ const streamOf = (bytes: Uint8Array) =>
 
 // Pass as `requestHandler` to any AWS SDK v3 client: its requests reach the region as
 // function calls, so page code needs no socket and no endpoint is listening
-export function requestHandler(region: Region): RegionRequestHandler {
+export function requestHandler(region: Dispatcher): RegionRequestHandler {
   return {
     async handle(request) {
       const response = await region.dispatch({
