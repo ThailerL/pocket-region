@@ -101,6 +101,79 @@ describe('createRegion', () => {
     expect(read.body.Item).toEqual(item);
   });
 
+  it('resets to empty, and the same names can be used again', async () => {
+    const fresh = await createRegion();
+    const fifo = async () => {
+      const { body } = await jsonApi(
+        'sqs',
+        'AmazonSQS.CreateQueue',
+        { QueueName: 'orders.fifo', Attributes: { FifoQueue: 'true' } },
+        fresh,
+      );
+      await jsonApi(
+        'sqs',
+        'AmazonSQS.SendMessage',
+        { QueueUrl: body.QueueUrl, MessageBody: 'latte', MessageGroupId: 'g', MessageDeduplicationId: 'once' },
+        fresh,
+      );
+      return body.QueueUrl;
+    };
+    const table = () =>
+      jsonApi(
+        'dynamodb',
+        'DynamoDB_20120810.CreateTable',
+        {
+          TableName: 'users',
+          KeySchema: [{ AttributeName: 'pk', KeyType: 'HASH' }],
+          AttributeDefinitions: [{ AttributeName: 'pk', AttributeType: 'S' }],
+          BillingMode: 'PAY_PER_REQUEST',
+        },
+        fresh,
+      );
+
+    await s3('PUT', '/photos', undefined, fresh);
+    await s3('PUT', '/photos/cat.txt', 'meow', fresh);
+    await fifo();
+    await table();
+    await jsonApi('dynamodb', 'DynamoDB_20120810.PutItem', { TableName: 'users', Item: { pk: { S: 'ada' } } }, fresh);
+
+    await fresh.reset();
+
+    expect(decoder.decode((await s3('GET', '/', undefined, fresh)).body)).not.toContain('<Name>');
+    expect((await jsonApi('sqs', 'AmazonSQS.ListQueues', {}, fresh)).body.QueueUrls ?? []).toEqual([]);
+    expect((await jsonApi('dynamodb', 'DynamoDB_20120810.ListTables', {}, fresh)).body.TableNames).toEqual([]);
+
+    expect((await s3('PUT', '/photos', undefined, fresh)).status).toBe(200);
+    expect((await s3('GET', '/photos/cat.txt', undefined, fresh)).status).toBe(404);
+    // The deduplication id was spent before the reset; a message with it is new again
+    const QueueUrl = await fifo();
+    const received = await jsonApi('sqs', 'AmazonSQS.ReceiveMessage', { QueueUrl }, fresh);
+    expect(received.body.Messages).toHaveLength(1);
+    expect((await table()).status).toBe(200);
+    await fresh.stop();
+  }, 30_000);
+
+  it('leaves saved state on disk until the next save', async () => {
+    const stateDir = await mkdtemp(path.join(tmpdir(), 'pocket-region-reset-'));
+    const first = await createRegion({ stateDir });
+    await s3('PUT', '/saved', undefined, first);
+    await s3('PUT', '/saved/keep.txt', 'kept', first);
+    await first.save();
+    await first.reset();
+
+    const unsaved = await createRegion({ stateDir });
+    expect((await s3('GET', '/saved/keep.txt', undefined, unsaved)).status).toBe(200);
+    await unsaved.stop();
+
+    // Stopping saves, so the reset reaches disk here
+    await first.stop();
+    const saved = await createRegion({ stateDir });
+    expect((await s3('GET', '/saved/keep.txt', undefined, saved)).status).toBe(404);
+    expect((await s3('GET', '/saved', undefined, saved)).status).toBe(404);
+    await saved.stop();
+    await rm(stateDir, { recursive: true, force: true });
+  }, 60_000);
+
   it('saves state that a later region reads back', async () => {
     const stateDir = await mkdtemp(path.join(tmpdir(), 'pocket-region-state-'));
     const first = await createRegion({ stateDir });

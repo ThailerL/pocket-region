@@ -90,6 +90,22 @@ await region.stop();   // saves on the way out
 
 A page has nowhere to write, so `save` is not offered there.
 
+## A clean region per test
+
+Boot once, then reset between tests. A reset empties every service in well under a
+millisecond for a typical test and about 3 ms for a region holding 20 resources, where a boot
+takes 300-500 ms.
+
+```js
+let region;
+beforeAll(async () => { region = await createRegion(); });
+beforeEach(() => region.reset());
+afterAll(() => region.stop());
+```
+
+A region with a `stateDir` keeps its files until the next `save` or `stop`, which writes the
+empty state over them.
+
 ## What works
 
 | Service | Status |

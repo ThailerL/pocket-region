@@ -20,6 +20,8 @@ export type Region = {
   // The port its queue URLs name, which an HTTP server over it has to answer on
   port: number;
   dispatch(request: RegionRequest): Promise<RegionResponse>;
+  // Back to empty in milliseconds; a region with a stateDir keeps its disk until the next save
+  reset(): Promise<void>;
   save(): Promise<void>;
   stop(): Promise<void>;
 };
@@ -97,16 +99,27 @@ export async function bootRegion(
   const dispatchPython: PythonDispatch = py.globals.get('region_dispatch');
   const savePython: () => void = py.globals.get('region_save');
 
+  const dispatch: Region['dispatch'] = ({ method, path, headers, body = new Uint8Array() }) =>
+    dispatchPython(
+      method,
+      path,
+      headers,
+      // A plain view: Pyodide's to_bytes rejects Buffer and other subclasses
+      new Uint8Array(body.buffer, body.byteOffset, body.byteLength),
+    );
+
   return {
     port,
-    dispatch({ method, path, headers, body = new Uint8Array() }) {
-      return dispatchPython(
-        method,
-        path,
-        headers,
-        // A plain view: Pyodide's to_bytes rejects Buffer and other subclasses
-        new Uint8Array(body.buffer, body.byteOffset, body.byteLength),
-      );
+    dispatch,
+    async reset() {
+      const response = await dispatch({
+        method: 'POST',
+        path: '/_ministack/reset',
+        headers: { host: `localhost:${port}` },
+      });
+      if (response.status !== 200) {
+        throw new Error(`reset answered ${response.status}: ${new TextDecoder().decode(response.body)}`);
+      }
     },
     async save() {
       if (persistence === undefined) return;
