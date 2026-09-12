@@ -1,0 +1,36 @@
+# Publishes to npm when a GitHub release is published. Authentication is OIDC, so no token is
+# stored anywhere; npm attaches provenance by itself while the repo and package are public.
+# The npmjs.com side names this file, so renaming it breaks publishing until it is renamed there.
+name: publish
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      # A tag that disagrees with the manifest would burn a version number: npm never lets one
+      # be reused, published or not
+      - name: The release tag names the version being published
+        run: |
+          tagged="${{ github.ref_name }}"
+          manifest="v$(node -p 'require("./package.json").version')"
+          test "$tagged" = "$manifest" || {
+            echo "release $tagged does not match package.json ($manifest)"
+            exit 1
+          }
+      - run: npm test
+      # prepack rebuilds vendor/ and dist/, so the tarball is built here rather than uploaded
+      - run: npm publish
