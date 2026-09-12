@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { RegionRequest } from '../core.ts';
 import { createRegion, type Region } from '../node.ts';
 import { kebabCase, parseArgs, parseValue, pascalCase, tokenize } from './args.ts';
-import { decoded } from './dispatch.ts';
+import { decoded, unresolvable } from './dispatch.ts';
 import { UsageError } from './errors.ts';
 import { awsCli, CliError } from './index.ts';
 import { formatBuckets, formatObjects, parseS3Uri } from './s3-verbs.ts';
@@ -230,6 +230,52 @@ describe('caller-supplied clients', () => {
     const result = await aws('s4 list-buckets');
     expect(result.stderr).toContain('npm install @aws-sdk/client-s4');
     expect(result.stderr).toContain("modules: { s4: await import('@aws-sdk/client-s4') }");
+  });
+
+  // import.meta.resolve decides wherever it exists, which is Node and every browser since
+  // 2023; this is the fallback for a host that resolves modules itself
+  it('reads a loader that names no code, as Vivari does not', () => {
+    expect(unresolvable(new Error("Cannot find module '@aws-sdk/client-bogus' from '/bin'"))).toBe(
+      true,
+    );
+    expect(
+      unresolvable(Object.assign(new Error('whatever'), { code: 'ERR_MODULE_NOT_FOUND' })),
+    ).toBe(true);
+    // A client that is installed and threw while evaluating keeps its own error
+    expect(unresolvable(new TypeError('x is not a function'))).toBe(false);
+  });
+
+  it('refuses an unlisted service without importing, since modules are the whole world', async () => {
+    const aws = awsCli(recorder(), {
+      modules: { s3: await import('@aws-sdk/client-s3'), sqs: await import('@aws-sdk/client-sqs') },
+    });
+    const result = await aws('bogusservice list-things');
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('unknown service "bogusservice"');
+    // The list comes from the usage text under it, named once
+    expect(result.stderr).toContain('services: s3, s3api, sqs');
+    // The advice a host that bundles cannot act on
+    expect(result.stderr).not.toContain('npm install');
+    expect(result.stderr).not.toContain('Cannot find module');
+  });
+
+  it('lists the services it was given, and the host note, in its usage', async () => {
+    const aws = awsCli(recorder(), {
+      modules: { s3: await import('@aws-sdk/client-s3') },
+      note: 'Credentials come from the environment this shell was given.',
+    });
+    const { stdout } = await aws('help');
+
+    expect(stdout).toContain('services: s3, s3api');
+    expect(stdout).toContain('Credentials come from the environment this shell was given.');
+    expect(stdout).not.toContain('npm install');
+    expect(stdout).not.toContain('@aws-sdk/client-<service>');
+  });
+
+  it('still offers the open list when no modules are given', async () => {
+    const { stdout } = await awsCli(recorder())('help');
+    expect(stdout).toContain('@aws-sdk/client-<service>');
   });
 });
 

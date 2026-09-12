@@ -42,20 +42,62 @@ export const resolve = (service: string) => PACKAGES[service] ?? service;
 
 export const packageFor = (service: string) => `@aws-sdk/client-${resolve(service)}`;
 
+// The CLI names for the modules a caller supplied, aliases included, which is the whole list
+// of services that host can reach
+export function serviceNames(modules: Modules) {
+  const given = Object.keys(modules);
+  const aliases = Object.keys(PACKAGES).filter((alias) => given.includes(PACKAGES[alias]!));
+  return [...given, ...aliases].sort();
+}
+
 export async function moduleFor(service: string, modules?: Modules): Promise<SdkModule> {
   if (!SERVICE_PATTERN.test(service)) throw new UsageError(`"${service}" is not a service name`);
-  const given = modules?.[resolve(service)];
-  if (given) return given;
+  if (modules) {
+    // Supplied modules are the whole world: importing is not an option a host that bundles
+    // has, and its loader's failure is not one this can read
+    const given = modules[resolve(service)];
+    if (given) return given;
+    // The usage text under this names what the build does have
+    throw new UsageError(`unknown service "${service}"`);
+  }
   const name = packageFor(service);
+  if (resolvable(name) === false) throw unreachable(service, name);
   try {
     return (await import(/* @vite-ignore */ name)) as SdkModule;
   } catch (error) {
-    // Anything else is a client that is installed and broken, which install advice would bury
-    if ((error as { code?: string }).code !== 'ERR_MODULE_NOT_FOUND') throw error;
-    throw new UsageError(`unknown service "${service}", or its client is neither installed nor given:
+    // A client that is installed and broken must keep its own error: install advice would
+    // bury it. Only a failure to resolve the name means the service is not here
+    if (!unresolvable(error)) throw error;
+    throw unreachable(service, name);
+  }
+}
+
+const unreachable = (service: string, name: string) =>
+  new UsageError(`unknown service "${service}", or its client is neither installed nor given:
   npm install ${name}
   or awsCli(region, { modules: { ${resolve(service)}: await import('${name}') } })`);
+
+// Asks the loader whether the name resolves at all, which separates a missing client from a
+// broken one. Undefined where the host has no import.meta.resolve, and the error decides
+function resolvable(name: string) {
+  const resolver = import.meta.resolve as ((specifier: string) => string) | undefined;
+  if (typeof resolver !== 'function') return undefined;
+  try {
+    resolver(name);
+    return true;
+  } catch {
+    return false;
   }
+}
+
+// Only for a loader with no import.meta.resolve, which browsers and Node both have: a host
+// that resolves modules itself, as Vivari's VM does, says this much and names no code
+export function unresolvable(error: unknown) {
+  const failure = error as { code?: string; message?: string };
+  return (
+    failure?.code === 'ERR_MODULE_NOT_FOUND' ||
+    /cannot find (module|package)/i.test(failure?.message ?? '')
+  );
 }
 
 // Every client package exports exactly one, named for the service with casing we would only
@@ -75,7 +117,19 @@ export function servicesFor(
   options: { modules?: Modules; client?: object } = {},
 ): Services {
   const built = new Map<string, Promise<SdkClient>>();
-  const module = (service: string) => moduleFor(service, options.modules);
+  const imported = new Map<string, Promise<SdkModule>>();
+  // Every command asks twice - once for the operation's Command class, once for the client -
+  // and the resolve and the import behind that are worth doing only the first time
+  const module = (service: string) => {
+    const name = resolve(service);
+    const existing = imported.get(name);
+    if (existing) return existing;
+    const importing = moduleFor(service, options.modules);
+    imported.set(name, importing);
+    // A failure is not the answer for the rest of the session
+    importing.catch(() => imported.delete(name));
+    return importing;
+  };
   return {
     module,
     client(service) {

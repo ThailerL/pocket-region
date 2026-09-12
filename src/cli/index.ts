@@ -1,7 +1,7 @@
 import type { Dispatcher } from '../core.ts';
 import { parseArgs, tokenize } from './args.ts';
-import { dispatch, servicesFor, type Modules } from './dispatch.ts';
-import { report, USAGE } from './errors.ts';
+import { dispatch, serviceNames, servicesFor, type Modules } from './dispatch.ts';
+import { report, usageText } from './errors.ts';
 import { runS3Verb, type Files } from './s3-verbs.ts';
 
 export type { Modules, SdkModule } from './dispatch.ts';
@@ -20,6 +20,9 @@ export type AwsCliOptions = {
   // Merged into every client's config, so a caller can move the endpoint and the credentials.
   // The addressing a service needs wins over it: S3 stays path-style whatever this says
   client?: object;
+  // Appended to the usage text, for advice only the host can give: where credentials come
+  // from, what this shell can reach
+  note?: string;
 };
 
 export class CliError extends Error {
@@ -35,19 +38,20 @@ export class CliError extends Error {
 // Output is returned rather than printed, since a page renders it and a test asserts on it
 export function awsCli(region: Dispatcher, options: AwsCliOptions = {}) {
   const services = servicesFor(region, options);
+  const usage = usageText(options.modules && serviceNames(options.modules), options.note);
   return async function aws(command: string | string[]): Promise<CliResult> {
     const argv = typeof command === 'string' ? tokenize(command) : command;
     let result: CliResult;
     try {
       const askedForHelp = argv.length === 0 || argv[0] === 'help' || argv.includes('--help');
       const stdout = askedForHelp
-        ? USAGE
+        ? usage
         : argv[0] === 's3'
           ? await runS3Verb(argv.slice(1), services, options.files)
           : await dispatch(parseArgs(argv), services);
       result = { stdout, stderr: '', code: 0 };
     } catch (error) {
-      result = { stdout: '', ...report(error) };
+      result = { stdout: '', ...report(error, usage) };
     }
     if (result.code !== 0 && options.throwOnError) throw new CliError(result);
     return result;
