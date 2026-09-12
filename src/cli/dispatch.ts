@@ -178,6 +178,8 @@ export async function dispatch({ service, operation, params }: Invocation, servi
   );
   if (stream) {
     stdout += await (rest[stream] as { transformToString(): Promise<string> }).transformToString();
+    // The body is whatever was stored, newline or not, so the metadata below needs its own line
+    if (stdout && !stdout.endsWith('\n')) stdout += '\n';
     delete rest[stream];
   }
   if (Object.keys(rest).length > 0) stdout += `${JSON.stringify(decoded(rest), null, 2)}\n`;
