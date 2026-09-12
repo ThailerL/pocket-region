@@ -22,6 +22,9 @@ export type Region = {
   stop(): Promise<void>;
 };
 
+// What anything built over a region needs: a page's region fits, and so does a stub
+export type Dispatcher = Pick<Region, 'dispatch'>;
+
 // Where each asset is, already resolved: file paths from Node, URLs from a page. Pyodide
 // takes either, so nothing below knows which host it is running on
 export type RegionAssets = {

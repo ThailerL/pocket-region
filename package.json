@@ -31,6 +31,10 @@
       "types": "./dist/browser.d.ts",
       "default": "./dist/browser.js"
     },
+    "./cli": {
+      "types": "./dist/cli/index.d.ts",
+      "default": "./dist/cli/index.js"
+    },
     "./sdk": {
       "types": "./dist/request-handler.d.ts",
       "default": "./dist/request-handler.js"
@@ -61,6 +65,7 @@
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "^3.1131.0",
     "@aws-sdk/client-s3": "^3.1131.0",
+    "@aws-sdk/client-sns": "^3.1131.0",
     "@aws-sdk/client-sqs": "^3.1131.0",
     "@types/node": "^24.13.4",
     "typescript": "^7.0.2",

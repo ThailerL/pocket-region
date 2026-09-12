@@ -39,6 +39,24 @@ const region = await createRegion({ assetsBaseUrl: '/vendor' });
 There's a live demo at [pocket-region.dev](https://pocket-region.dev), and its source is in
 [`demo/`](demo/index.html).
 
+## The `aws` CLI
+
+Commands are the real CLI's, so they paste out of AWS documentation. Output comes back rather
+than being printed, because a terminal renders it and a test asserts on it.
+
+```js
+import { awsCli } from 'pocket-region/cli';
+
+const aws = awsCli(region);
+await aws('s3api create-bucket --bucket notes');
+const { stdout } = await aws('sqs create-queue --queue-name orders');
+```
+
+It takes a typed line or an argument array, and resolves `{ stdout, stderr, code }` — a bad
+command is a non-zero `code`, as it is in the real CLI, or pass `{ throwOnError: true }`.
+Any service works as long as its client is installed: a command naming `sns` needs
+`@aws-sdk/client-sns`, and says so if it is missing.
+
 ## Persistence
 
 State lives in memory unless you give it somewhere to write. Nothing is saved on a timer —

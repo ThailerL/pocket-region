@@ -1,7 +1,6 @@
-import type { Region } from './core.ts';
+import type { Dispatcher } from './core.ts';
 
 // Only dispatch is needed, so a page's region fits too
-type Dispatcher = Pick<Region, 'dispatch'>;
 
 // The AWS SDK's shapes, structurally: taking @smithy/types as a dependency would put the
 // SDK's release cadence in front of this package's
