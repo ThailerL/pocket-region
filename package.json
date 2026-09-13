@@ -1,13 +1,14 @@
 {
   "name": "pocket-region",
   "version": "0.3.0",
-  "description": "Real S3, SQS and DynamoDB inside Node or a browser tab, reached with the ordinary AWS SDK",
+  "description": "Real S3, SQS, DynamoDB, and Lambda inside Node or a browser tab, reached with the ordinary AWS SDK",
   "keywords": [
     "aws",
     "localstack",
     "s3",
     "sqs",
     "dynamodb",
+    "lambda",
     "emulator",
     "testing",
     "browser",

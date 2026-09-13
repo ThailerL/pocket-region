@@ -1,8 +1,8 @@
 # Pocket Region
 
-Pocket Region runs S3, SQS and DynamoDB inside your Node process or a browser tab, and you
-call them with the ordinary AWS SDK. There's no Docker container to start and no port to wait on, because each
-SDK request becomes a function call.
+Pocket Region runs S3, SQS, DynamoDB, and Lambda inside your Node process or a browser tab,
+and you call them with the ordinary AWS SDK. Nothing runs outside your process or tab, so
+there's no container to start, no server to reach, and no request leaving the machine.
 
 ```js
 import { createRegion, requestHandler } from 'pocket-region';
@@ -37,8 +37,43 @@ import { requestHandler } from 'pocket-region/sdk';
 const region = await createRegion({ assetsBaseUrl: '/vendor' });
 ```
 
+Everything below works the same in a page, Lambda included, where functions run in Web
+Workers instead of child processes.
+
 Try it at [pocket-region.dev](https://pocket-region.dev). The demo's source is in
 [`demo/`](demo/index.html).
+
+## Lambda
+
+Functions are created from a zipped deployment package and invoked the same way as on AWS.
+Handlers run in Node child processes, or in Web Workers in a browser.
+
+```js
+import { createRegion, requestHandler } from 'pocket-region';
+import { LambdaClient, CreateFunctionCommand, InvokeCommand } from '@aws-sdk/client-lambda';
+
+const region = await createRegion();
+const lambda = new LambdaClient({ /* as above */ requestHandler: requestHandler(region) });
+await lambda.send(new CreateFunctionCommand({
+  FunctionName: 'hello',
+  Runtime: 'nodejs22.x',
+  Handler: 'index.handler',
+  Role: 'arn:aws:iam::000000000000:role/lambda',
+  Code: { ZipFile: zipOfYourCode },
+}));
+const { Payload } = await lambda.send(new InvokeCommand({ FunctionName: 'hello', Payload: '{}' }));
+```
+
+The handler's environment has `AWS_ENDPOINT_URL`, `AWS_REGION`, and test credentials, so an
+SDK client created with no options reaches the region. `Timeout`,
+`ReservedConcurrentExecutions`, `Environment`, `InvocationType: 'Event'`, and
+`LogType: 'Tail'` work as they do on Lambda, and a thrown error comes back as
+`FunctionError: 'Unhandled'`.
+
+Only Node runtimes work, and the AWS SDK isn't preinstalled, so bundle it with your code. In a
+browser the package must be a single ES module, since CommonJS and relative imports don't
+load there. Asynchronous events are delivered once, with no retries or dead-letter queues,
+and SQS event source mappings don't poll yet.
 
 ## The `aws` CLI
 
@@ -128,46 +163,6 @@ It listens on the port the region builds its queue URLs with, 4566 unless you ga
 `{ port }` to listen somewhere else. A browser can't listen on a port, so `serve` is only in
 the Node entry.
 
-## Lambda
-
-Functions are created from a zipped deployment package and invoked the same way as on AWS.
-Each concurrent invocation runs the handler in its own execution environment, a Node child
-process or, in a browser, a Web Worker, which stays warm until it has been idle for a minute.
-
-```js
-import { createRegion, requestHandler } from 'pocket-region';
-import { LambdaClient, CreateFunctionCommand, InvokeCommand } from '@aws-sdk/client-lambda';
-
-const region = await createRegion();
-const lambda = new LambdaClient({ /* as above */ requestHandler: requestHandler(region) });
-await lambda.send(new CreateFunctionCommand({
-  FunctionName: 'hello',
-  Runtime: 'nodejs22.x',
-  Handler: 'index.handler',
-  Role: 'arn:aws:iam::000000000000:role/lambda',
-  Code: { ZipFile: zipOfYourCode },
-}));
-const { Payload } = await lambda.send(new InvokeCommand({ FunctionName: 'hello', Payload: '{}' }));
-```
-
-The handler gets `AWS_ENDPOINT_URL`, `AWS_REGION` and test credentials in its environment, so
-an SDK client created with no options reaches the region. The region is served on its port
-from the first invocation on, since the handler is in another process; if you called `serve`
-yourself, that server is used instead. `Timeout`,
-`ReservedConcurrentExecutions`, `Environment`, `InvocationType: 'Event'` and `LogType: 'Tail'`
-work as they do on Lambda. A handler that throws comes back with `FunctionError: 'Unhandled'`.
-
-Only Node runtimes work. The AWS SDK isn't preinstalled the way it is on Lambda, so bundle it
-into your code or include `node_modules` in the zip. S3 notifications, SNS and EventBridge
-deliver each event once, with no retries or dead-letter queues yet. SQS event source mappings
-don't poll.
-
-In a browser, the handler runs in a Web Worker with `process.env` set as above, and a `fetch`
-to `AWS_ENDPOINT_URL` (or to a queue URL, which names the same origin) is answered in the page
-without any network. That is what a bundled SDK client does, so it works unchanged. The
-package has to be one ES module, since a worker loaded from memory can't resolve imports of
-its neighbours, and CommonJS handlers don't load there.
-
 ## What works
 
 | Service | Status |
@@ -215,3 +210,10 @@ const guarded = {
 
 const server = await serve(guarded);
 ```
+
+## Where it came from
+
+Pocket Region started as the AWS region inside [Glass Garden](https://glass.garden/), where
+you drag load balancers, instance groups, and AWS services onto a canvas and watch requests
+move through real code. It was pulled out so the same region can run in a test or any other
+page.
