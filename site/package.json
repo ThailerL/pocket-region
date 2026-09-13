@@ -1,0 +1,22 @@
+{
+  "name": "pocket-region-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "predev": "node scripts/copy-region.mjs",
+    "dev": "astro dev",
+    "prebuild": "node scripts/copy-region.mjs",
+    "build": "astro build",
+    "preview": "astro preview",
+    "check": "astro check"
+  },
+  "dependencies": {
+    "astro": "^7.3.2"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.10",
+    "@aws-sdk/client-lambda": "3.1131.0",
+    "pocket-region": "file:..",
+    "typescript": "^6.0.3"
+  }
+}

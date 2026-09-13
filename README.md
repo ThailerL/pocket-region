@@ -1,8 +1,11 @@
 # Pocket Region
 
 Pocket Region runs S3, SQS, DynamoDB, and Lambda inside your Node process or a browser tab,
-and you call them with the ordinary AWS SDK. Nothing runs outside your process or tab, so
-there's no container to start, no server to reach, and no request leaving the machine.
+and you call them with the ordinary AWS SDK. The AWS APIs are
+[ministack](https://pypi.org/project/ministack/)'s, a Python AWS emulator that runs here
+under [Pyodide](https://github.com/pyodide/pyodide), and Pocket Region runs Lambda handlers itself. Nothing runs outside your process or tab, so
+there's no container to start, no server to reach, and no request leaving the machine. In
+Node, a region is ready in half a second, and later ones in the same process in about 350 ms.
 
 ```js
 import { createRegion, requestHandler } from 'pocket-region';
@@ -28,7 +31,8 @@ await region.stop();
 
 The browser entry loads the emulator from the package's `vendor/` directory, served from your
 site at the address you give it. Pyodide itself loads from jsDelivr, at the version the package was built with, unless
-you pass `indexURL`.
+you pass `indexURL`. A first visit downloads about 12 MB: 8 MB of wheels and Python standard
+library from your site, which are already compressed, and 3.7 MB of Pyodide from jsDelivr.
 
 ```js
 import { createRegion } from 'pocket-region/browser';
@@ -40,12 +44,11 @@ const region = await createRegion({ assetsBaseUrl: '/vendor' });
 Everything below works the same in a page, Lambda included, where functions run in Web
 Workers instead of child processes.
 
-Try it at [pocket-region.dev](https://pocket-region.dev). The demo's source is in
-[`demo/`](demo/index.html).
+Try it at [pocket-region.dev/demo](https://pocket-region.dev/demo).
 
 ## Lambda
 
-Functions are created from a zipped deployment package and invoked the same way as on AWS.
+Functions are created from a zipped deployment package and invoked with `InvokeCommand`.
 Handlers run in Node child processes, or in Web Workers in a browser.
 
 ```js
@@ -64,22 +67,23 @@ await lambda.send(new CreateFunctionCommand({
 const { Payload } = await lambda.send(new InvokeCommand({ FunctionName: 'hello', Payload: '{}' }));
 ```
 
-The handler's environment has `AWS_ENDPOINT_URL`, `AWS_REGION`, and test credentials, so an
-SDK client created with no options reaches the region. `Timeout`,
+The handler's environment has `AWS_ENDPOINT_URL`, `AWS_REGION`, and test credentials. In Node,
+an SDK client created with no options reaches the region. In a browser, pass them to the client
+yourself. `Timeout`,
 `ReservedConcurrentExecutions`, `Environment`, `InvocationType: 'Event'`, and
 `LogType: 'Tail'` work as they do on Lambda, and a thrown error comes back as
 `FunctionError: 'Unhandled'`.
 
 Only Node runtimes work, and the AWS SDK isn't preinstalled, so bundle it with your code. In a
 browser the package must be a single ES module, since CommonJS and relative imports don't
-load there. Asynchronous events are delivered once, with no retries or dead-letter queues,
+load there, though imports from a full URL such as jsDelivr do. Asynchronous events are delivered once, with no retries or dead-letter queues,
 and SQS event source mappings don't poll yet.
 
 ## The `aws` CLI
 
-`awsCli` runs commands written the same way as for the real AWS CLI, so you can paste them
-from AWS's documentation. It returns the output instead of printing it, so you can show it
-in a page or check it in a test.
+`awsCli` runs `aws` commands, so you can put an AWS console in your own page, where people
+paste commands from AWS's documentation. It returns the output instead of printing it, so you
+decide where it shows.
 
 ```js
 import { awsCli } from 'pocket-region/cli';
@@ -130,9 +134,10 @@ A browser has nowhere to write, so the browser region has no `save`.
 
 ## A clean region per test
 
-One region can serve a whole test file, reset to empty before each test. A reset takes under
-a millisecond for a typical test and about 3 ms with 20 resources, while booting a region
-takes 300-500 ms.
+One region can serve a whole test file, reset to empty before each test. `reset` calls
+ministack's own reset, so every service comes back empty, not only the tested ones. A reset takes under
+a millisecond for a typical test and about 3.5 ms with 20 resources, while booting a region
+takes 350-500 ms.
 
 ```js
 let region;
@@ -179,7 +184,7 @@ the loops that drive them never start.
 ## How it works
 
 [ministack](https://pypi.org/project/ministack/), a Python AWS emulator, runs under
-[Pyodide](https://pyodide.org). Python can't open a socket under Pyodide, so JavaScript takes
+[Pyodide](https://github.com/pyodide/pyodide). Python can't open a socket under Pyodide, so JavaScript takes
 each request and passes it to the emulator directly. That call is `dispatch`. The SDK adapter
 is built on it, which is why no server is needed.
 
@@ -193,6 +198,12 @@ const response = await region.dispatch({
 
 Anything that speaks the AWS wire protocol works with it, and a service could later be
 rewritten without changing how you call it.
+
+Lambda crosses the boundary the other way. ministack keeps the functions and answers the
+Lambda API, and when something invokes a function, the invocation comes back out to
+JavaScript. Pocket Region runs the handler in a child process or a Web Worker, enforces its
+timeout and concurrency, and hands the result back to ministack, while the handler's own SDK
+calls go through `dispatch` like any other request.
 
 `requestHandler`, `awsCli` and `serve` only ever call `dispatch`, so any object with a
 `dispatch` method works in place of a region. Wrap one to refuse, log or count requests before

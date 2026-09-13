@@ -1,0 +1,78 @@
+/* Global: shared by the demo's sections, and matching elements its script builds, which scoped
+   styles never reach */
+
+.function h2 {
+  font-size: 1.125rem;
+  margin: 0 0 0.25rem;
+}
+
+.function .lede {
+  margin-bottom: 0;
+}
+
+.function .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+#log .typed {
+  font-weight: 600;
+}
+
+#log .failed {
+  color: color-mix(in srgb, red 65%, currentColor);
+}
+
+.examples {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem;
+  margin-top: 1rem;
+}
+
+.examples button {
+  font-family: ui-monospace, monospace;
+  font-size: 0.8125rem;
+  padding: 0.25rem 0.6rem;
+}
+
+#examples {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.5rem 0.75rem;
+}
+
+#examples .examples {
+  margin-top: 0;
+}
+
+#examples .service {
+  color: var(--faint);
+  font-size: 0.8125rem;
+  padding-top: 0.3rem;
+}
+
+#status:empty {
+  display: none;
+}
+
+/* The page is exactly one screen */
+@media (min-width: 64rem) {
+  body {
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    padding-bottom: 1rem;
+  }
+
+  .examples button {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}

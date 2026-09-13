@@ -62,7 +62,7 @@
     "pretest": "npm run vendor",
     "test": "npm run embed && vitest run",
     "vendor": "node scripts/vendor.mjs",
-    "demo": "node scripts/serve-demo.mjs"
+    "site": "npm run build && npm --prefix site run dev"
   },
   "dependencies": {
     "pyodide": "314.0.6"

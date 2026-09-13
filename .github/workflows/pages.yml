@@ -1,5 +1,5 @@
-# Publishes demo/index.html to GitHub Pages with the dist/ and vendor/ it needs. Both are
-# gitignored and rebuilt here, so the page always demonstrates the commit it was built from.
+# Publishes the site/ Astro site to GitHub Pages. The library's dist/ and vendor/ are gitignored
+# and rebuilt here, then copied into the site, so it always demonstrates the commit it was built from.
 name: demo
 
 on:
@@ -26,21 +26,21 @@ jobs:
         with:
           node-version: 24
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            site/package-lock.json
       - run: npm ci
       # Needs the network: the wheels come from PyPI and Pyodide's distribution
       - run: npm run vendor
       - run: npm run build
       - run: npm test
-      - name: Assemble the site
-        run: |
-          mkdir -p _site
-          cp demo/index.html _site/
-          cp -r dist vendor _site/
-          # Without this in the artifact, a deploy clears the custom domain in repo settings
-          echo pocket-region.dev > _site/CNAME
+      - run: npm ci --prefix site
+      - run: npm run check --prefix site
+      # site/public/CNAME is in the artifact; without it, a deploy clears the custom domain
+      - run: npm run build --prefix site
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: _site
+          path: site/dist
 
   deploy:
     needs: build

@@ -1,0 +1,83 @@
+<div class="console">
+  <div class="terminal">
+    <pre id="log"><code>booting: fetching the runtime from jsDelivr and the wheels from /region/vendor…
+</code></pre>
+    <form id="prompt">
+      <span>$ aws</span>
+      <input id="command" autocomplete="off" spellcheck="false" placeholder="s3 ls" disabled />
+    </form>
+  </div>
+  <p class="note">
+    This terminal is built on <a href="https://github.com/ThailerL/pocket-region#the-aws-cli"><code>pocket-region/cli</code></a>. Use it to put an AWS console in your own page.
+  </p>
+</div>
+
+<style>
+  .terminal {
+    border: 1px solid var(--line);
+    border-radius: 0.5rem;
+    overflow: hidden;
+  }
+
+  #log {
+    margin: 0;
+    padding: 1rem;
+    min-height: 16rem;
+    max-height: 28rem;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    font-family: ui-monospace, monospace;
+    font-size: 0.875rem;
+  }
+
+  form {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 1rem;
+    border-top: 1px solid var(--line);
+    font-family: ui-monospace, monospace;
+  }
+
+  span {
+    color: var(--faint);
+  }
+
+  input {
+    flex: 1;
+    font: inherit;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    outline: none;
+  }
+
+  .note {
+    margin: 0.4rem 0 0;
+    color: var(--faint);
+    font-size: 0.8125rem;
+  }
+
+  @media (min-width: 64rem) {
+    .console {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      /* Its output never sizes the row; the example commands and the screen do */
+      contain: size;
+    }
+
+    .terminal {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    #log {
+      flex: 1;
+      min-height: 0;
+      max-height: none;
+    }
+  }
+</style>

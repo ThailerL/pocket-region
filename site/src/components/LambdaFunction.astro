@@ -1,0 +1,29 @@
+---
+import helloHandler from '../demo/handlers/hello.mjs?raw';
+---
+
+<section class="function">
+  <h2>A Lambda function</h2>
+  <p class="lede">Deploy this handler, then invoke it. It runs in a Web Worker.</p>
+  <textarea id="handler" rows="7" spellcheck="false">{helloHandler.trimEnd()}</textarea>
+  <div class="actions">
+    <button id="deploy" disabled>Deploy as hello</button>
+    <button id="invoke" disabled>Invoke hello</button>
+  </div>
+</section>
+
+<style>
+  textarea {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    margin: 0.6rem 0 0.5rem;
+    padding: 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: 0.5rem;
+    background: transparent;
+    color: inherit;
+    font: 0.875rem/1.5 ui-monospace, monospace;
+    resize: vertical;
+  }
+</style>
