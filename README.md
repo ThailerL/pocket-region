@@ -131,8 +131,8 @@ the Node entry.
 ## Lambda
 
 Functions are created from a zipped deployment package and invoked the same way as on AWS.
-Each concurrent invocation runs the handler in its own Node child process, which stays warm until
-it has been idle for a minute.
+Each concurrent invocation runs the handler in its own execution environment, a Node child
+process or, in a browser, a Web Worker, which stays warm until it has been idle for a minute.
 
 ```js
 import { createRegion, requestHandler } from 'pocket-region';
@@ -157,10 +157,16 @@ yourself, that server is used instead. `Timeout`,
 `ReservedConcurrentExecutions`, `Environment`, `InvocationType: 'Event'` and `LogType: 'Tail'`
 work as they do on Lambda. A handler that throws comes back with `FunctionError: 'Unhandled'`.
 
-Only Node runtimes work, and only when the region runs in Node, because a browser can't start
-processes. The AWS SDK isn't preinstalled the way it is on Lambda, so bundle it into your code
-or include `node_modules` in the zip. S3 notifications, SNS and EventBridge deliver each event
-once, with no retries or dead-letter queues yet. SQS event source mappings don't poll.
+Only Node runtimes work. The AWS SDK isn't preinstalled the way it is on Lambda, so bundle it
+into your code or include `node_modules` in the zip. S3 notifications, SNS and EventBridge
+deliver each event once, with no retries or dead-letter queues yet. SQS event source mappings
+don't poll.
+
+In a browser, the handler runs in a Web Worker with `process.env` set as above, and a `fetch`
+to `AWS_ENDPOINT_URL` (or to a queue URL, which names the same origin) is answered in the page
+without any network. That is what a bundled SDK client does, so it works unchanged. The
+package has to be one ES module, since a worker loaded from memory can't resolve imports of
+its neighbours, and CommonJS handlers don't load there.
 
 ## What works
 
@@ -169,7 +175,7 @@ once, with no retries or dead-letter queues yet. SQS event source mappings don't
 | S3 | Tested, including bucket notifications into SQS |
 | SQS | Tested |
 | DynamoDB | Tested |
-| Lambda | Tested with Node functions, synchronous and `Event` invokes, when the region runs in Node |
+| Lambda | Tested with Node functions, synchronous and `Event` invokes, in Node and in a page |
 | The rest of [ministack](https://pypi.org/project/ministack/)'s services | Untested. They may respond, but nothing here checks them |
 
 Scheduled EventBridge rules and the DynamoDB TTL reaper never run. Pyodide has no threads, so

@@ -4,6 +4,7 @@ import {
   type RegionSettings,
   type VendorManifest,
 } from './core.ts';
+import { createWorkerHost } from './lambda/worker-host.ts';
 
 export type { OutputStream, Region, RegionRequest, RegionResponse } from './core.ts';
 
@@ -27,6 +28,7 @@ export async function createRegion(options: BrowserRegionOptions): Promise<PageR
     throw new Error(`no region assets at ${base.href} (meta.json answered ${response.status})`);
   }
   const manifest: VendorManifest = await response.json();
+  const { onOutput } = options;
 
   return bootRegion(
     {
@@ -36,5 +38,7 @@ export async function createRegion(options: BrowserRegionOptions): Promise<PageR
       wheels: manifest.wheels.map((file) => new URL(file, base).href),
     },
     options,
+    undefined,
+    (region) => createWorkerHost({ ...region, onOutput: onOutput && ((line) => onOutput(line, 'stdout')) }),
   );
 }

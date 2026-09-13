@@ -19,8 +19,7 @@ export type SandboxEvents = {
   ready(): void;
   responded(requestId: string, result: string): void;
   failed(requestId: string, error: LambdaError): void;
-  // The environment is gone, with the runtime's own init error when it reported one. Never
-  // called synchronously from inside kill(), so the pool's own bookkeeping is done first
+  // The environment is gone, with the runtime's own init error when it reported one
   exited(reason: string, initError?: LambdaError): void;
   output(line: string): void;
 };

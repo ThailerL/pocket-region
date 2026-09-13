@@ -82,12 +82,15 @@ export type InvocationOutcome = {
   log: string;
 };
 
-// Supplied by an entry point that can run function code: node.ts, not browser.ts yet
+// Supplied by the entry point: child processes in Node, workers in a page
 export type LambdaExecutor = {
   needsCode(codeSha256: string): boolean;
   execute(invocation: Invocation): Promise<InvocationOutcome>;
   stop(): Promise<void>;
 };
+
+// Built during boot, around the dispatch a handler's own calls come back through
+export type LambdaHostFactory = (region: Pick<Region, 'port' | 'dispatch'>) => LambdaExecutor;
 
 // What scripts/vendor.mjs writes beside the wheels
 export type VendorManifest = { wheels: string[]; stdlib: string; pyodideVersion: string };
@@ -112,7 +115,7 @@ export async function bootRegion(
   assets: RegionAssets,
   settings: RegionSettings,
   persistence?: RegionPersistence,
-  lambda?: LambdaExecutor,
+  lambda?: LambdaHostFactory,
 ): Promise<Region> {
   const onOutput = settings.onOutput ?? (() => {});
 
@@ -131,19 +134,8 @@ export async function bootRegion(
   });
 
   const port = settings.port ?? DEFAULT_PORT;
-  py.globals.set('STATE_ROOT', STATE_ROOT);
-  py.globals.set('REGION_PORT', port);
-  py.globals.set('LAMBDA_EXECUTOR', lambda ?? null);
-  await persistence?.restore(py, STATE_ROOT);
-  // One shared namespace, in the generated order
-  for (const source of PYTHON_SOURCES) {
-    await py.runPythonAsync(source);
-  }
-  const lifespan: (phase: 'startup' | 'shutdown') => Promise<void> = py.globals.get('lifespan');
-  await lifespan('startup');
-  const dispatchPython: PythonDispatch = py.globals.get('region_dispatch');
-  const savePython: () => void = py.globals.get('region_save');
-
+  // Bound once the sources have run; nothing dispatches before boot resolves
+  let dispatchPython: PythonDispatch;
   const dispatch: Region['dispatch'] = ({ method, path, headers, body = new Uint8Array() }) =>
     dispatchPython(
       method,
@@ -152,6 +144,20 @@ export async function bootRegion(
       // A plain view: Pyodide's to_bytes rejects Buffer and other subclasses
       new Uint8Array(body.buffer, body.byteOffset, body.byteLength),
     );
+  const executor = lambda?.({ port, dispatch });
+
+  py.globals.set('STATE_ROOT', STATE_ROOT);
+  py.globals.set('REGION_PORT', port);
+  py.globals.set('LAMBDA_EXECUTOR', executor ?? null);
+  await persistence?.restore(py, STATE_ROOT);
+  // One shared namespace, in the generated order
+  for (const source of PYTHON_SOURCES) {
+    await py.runPythonAsync(source);
+  }
+  const lifespan: (phase: 'startup' | 'shutdown') => Promise<void> = py.globals.get('lifespan');
+  await lifespan('startup');
+  dispatchPython = py.globals.get('region_dispatch');
+  const savePython: () => void = py.globals.get('region_save');
 
   return {
     port,
@@ -175,7 +181,7 @@ export async function bootRegion(
       // Lifespan shutdown writes the state files; the mirror follows
       await lifespan('shutdown');
       await persistence?.mirror(py, STATE_ROOT);
-      await lambda?.stop();
+      await executor?.stop();
     },
   };
 }

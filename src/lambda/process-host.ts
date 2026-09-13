@@ -4,21 +4,14 @@ import http from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { buffer } from 'node:stream/consumers';
-import type { CodeEntry, Dispatcher, Invocation, LambdaExecutor } from '../core.ts';
+import type { CodeEntry, Invocation, LambdaExecutor } from '../core.ts';
 import { serve, type RegionServer } from '../server.ts';
-import { createLambdaHost } from './host.ts';
+import { createLambdaHost, type RegionHostOptions } from './host.ts';
 import { parseError, type LambdaError, type SandboxFactory } from './pool.ts';
 import { PROCESS_RUNTIME_SOURCE } from './process-runtime.generated.ts';
 
 const RUNTIME_API_PREFIX = '/2018-06-01/runtime/';
 const EMPTY = Buffer.alloc(0);
-
-export type ProcessHostOptions = {
-  // The region's own port: queue URLs name it, and a handler's SDK follows them
-  port: number;
-  dispatch: Dispatcher['dispatch'];
-  onOutput?: (line: string) => void;
-};
 
 type Package = { taskRoot: string; runtimeScript: string };
 
@@ -155,8 +148,8 @@ const respondJson = (res: http.ServerResponse, status: number, value: unknown) =
 
 // Packages are unpacked into a temp directory by code hash, the runtime beside them. The
 // region is served on its port from the first environment on, since a handler's SDK calls
-// arrive from another process
-export function createProcessHost({ port, dispatch, onOutput }: ProcessHostOptions): LambdaExecutor {
+// arrive from another process, and queue URLs name that port
+export function createProcessHost({ port, dispatch, onOutput }: RegionHostOptions): LambdaExecutor {
   let root: Promise<string> | undefined;
   let served: Promise<RegionServer | undefined> | undefined;
 

@@ -1,5 +1,12 @@
-import type { CodeEntry, LambdaExecutor } from '../core.ts';
+import type { CodeEntry, Dispatcher, LambdaExecutor } from '../core.ts';
 import { failure, FunctionPool, type SandboxFactory } from './pool.ts';
+
+// What either host takes: the region it runs beside, and where its handlers' output goes
+export type RegionHostOptions = {
+  port: number;
+  dispatch: Dispatcher['dispatch'];
+  onOutput?: (line: string) => void;
+};
 
 // What a host adds to the pool: where a package goes and how an environment runs it
 export type HostPackaging<Package> = {

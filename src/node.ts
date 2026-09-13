@@ -4,7 +4,6 @@ import { fileURLToPath } from 'node:url';
 import type { PyodideAPI } from 'pyodide';
 import {
   bootRegion,
-  DEFAULT_PORT,
   type Region,
   type RegionSettings,
   type VendorManifest,
@@ -58,30 +57,22 @@ function mirrorToDisk(py: PyodideAPI, stateRoot: string, stateDir: string) {
   }
 }
 
-export async function createRegion(options: NodeRegionOptions = {}): Promise<Region> {
+export function createRegion(options: NodeRegionOptions = {}): Promise<Region> {
   const packageCacheDir =
     options.packageCacheDir ?? fileURLToPath(new URL('../vendor', import.meta.url));
   const manifest: VendorManifest = JSON.parse(
     fs.readFileSync(path.join(packageCacheDir, 'meta.json'), 'utf8'),
   );
   const { stateDir, onOutput } = options;
-  const port = options.port ?? DEFAULT_PORT;
-  // Nothing is invoked before boot resolves, so the region is there by the first dispatch
-  let region: Region;
-  const lambda = createProcessHost({
-    port,
-    dispatch: (request) => region.dispatch(request),
-    onOutput: onOutput && ((line) => onOutput(line, 'stdout')),
-  });
 
-  region = await bootRegion(
+  return bootRegion(
     {
       indexURL: options.indexURL,
       packageCacheDir,
       stdLib: path.join(packageCacheDir, manifest.stdlib),
       wheels: manifest.wheels.map((file) => path.join(packageCacheDir, file)),
     },
-    { ...options, port },
+    options,
     stateDir === undefined
       ? undefined
       : {
@@ -93,7 +84,6 @@ export async function createRegion(options: NodeRegionOptions = {}): Promise<Reg
             mirrorToDisk(py, stateRoot, stateDir);
           },
         },
-    lambda,
+    (region) => createProcessHost({ ...region, onOutput: onOutput && ((line) => onOutput(line, 'stdout')) }),
   );
-  return region;
 }

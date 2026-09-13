@@ -11,10 +11,11 @@ import {
 } from '@aws-sdk/client-lambda';
 import { HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createRegion, type Region } from '../node.ts';
+import { createRegion as createPageRegion, type PageRegion } from '../browser.ts';
+import { createRegion } from '../node.ts';
 import { requestHandler } from '../request-handler.ts';
 import { serve } from '../server.ts';
-import { authorization, clientConfig, freePort } from '../test-support.ts';
+import { authorization, clientConfig, freePort, installWorkerShim, serveVendor } from '../test-support.ts';
 
 const decoder = new TextDecoder();
 
@@ -63,23 +64,23 @@ export const handler = async (event, context) => {
 };
 `;
 
-let region: Region;
-let port: number;
+let region: PageRegion;
+let vendor: Awaited<ReturnType<typeof serveVendor>> | undefined;
 let lambda: LambdaClient;
 let s3: S3Client;
 
-beforeAll(async () => {
-  port = await freePort();
-  region = await createRegion({ port });
-  const config = clientConfig({ requestHandler: requestHandler(region) });
-  // One attempt, so a throttle is seen rather than retried until it clears
-  lambda = new LambdaClient({ ...config, maxAttempts: 1 });
-  s3 = new S3Client({ ...config, forcePathStyle: true });
-}, 30_000);
-
-afterAll(async () => {
-  await region?.stop();
-});
+// The same handler, unbundled, runs on both hosts: fetch and process.env are all it needs
+const HOSTS: [string, () => Promise<PageRegion>][] = [
+  ['in Node', async () => createRegion({ port: await freePort() })],
+  [
+    'in a page',
+    async () => {
+      installWorkerShim();
+      vendor = await serveVendor();
+      return createPageRegion(vendor);
+    },
+  ],
+];
 
 const createFunction = (FunctionName: string, extra: object = {}, code = HANDLER, client = lambda) =>
   client.send(
@@ -105,7 +106,20 @@ async function invoke(FunctionName: string, event: object, extra: object = {}, c
   };
 }
 
-describe('Lambda', () => {
+describe.each(HOSTS)('Lambda %s', (_, boot) => {
+  beforeAll(async () => {
+    region = await boot();
+    const config = clientConfig({ requestHandler: requestHandler(region) });
+    // One attempt, so a throttle is seen rather than retried until it clears
+    lambda = new LambdaClient({ ...config, maxAttempts: 1 });
+    s3 = new S3Client({ ...config, forcePathStyle: true });
+  }, 60_000);
+
+  afterAll(async () => {
+    await region?.stop();
+    vendor?.close();
+  });
+
   it('runs a function created with the SDK, warm on the second call', async () => {
     await createFunction('echo');
     const first = await invoke('echo', { hello: 'world' });
@@ -123,17 +137,6 @@ describe('Lambda', () => {
     expect((await invoke('echo', { bucket: 'made-by-lambda' })).payload).toEqual({ created: 200 });
     await expect(s3.send(new HeadBucketCommand({ Bucket: 'made-by-lambda' }))).resolves.toBeDefined();
   });
-
-  // The host serves the region itself, but a caller may already have
-  it('shares the port with a server the caller started', async () => {
-    const shared = await createRegion({ port: await freePort() });
-    const server = await serve(shared);
-    const own = new LambdaClient(clientConfig({ requestHandler: requestHandler(shared) }));
-    await createFunction('echo', {}, HANDLER, own);
-    expect((await invoke('echo', { bucket: 'shared' }, {}, own)).payload).toEqual({ created: 200 });
-    await shared.stop();
-    await server.close();
-  }, 30_000);
 
   it('reports a thrown handler as an unhandled function error', async () => {
     const thrown = await invoke('echo', { throw: true });
@@ -189,6 +192,19 @@ describe('Lambda', () => {
     expect(failed.error).toBe('Unhandled');
     expect(failed.payload.errorMessage).toContain('does not export a function named "handler"');
   });
+});
+
+describe('Lambda in Node', () => {
+  // The host serves the region itself, but a caller may already have
+  it('shares the port with a server the caller started', async () => {
+    const shared = await createRegion({ port: await freePort() });
+    const server = await serve(shared);
+    const own = new LambdaClient(clientConfig({ requestHandler: requestHandler(shared) }));
+    await createFunction('echo', {}, HANDLER, own);
+    expect((await invoke('echo', { bucket: 'shared' }, {}, own)).payload).toEqual({ created: 200 });
+    await shared.stop();
+    await server.close();
+  }, 30_000);
 
   // In a process of its own, where nothing but the region can keep Node running
   async function runAlone(code: string, expected: string) {
