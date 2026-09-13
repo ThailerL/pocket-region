@@ -23,9 +23,6 @@ _TICKED = {
     "ministack.services.dynamodb._ttl_reaper",
 }
 JSPI = hasattr(WebAssembly, "Suspending")
-# Its passes block on handlers, which only JSPI lets a synchronous caller do
-if JSPI and LAMBDA_EXECUTOR is not None:
-    _TICKED.add("ministack.services.lambda_svc._poll_loop")
 _ticked = []
 
 _real_sleep = time.sleep

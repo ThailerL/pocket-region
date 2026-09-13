@@ -103,8 +103,8 @@ def _patch_lambda(lambda_svc):
     if not JSPI:
         lambda_svc._create_esm = lambda data: lambda_svc.error_response_json(
             "InvalidParameterValueException",
-            "Event source mappings need WebAssembly JSPI: use Node 25 or later, Node 24 started with "
-            "--experimental-wasm-jspi, or a browser that has it",
+            "Event source mappings need WebAssembly JSPI: use Node 24.20 or later, an earlier Node 24 "
+            "started with --experimental-wasm-jspi, or a browser that has it",
             400,
         )
 
@@ -127,6 +127,9 @@ class _PatchOnImport(importlib.abc.MetaPathFinder):
 
 
 if LAMBDA_EXECUTOR is not None:
+    # Its passes block on handlers, which only JSPI lets a synchronous caller do
+    if JSPI:
+        _TICKED.add("ministack.services.lambda_svc._poll_loop")
     if _LAMBDA_MODULE in sys.modules:
         _patch_lambda(sys.modules[_LAMBDA_MODULE])
     else:

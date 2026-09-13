@@ -83,7 +83,7 @@ load there, though imports from a full URL such as jsDelivr do. Asynchronous eve
 
 SQS event source mappings hand a function batches from a queue, delete a batch once the function
 succeeds, and leave a failed batch on the queue. They need JSPI, WebAssembly's promise
-integration, so they work in Node 25 or later, in Node 24 started with
+integration, so they work in Node 24.20 or later, in earlier Node 24 releases started with
 `--experimental-wasm-jspi`, and in browsers that have it, such as Chrome. Anywhere else,
 `CreateEventSourceMapping` fails with an error that says so.
 
