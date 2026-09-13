@@ -1,12 +1,13 @@
 import {
   bootRegion,
+  hostObserver,
   type Region,
   type RegionSettings,
   type VendorManifest,
 } from './core.ts';
 import { createWorkerHost } from './lambda/worker-host.ts';
 
-export type { OutputStream, Region, RegionRequest, RegionResponse } from './core.ts';
+export type { LambdaEvent, LambdaObserver, OutputStream, Region, RegionRequest, RegionResponse } from './core.ts';
 
 // A page has nowhere to save to, so it is not offered: IndexedDB is its own decision
 export type PageRegion = Omit<Region, 'save'>;
@@ -28,7 +29,6 @@ export async function createRegion(options: BrowserRegionOptions): Promise<PageR
     throw new Error(`no region assets at ${base.href} (meta.json answered ${response.status})`);
   }
   const manifest: VendorManifest = await response.json();
-  const { onOutput } = options;
 
   return bootRegion(
     {
@@ -39,6 +39,6 @@ export async function createRegion(options: BrowserRegionOptions): Promise<PageR
     },
     options,
     undefined,
-    (region) => createWorkerHost({ ...region, onOutput: onOutput && ((line) => onOutput(line, 'stdout')) }),
+    (region) => createWorkerHost({ ...region, lambda: hostObserver(options) }),
   );
 }

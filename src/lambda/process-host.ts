@@ -149,7 +149,7 @@ const respondJson = (res: http.ServerResponse, status: number, value: unknown) =
 // Packages are unpacked into a temp directory by code hash, the runtime beside them. The
 // region is served on its port from the first environment on, since a handler's SDK calls
 // arrive from another process, and queue URLs name that port
-export function createProcessHost({ port, dispatch, onOutput }: RegionHostOptions): LambdaExecutor {
+export function createProcessHost({ port, dispatch, lambda }: RegionHostOptions): LambdaExecutor {
   let root: Promise<string> | undefined;
   let served: Promise<RegionServer | undefined> | undefined;
 
@@ -195,6 +195,6 @@ export function createProcessHost({ port, dispatch, onOutput }: RegionHostOption
         if (root) await rm(await root, { recursive: true, force: true });
       },
     },
-    { endpoint: `http://127.0.0.1:${port}`, onOutput },
+    { endpoint: `http://127.0.0.1:${port}`, lambda },
   );
 }

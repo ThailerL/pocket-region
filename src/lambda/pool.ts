@@ -1,7 +1,12 @@
-import { unref, type FunctionConfig, type Invocation, type InvocationOutcome } from '../core.ts';
+import {
+  unref,
+  type FunctionConfig,
+  type Invocation,
+  type InvocationOutcome,
+  type LambdaEvent,
+  type LambdaObserver,
+} from '../core.ts';
 
-// ministack's account cap is bypassed, so this is the only bound on environments
-const DEFAULT_CONCURRENCY = 10;
 const IDLE_MS = 60_000;
 const INIT_TIMEOUT_MS = 30_000;
 
@@ -30,7 +35,7 @@ export type PoolSettings = {
   spawn: SandboxFactory;
   // What a handler's AWS_ENDPOINT_URL names
   endpoint: string;
-  onOutput?: (line: string) => void;
+  lambda: LambdaObserver;
 };
 
 type Pending = {
@@ -41,15 +46,23 @@ type Pending = {
 type Running = Pending & {
   environment: Environment;
   timer: ReturnType<typeof setTimeout>;
+  // The environment's init output, then the invocation's own
+  init: string[];
   log: string[];
+  startedAt: number;
+  // Only on an environment's first invocation
+  initMs?: number;
 };
 
 type Environment = {
   id: string;
+  functionName: string;
   sandbox: Sandbox;
   state: 'starting' | 'idle' | 'busy';
   running?: Running;
-  // Init output, handed to the first invocation
+  spawnedAt: number;
+  // Set when the runtime first asks for work, and handed to the first invocation with log
+  initMs?: number;
   log: string[];
   idleTimer?: ReturnType<typeof setTimeout>;
   initTimer: ReturnType<typeof setTimeout>;
@@ -57,11 +70,16 @@ type Environment = {
   onExit?: () => void;
 };
 
-export const failure = (error: LambdaError, log = ''): InvocationOutcome => ({
+export const failure = (error: LambdaError, log = '', output = log): InvocationOutcome => ({
   status: 'error',
   payload: JSON.stringify(error),
   log,
+  output,
 });
+
+const startLine = ({ requestId, config }: Invocation) => `START RequestId: ${requestId} Version: ${config.Version}`;
+
+const REGION_STOPPED =failure({ errorType: 'Runtime.ExitError', errorMessage: 'The region stopped' });
 
 // The runtime's error payload; anything else is a runtime that died mid-sentence
 export function parseError(text: string): LambdaError {
@@ -95,7 +113,7 @@ export class FunctionPool {
   private readonly inFlight = new Map<string, Running>();
   private stopped = false;
   // PutFunctionConcurrency can change it between invocations
-  private cap = DEFAULT_CONCURRENCY;
+  private cap = 0;
   private readonly settings: PoolSettings;
 
   // An explicit field: parameter properties are not erasable syntax, and plain Node runs this
@@ -107,16 +125,20 @@ export class FunctionPool {
     return [...this.environments.values()].filter((env) => env.state === state).length;
   }
 
+  // An environment whose invocation has finished is free before its runtime asks for the next
   private capacity() {
-    const coming = this.environments.size - this.count('busy');
-    return coming + this.cap - this.environments.size - this.pending.length;
+    return this.cap - this.inFlight.size - this.pending.length;
   }
 
   // Lambda throttles past the cap rather than queueing
   invoke(invocation: Invocation): Promise<InvocationOutcome> {
     return new Promise((resolve) => {
-      this.cap = invocation.reservedConcurrency ?? DEFAULT_CONCURRENCY;
-      if (this.stopped || this.capacity() < 1) return resolve({ status: 'throttled', payload: null, log: '' });
+      if (this.stopped) return resolve(REGION_STOPPED);
+      this.cap = invocation.concurrency;
+      if (this.capacity() < 1) {
+        this.emit({ kind: 'throttled', functionName: invocation.config.FunctionName });
+        return resolve({ status: 'throttled', payload: null, log: '', output: '' });
+      }
       this.pending.push({ invocation, resolve });
       this.dispatch();
     });
@@ -140,8 +162,10 @@ export class FunctionPool {
     // Every event arrives after env is assigned
     const env: Environment = {
       id,
+      functionName: config.FunctionName,
       state: 'starting',
       log: [],
+      spawnedAt: performance.now(),
       initTimer: unref(setTimeout(() => this.reap(env, 'never asked for work'), INIT_TIMEOUT_MS)),
       sandbox: this.settings.spawn(environmentVariables(config, id, this.settings.endpoint), {
         ready: () => this.ready(env),
@@ -152,6 +176,15 @@ export class FunctionPool {
       }),
     };
     this.environments.set(id, env);
+    this.emit({ kind: 'environment', functionName: env.functionName, environment: id, phase: 'started' });
+  }
+
+  private emit(event: LambdaEvent) {
+    this.settings.lambda.onEvent?.(event);
+  }
+
+  private tell(env: Environment, line: string) {
+    this.settings.lambda.onOutput?.(line, { functionName: env.functionName, environment: env.id });
   }
 
   private owned(env: Environment, requestId: string) {
@@ -161,6 +194,7 @@ export class FunctionPool {
 
   private ready(env: Environment) {
     clearTimeout(env.initTimer);
+    if (env.state === 'starting') env.initMs = performance.now() - env.spawnedAt;
     env.state = 'idle';
     env.idleTimer = unref(setTimeout(() => this.reap(env, `idle for ${IDLE_MS / 1000} s`), IDLE_MS));
     this.dispatch();
@@ -168,13 +202,14 @@ export class FunctionPool {
 
   private output(env: Environment, line: string) {
     (env.running?.log ?? env.log).push(line);
-    this.settings.onOutput?.(line);
+    this.tell(env, line);
   }
 
   private exited(env: Environment, reason: string, initError?: LambdaError) {
     clearTimeout(env.initTimer);
     clearTimeout(env.idleTimer);
     if (!this.environments.delete(env.id)) return;
+    this.emit({ kind: 'environment', functionName: env.functionName, environment: env.id, phase: 'stopped', reason });
     if (env.state === 'starting') {
       this.failStartup(
         env,
@@ -200,7 +235,7 @@ export class FunctionPool {
 
   private reap(env: Environment, reason: string) {
     if (!this.environments.has(env.id)) return;
-    this.settings.onOutput?.(`Stopping execution environment ${env.id}: ${reason}`);
+    this.tell(env, `Stopping execution environment ${env.id}: ${reason}`);
     env.sandbox.kill();
   }
 
@@ -213,10 +248,24 @@ export class FunctionPool {
       resolve,
       environment: env,
       timer: unref(setTimeout(() => this.timeOut(running), budget)),
-      log: env.log.splice(0),
+      init: env.log.splice(0),
+      log: [],
+      startedAt: performance.now(),
+      initMs: env.initMs,
     };
+    env.initMs = undefined;
     env.running = running;
     this.inFlight.set(invocation.requestId, running);
+    this.emit({
+      kind: 'invocation',
+      functionName: env.functionName,
+      environment: env.id,
+      requestId: invocation.requestId,
+      phase: 'started',
+      event: invocation.event,
+      coldStart: running.initMs !== undefined,
+    });
+    this.tell(env, startLine(invocation));
     env.sandbox.invoke(invocation, Date.now() + budget);
   }
 
@@ -233,16 +282,39 @@ export class FunctionPool {
   private complete(running: Running | undefined, error?: LambdaError, result?: string) {
     if (!running || !this.inFlight.delete(running.invocation.requestId)) return;
     clearTimeout(running.timer);
-    running.environment.running = undefined;
-    const log = running.log.join('\n');
-    running.resolve(error ? failure(error, log) : { status: 'ok', payload: result ?? null, log });
+    const env = running.environment;
+    const { invocation, initMs, init, log } = running;
+    const { requestId, config } = invocation;
+    const durationMs = performance.now() - running.startedAt;
+    const report = [
+      `REPORT RequestId: ${requestId}`,
+      `Duration: ${durationMs.toFixed(2)} ms`,
+      `Billed Duration: ${Math.ceil(durationMs)} ms`,
+      `Memory Size: ${config.MemorySize} MB`,
+      ...(initMs === undefined ? [] : [`Init Duration: ${initMs.toFixed(2)} ms`]),
+    ].join('\t');
+    const end = `END RequestId: ${requestId}`;
+    this.tell(env, end);
+    this.tell(env, report);
+    env.running = undefined;
+    this.emit({
+      kind: 'invocation',
+      functionName: env.functionName,
+      environment: env.id,
+      requestId,
+      phase: 'completed',
+      durationMs,
+      initMs,
+      failed: error !== undefined,
+    });
+    const output = [...init, ...log].join('\n');
+    const framed = [...init, startLine(invocation), ...log, end, report].join('\n');
+    running.resolve(error ? failure(error, framed, output) : { status: 'ok', payload: result ?? null, log: framed, output });
   }
 
   async stop() {
     this.stopped = true;
-    for (const { resolve } of this.pending.splice(0)) {
-      resolve(failure({ errorType: 'Runtime.ExitError', errorMessage: 'The region stopped' }));
-    }
+    for (const { resolve } of this.pending.splice(0)) resolve(REGION_STOPPED);
     const exits = [...this.environments.values()].map(
       (env) =>
         new Promise<void>((done) => {

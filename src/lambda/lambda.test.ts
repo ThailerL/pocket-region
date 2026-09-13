@@ -10,6 +10,7 @@ import {
   PutFunctionConcurrencyCommand,
   ResourceNotFoundException,
   TooManyRequestsException,
+  UpdateFunctionConfigurationCommand,
 } from '@aws-sdk/client-lambda';
 import { HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
 import {
@@ -20,7 +21,7 @@ import {
 } from '@aws-sdk/client-sqs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createRegion as createPageRegion, type PageRegion } from '../browser.ts';
-import { createRegion } from '../node.ts';
+import { createRegion, type LambdaEvent, type LambdaObserver } from '../node.ts';
 import { requestHandler } from '../request-handler.ts';
 import { serve } from '../server.ts';
 import { authorization, clientConfig, freePort, installWorkerShim, serveVendor } from '../test-support.ts';
@@ -89,15 +90,23 @@ let lambda: LambdaClient;
 let s3: S3Client;
 let sqs: SQSClient;
 
+let observed: LambdaEvent[] = [];
+let tagged: { line: string; functionName: string; environment: string }[] = [];
+const observer: LambdaObserver = {
+  onEvent: (event) => observed.push(event),
+  onOutput: (line, source) => tagged.push({ line, ...source }),
+};
+const eventsOf = (functionName: string) => observed.filter((event) => event.functionName === functionName);
+
 // The same handler, unbundled, runs on both hosts: fetch and process.env are all it needs
 const HOSTS: [string, () => Promise<PageRegion>][] = [
-  ['in Node', async () => createRegion({ port: await freePort() })],
+  ['in Node', async () => createRegion({ port: await freePort(), lambda: observer })],
   [
     'in a page',
     async () => {
       installWorkerShim();
       vendor = await serveVendor();
-      return createPageRegion(vendor);
+      return createPageRegion({ ...vendor, lambda: observer });
     },
   ],
 ];
@@ -156,6 +165,8 @@ async function messagesLeft(QueueUrl: string) {
 
 describe.each(HOSTS)('Lambda %s', (_, boot) => {
   beforeAll(async () => {
+    observed = [];
+    tagged = [];
     region = await boot();
     const config = clientConfig({ requestHandler: requestHandler(region) });
     // One attempt, so a throttle is seen rather than retried until it clears
@@ -176,6 +187,31 @@ describe.each(HOSTS)('Lambda %s', (_, boot) => {
     expect(first.error).toBeUndefined();
     expect(first.payload).toEqual({ calls: 1, functionName: 'echo', remaining: true, event: { hello: 'world' } });
     expect((await invoke('echo', {})).payload.calls).toBe(2);
+  }, 30_000);
+
+  it('tells an observer about the environment and each invocation, cold then warm', async () => {
+    await createFunction('observed');
+    await invoke('observed', { first: 1 });
+    await invoke('observed', {});
+    const [started, cold, coldDone, warm, warmDone, ...rest] = eventsOf('observed');
+    expect(rest).toEqual([]);
+    expect(started).toEqual({ kind: 'environment', functionName: 'observed', environment: expect.any(String), phase: 'started' });
+    const environment = (started as { environment: string }).environment;
+    expect(cold).toMatchObject({ kind: 'invocation', phase: 'started', environment, event: '{"first": 1}', coldStart: true });
+    expect(coldDone).toMatchObject({ kind: 'invocation', phase: 'completed', environment, failed: false, initMs: expect.any(Number) });
+    expect(warm).toMatchObject({ kind: 'invocation', phase: 'started', environment, coldStart: false });
+    expect(warmDone).toMatchObject({ kind: 'invocation', phase: 'completed', environment, failed: false, initMs: undefined });
+    expect(tagged).toContainEqual({ line: expect.stringContaining('handling {"first":1}'), functionName: 'observed', environment });
+  }, 30_000);
+
+  it('gives a function fresh environments after its configuration changes', async () => {
+    const code = 'export const handler = async () => ({ greeting: process.env.GREETING });';
+    await createFunction('configured', { Environment: { Variables: { GREETING: 'before' } } }, code);
+    expect((await invoke('configured', {})).payload).toEqual({ greeting: 'before' });
+    await lambda.send(
+      new UpdateFunctionConfigurationCommand({ FunctionName: 'configured', Environment: { Variables: { GREETING: 'after' } } }),
+    );
+    expect((await invoke('configured', {})).payload).toEqual({ greeting: 'after' });
   }, 30_000);
 
   it('answers ResourceNotFoundException for an unknown function', async () => {
@@ -199,6 +235,15 @@ describe.each(HOSTS)('Lambda %s', (_, boot) => {
     expect(tailed.log).toContain('handling {"tail":1}');
   });
 
+  it("frames the log with Lambda's START, END, and REPORT lines, Init Duration on the first only", async () => {
+    await createFunction('reported');
+    const cold = (await invoke('reported', {}, { LogType: 'Tail' })).log!;
+    const warm = (await invoke('reported', {}, { LogType: 'Tail' })).log!;
+    expect(cold).toMatch(/^START RequestId: \S+ Version: \$LATEST\n.*\nEND RequestId: \S+\nREPORT RequestId: \S+\tDuration: [\d.]+ ms\t.*\tInit Duration: [\d.]+ ms$/s);
+    expect(warm).toMatch(/\nREPORT RequestId: \S+\tDuration: [\d.]+ ms/);
+    expect(warm).not.toContain('Init Duration');
+  }, 30_000);
+
   it('times out with Lambda’s message, and the next invocation still runs', async () => {
     await createFunction('slow', { Timeout: 1 });
     const late = await invoke('slow', { sleep: 1500 });
@@ -206,6 +251,10 @@ describe.each(HOSTS)('Lambda %s', (_, boot) => {
     expect(late.payload).toEqual({ errorType: 'Sandbox.Timedout', errorMessage: 'Task timed out after 1.00 seconds' });
     // A fresh environment: the timed-out one was not reused
     expect((await invoke('slow', {})).payload.calls).toBe(1);
+    expect(eventsOf('slow')).toContainEqual(expect.objectContaining({ phase: 'completed', failed: true }));
+    await expect
+      .poll(() => eventsOf('slow').filter((event) => event.kind === 'environment' && event.phase === 'stopped'))
+      .toEqual([expect.objectContaining({ reason: expect.any(String) })]);
   }, 30_000);
 
   it('throttles past the reserved concurrency', async () => {
@@ -220,6 +269,7 @@ describe.each(HOSTS)('Lambda %s', (_, boot) => {
     const refused = outcomes.filter((outcome) => outcome.status === 'rejected');
     expect(refused).toHaveLength(1);
     expect(refused[0]!.reason).toBeInstanceOf(TooManyRequestsException);
+    expect(eventsOf('single')).toContainEqual({ kind: 'throttled', functionName: 'single' });
   }, 30_000);
 
   it('accepts an Event invocation before the handler runs it', async () => {
@@ -241,6 +291,34 @@ describe.each(HOSTS)('Lambda %s', (_, boot) => {
     await expect(s3.send(new HeadBucketCommand({ Bucket: 'made-before-failing' }))).resolves.toBeDefined();
     expect(await messagesLeft(ok.QueueUrl)).toBe(0);
     expect(await messagesLeft(failed.QueueUrl)).toBe(1);
+  }, 30_000);
+
+  it('runs mapped batches concurrently, up to the reserved concurrency', async () => {
+    await createFunction('drainer', {}, 'export const handler = () => new Promise((resolve) => setTimeout(resolve, 300));');
+    await lambda.send(new PutFunctionConcurrencyCommand({ FunctionName: 'drainer', ReservedConcurrentExecutions: 5 }));
+    const { QueueUrl } = await sqs.send(new CreateQueueCommand({ QueueName: 'backlog' }));
+    await Promise.all(
+      Array.from({ length: 10 }, (_, index) => sqs.send(new SendMessageCommand({ QueueUrl, MessageBody: String(index) }))),
+    );
+    const { Attributes } = await sqs.send(new GetQueueAttributesCommand({ QueueUrl, AttributeNames: ['QueueArn'] }));
+    await lambda.send(
+      new CreateEventSourceMappingCommand({ FunctionName: 'drainer', EventSourceArn: Attributes!.QueueArn, BatchSize: 1 }),
+    );
+
+    await expect.poll(() => eventsOf('drainer').length, { timeout: 5_000 }).toBeGreaterThan(0);
+    const started = performance.now();
+    await expect.poll(() => messagesLeft(QueueUrl!), { timeout: 10_000, interval: 20 }).toBe(0);
+    expect(performance.now() - started).toBeLessThan(1_500);
+
+    let running = 0;
+    let peak = 0;
+    for (const event of eventsOf('drainer')) {
+      if (event.kind === 'throttled') throw new Error('a mapping batch was throttled');
+      if (event.kind !== 'invocation') continue;
+      running += event.phase === 'started' ? 1 : -1;
+      peak = Math.max(peak, running);
+    }
+    expect(peak).toBe(5);
   }, 30_000);
 
   it('refuses a runtime it cannot run', async () => {
@@ -304,29 +382,44 @@ describe('Lambda in Node', () => {
   }, 40_000);
 
   // A child started without the flag lacks JSPI only on a Node where the flag had to supply it
-  it.runIf(process.execArgv.includes('--experimental-wasm-jspi'))(
-    'refuses an event source mapping without JSPI, saying what provides it',
-    async () => {
-      const module = JSON.stringify(new URL('../node.ts', import.meta.url).href);
-      const script = `
-        import { createRegion } from ${module};
-        const region = await createRegion();
-        const response = await region.dispatch({ method: 'POST', path: '/2015-03-31/event-source-mappings', headers: { host: 'localhost:4566', authorization: ${JSON.stringify(authorization('lambda'))}, 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify({ FunctionName: 'consumer', EventSourceArn: 'arn:aws:sqs:us-east-1:000000000000:orders' })) });
-        console.log(JSON.stringify({ status: response.status, body: new TextDecoder().decode(response.body) }));
-        await region.stop();
-      `;
-      const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
-        stdio: ['ignore', 'pipe', 'inherit'],
-        signal: AbortSignal.timeout(30_000),
-      });
-      let stdout = '';
-      child.stdout.on('data', (chunk) => (stdout += chunk));
-      await once(child, 'exit');
-      const { status, body } = JSON.parse(stdout.trim().split('\n').at(-1)!);
-      expect(status).toBe(400);
-      expect(body).toContain('InvalidParameterValueException');
-      expect(body).toContain('--experimental-wasm-jspi');
-    },
-    40_000,
-  );
+  it.runIf(process.execArgv.includes('--experimental-wasm-jspi'))('runs a mapping without JSPI', async () => {
+    const url = (file: string) => JSON.stringify(new URL(file, import.meta.url).href);
+    const zip = JSON.stringify(zipOf('index.mjs', 'export const handler = async () => {};').toString('base64'));
+    const script = `
+      import { LambdaClient, CreateFunctionCommand, CreateEventSourceMappingCommand } from '@aws-sdk/client-lambda';
+      import { SQSClient, CreateQueueCommand, GetQueueAttributesCommand, SendMessageCommand } from '@aws-sdk/client-sqs';
+      import { createRegion } from ${url('../node.ts')};
+      import { requestHandler } from ${url('../request-handler.ts')};
+      if (typeof WebAssembly.Suspending === 'function') throw new Error('this child has JSPI');
+      const region = await createRegion();
+      const config = { region: 'us-east-1', endpoint: 'http://localhost:4566', credentials: { accessKeyId: 'test', secretAccessKey: 'test' }, requestHandler: requestHandler(region) };
+      const lambda = new LambdaClient(config);
+      const sqs = new SQSClient(config);
+      await lambda.send(new CreateFunctionCommand({ FunctionName: 'consumer', Runtime: 'nodejs22.x', Handler: 'index.handler', Role: 'r', Code: { ZipFile: Buffer.from(${zip}, 'base64') } }));
+      const { QueueUrl } = await sqs.send(new CreateQueueCommand({ QueueName: 'orders' }));
+      await sqs.send(new SendMessageCommand({ QueueUrl, MessageBody: 'one' }));
+      const { Attributes } = await sqs.send(new GetQueueAttributesCommand({ QueueUrl, AttributeNames: ['QueueArn'] }));
+      await lambda.send(new CreateEventSourceMappingCommand({ FunctionName: 'consumer', EventSourceArn: Attributes.QueueArn, BatchSize: 1 }));
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const { Attributes: counts } = await sqs.send(new GetQueueAttributesCommand({ QueueUrl, AttributeNames: ['ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible'] }));
+        if (counts.ApproximateNumberOfMessages === '0' && counts.ApproximateNumberOfMessagesNotVisible === '0') break;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      const { Attributes: left } = await sqs.send(new GetQueueAttributesCommand({ QueueUrl, AttributeNames: ['ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible'] }));
+      console.log(JSON.stringify(left));
+      await region.stop();
+    `;
+    const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
+      stdio: ['ignore', 'pipe', 'inherit'],
+      signal: AbortSignal.timeout(30_000),
+    });
+    let stdout = '';
+    child.stdout.on('data', (chunk) => (stdout += chunk));
+    const [exitCode] = await once(child, 'exit');
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout.trim().split('\n').at(-1)!)).toEqual({
+      ApproximateNumberOfMessages: '0',
+      ApproximateNumberOfMessagesNotVisible: '0',
+    });
+  }, 40_000);
 });

@@ -4,13 +4,14 @@ import { fileURLToPath } from 'node:url';
 import type { PyodideAPI } from 'pyodide';
 import {
   bootRegion,
+  hostObserver,
   type Region,
   type RegionSettings,
   type VendorManifest,
 } from './core.ts';
 import { createProcessHost } from './lambda/process-host.ts';
 
-export type { OutputStream, Region, RegionRequest, RegionResponse } from './core.ts';
+export type { LambdaEvent, LambdaObserver, OutputStream, Region, RegionRequest, RegionResponse } from './core.ts';
 
 export type NodeRegionOptions = RegionSettings & {
   // Only for hosts where Pyodide cannot locate itself from import.meta.url
@@ -63,7 +64,7 @@ export function createRegion(options: NodeRegionOptions = {}): Promise<Region> {
   const manifest: VendorManifest = JSON.parse(
     fs.readFileSync(path.join(packageCacheDir, 'meta.json'), 'utf8'),
   );
-  const { stateDir, onOutput } = options;
+  const { stateDir } = options;
 
   return bootRegion(
     {
@@ -84,6 +85,6 @@ export function createRegion(options: NodeRegionOptions = {}): Promise<Region> {
             mirrorToDisk(py, stateRoot, stateDir);
           },
         },
-    (region) => createProcessHost({ ...region, onOutput: onOutput && ((line) => onOutput(line, 'stdout')) }),
+    (region) => createProcessHost({ ...region, lambda: hostObserver(options) }),
   );
 }

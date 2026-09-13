@@ -91,7 +91,7 @@ function workerSandbox(files: Package, dispatch: RegionHostOptions['dispatch']):
 const initError = (error: Error): LambdaError => ({ errorType: 'Runtime.InitError', errorMessage: error.message });
 
 // Packages stay in memory; each environment gets a copy of its handler file
-export function createWorkerHost({ port, dispatch, onOutput }: RegionHostOptions): LambdaExecutor {
+export function createWorkerHost({ port, dispatch, lambda }: RegionHostOptions): LambdaExecutor {
   return createLambdaHost<Package>(
     {
       pack: async (_codeSha256, entries) => entries,
@@ -99,6 +99,6 @@ export function createWorkerHost({ port, dispatch, onOutput }: RegionHostOptions
       dispose: async () => {},
     },
     // The host ministack mints queue URLs on, so a handler following one is answered too
-    { endpoint: `http://localhost:${port}`, onOutput },
+    { endpoint: `http://localhost:${port}`, lambda },
   );
 }

@@ -7,7 +7,6 @@ import sys
 import threading
 import time
 
-from js import WebAssembly
 from pyodide.ffi import run_sync
 
 
@@ -22,8 +21,9 @@ _TICKED = {
     "ministack.services.scheduler._ticker_loop",
     "ministack.services.dynamodb._ttl_reaper",
 }
-JSPI = hasattr(WebAssembly, "Suspending")
 _ticked = []
+# Run after the ticked workers, by sources that follow this one
+TICK_HOOKS = []
 
 _real_sleep = time.sleep
 
@@ -75,6 +75,8 @@ def _inline_start(self):
 async def region_tick():
     for name, target in _ticked:
         _run(name, target, 1)
+    for hook in TICK_HOOKS:
+        await hook()
 
 
 # The worker already ran inside start(), but the stdlib refuses to join a thread it never

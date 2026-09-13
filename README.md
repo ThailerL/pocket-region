@@ -81,11 +81,26 @@ Only Node runtimes work, and the AWS SDK isn't preinstalled, so bundle it with y
 browser the package must be a single ES module, since CommonJS and relative imports don't
 load there, though imports from a full URL such as jsDelivr do. Asynchronous events are delivered once, with no retries or dead-letter queues.
 
-SQS event source mappings hand a function batches from a queue, delete a batch once the function
-succeeds, and leave a failed batch on the queue. They need JSPI, WebAssembly's promise
-integration, so they work in Node 24.20 or later, in earlier Node 24 releases started with
-`--experimental-wasm-jspi`, and in browsers that have it, such as Chrome. Anywhere else,
-`CreateEventSourceMapping` fails with an error that says so.
+SQS event source mappings work everywhere. They hand a function batches from a queue, as many at
+once as its reserved concurrency allows (10 without one). A batch is deleted once the function
+succeeds, and a failed batch stays on the queue. Where JSPI, WebAssembly's promise integration,
+is present (Node 24.20 or later, earlier Node 24 releases started with
+`--experimental-wasm-jspi`, and browsers that have it), it also serves MiniStack's remaining
+synchronous paths to Lambda, which are untested.
+
+To watch functions run, pass `lambda` to `createRegion`. `onOutput` gets each line a handler
+writes, Lambda's `START`, `END`, and `REPORT` lines included, tagged with the function and its
+execution environment. `onEvent` gets environments starting and stopping, invocations starting
+and completing (with `coldStart`, `durationMs`, and `initMs`), and throttles.
+
+```js
+const region = await createRegion({
+  lambda: {
+    onOutput: (line, { functionName, environment }) => console.log(`[${functionName} ${environment}] ${line}`),
+    onEvent: (event) => { if (event.kind === 'throttled') console.warn(`${event.functionName} throttled`); },
+  },
+});
+```
 
 ## The `aws` CLI
 

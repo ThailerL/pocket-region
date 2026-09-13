@@ -60,6 +60,8 @@ export type FunctionConfig = {
   Timeout: number;
   MemorySize: number;
   CodeSha256: string;
+  // A new one on every code and configuration change
+  RevisionId: string;
   Environment?: { Variables?: Record<string, string> };
 };
 
@@ -67,8 +69,8 @@ export type FunctionConfig = {
 export type Invocation = {
   requestId: string;
   config: FunctionConfig;
-  // Set through PutFunctionConcurrency
-  reservedConcurrency: number | null;
+  // Reserved through PutFunctionConcurrency, or the emulator's default
+  concurrency: number;
   // The event as JSON text, handed to the runtime verbatim
   event: string;
   // Present only when the host answered needsCode(CodeSha256) with true
@@ -79,7 +81,9 @@ export type Invocation = {
 export type InvocationOutcome = {
   status: 'ok' | 'error' | 'throttled';
   payload: string | null;
+  // Framed with Lambda's START, END, and REPORT lines; output is what the function wrote
   log: string;
+  output: string;
 };
 
 // Supplied by the entry point: child processes in Node, workers in a page
@@ -87,6 +91,35 @@ export type LambdaExecutor = {
   needsCode(codeSha256: string): boolean;
   execute(invocation: Invocation): Promise<InvocationOutcome>;
   stop(): Promise<void>;
+};
+
+// What the host saw of a function's environments, named by the environment's log stream
+export type LambdaEvent =
+  | { kind: 'environment'; functionName: string; environment: string; phase: 'started' | 'stopped'; reason?: string }
+  | {
+      kind: 'invocation';
+      functionName: string;
+      environment: string;
+      requestId: string;
+      phase: 'started';
+      event: string;
+      coldStart: boolean;
+    }
+  | {
+      kind: 'invocation';
+      functionName: string;
+      environment: string;
+      requestId: string;
+      phase: 'completed';
+      durationMs: number;
+      initMs?: number;
+      failed: boolean;
+    }
+  | { kind: 'throttled'; functionName: string };
+
+export type LambdaObserver = {
+  onOutput?(line: string, source: { functionName: string; environment: string }): void;
+  onEvent?(event: LambdaEvent): void;
 };
 
 // Built during boot, around the dispatch a handler's own calls come back through
@@ -99,6 +132,7 @@ export type RegionSettings = {
   // The port minted queue URLs name, since the AWS SDK dials the URL it is given
   port?: number;
   onOutput?: (line: string, stream: OutputStream) => void;
+  lambda?: LambdaObserver;
 };
 
 type PythonDispatch = (
@@ -112,6 +146,15 @@ const STATE_ROOT = '/state';
 export const DEFAULT_PORT = 4566;
 // A pass measured 0.03 ms empty and 57 ms over 100,000 TTL items, 2026-09-12
 const TICK_INTERVAL_MS = 1000;
+
+// A host reports to the observer alone; the region's untagged onOutput hears each line too
+export const hostObserver = ({ onOutput, lambda }: RegionSettings): LambdaObserver => ({
+  onEvent: (event) => lambda?.onEvent?.(event),
+  onOutput: (line, source) => {
+    lambda?.onOutput?.(line, source);
+    onOutput?.(line, 'stdout');
+  },
+});
 
 // Timers must not hold Node open; a page has no such thing
 export const unref = (timer: ReturnType<typeof setTimeout>) => {
