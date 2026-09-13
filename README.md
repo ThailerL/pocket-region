@@ -109,6 +109,25 @@ afterAll(() => region.stop());
 If the region has a `stateDir`, its files stay on disk until the next `save` or `stop`, which
 overwrites them with the empty state.
 
+## Over HTTP
+
+Some callers can't be handed a request handler, such as another process, a program in
+another language, or the real AWS CLI. `serve` gives them an endpoint to call.
+
+```js
+import { createRegion, serve } from 'pocket-region';
+
+const region = await createRegion();
+const server = await serve(region);
+// aws --endpoint-url http://127.0.0.1:4566 s3 ls
+await server.close();
+```
+
+It listens on the port the region builds its queue URLs with, 4566 unless you gave
+`createRegion` a `port`, so a client following a queue URL arrives at the server. Pass
+`{ port }` to listen somewhere else. A browser can't listen on a port, so `serve` is only in
+the Node entry.
+
 ## Lambda
 
 Functions are created from a zipped deployment package and invoked the same way as on AWS.
@@ -120,7 +139,7 @@ import { createRegion, requestHandler, serve } from 'pocket-region';
 import { LambdaClient, CreateFunctionCommand, InvokeCommand } from '@aws-sdk/client-lambda';
 
 const region = await createRegion();
-// The handler runs in another process, so its SDK calls need a real endpoint
+// The handler runs in another process, so its SDK calls need the region served over HTTP
 const server = await serve(region);
 
 const lambda = new LambdaClient({ /* as above */ requestHandler: requestHandler(region) });
@@ -174,3 +193,20 @@ const response = await region.dispatch({
 
 Anything that speaks the AWS wire protocol works with it, and a service could later be
 rewritten without changing how you call it.
+
+`requestHandler`, `awsCli` and `serve` only ever call `dispatch`, so any object with a
+`dispatch` method works in place of a region. Wrap one to refuse, log or count requests before
+they reach the emulator.
+
+```js
+const guarded = {
+  dispatch(request) {
+    if (request.method === 'DELETE') {
+      return { status: 403, headers: {}, body: new TextEncoder().encode('no DELETE requests') };
+    }
+    return region.dispatch(request);
+  },
+};
+
+const server = await serve(guarded);
+```
