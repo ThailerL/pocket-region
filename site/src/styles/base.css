@@ -1,14 +1,22 @@
 :root {
   color-scheme: light dark;
+  /* The landing page scrolls and the demo doesn't; without this the centred header moves */
+  scrollbar-gutter: stable;
   --line: color-mix(in srgb, currentColor 15%, transparent);
   --faint: color-mix(in srgb, currentColor 60%, transparent);
 }
 
 body {
+  box-sizing: border-box;
   margin: 0 auto;
   padding: 1.5rem 1rem 3rem;
   max-width: 76rem;
   font: 16px/1.5 system-ui, sans-serif;
+}
+
+a {
+  color: inherit;
+  text-underline-offset: 0.2em;
 }
 
 h1 {

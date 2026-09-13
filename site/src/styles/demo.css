@@ -62,7 +62,6 @@
 /* The page is exactly one screen */
 @media (min-width: 64rem) {
   body {
-    box-sizing: border-box;
     display: flex;
     flex-direction: column;
     height: 100dvh;

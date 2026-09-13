@@ -1,11 +1,14 @@
 # Pocket Region
 
 Pocket Region runs S3, SQS, DynamoDB, and Lambda inside your Node process or a browser tab,
-and you call them with the ordinary AWS SDK. The AWS APIs are
-[ministack](https://pypi.org/project/ministack/)'s, a Python AWS emulator that runs here
-under [Pyodide](https://github.com/pyodide/pyodide), and Pocket Region runs Lambda handlers itself. Nothing runs outside your process or tab, so
-there's no container to start, no server to reach, and no request leaving the machine. In
-Node, a region is ready in half a second, and later ones in the same process in about 350 ms.
+and you call them with the ordinary AWS SDK. Requests reach the emulator without a socket, so
+there's no container to start and no server to reach. Lambda
+handlers run in child processes or Web Workers, and a region resets to empty in under a
+millisecond, so every test can start clean. In Node, a region is ready in half a second, and
+later ones in the same process in about 350 ms.
+
+The AWS APIs come from [MiniStack](https://ministack.org/), a Python AWS emulator that runs
+here under [Pyodide](https://github.com/pyodide/pyodide).
 
 ```js
 import { createRegion, requestHandler } from 'pocket-region';
@@ -135,7 +138,7 @@ A browser has nowhere to write, so the browser region has no `save`.
 ## A clean region per test
 
 One region can serve a whole test file, reset to empty before each test. `reset` calls
-ministack's own reset, so every service comes back empty, not only the tested ones. A reset takes under
+MiniStack's own reset, so every service comes back empty, not only the tested ones. A reset takes under
 a millisecond for a typical test and about 3.5 ms with 20 resources, while booting a region
 takes 350-500 ms.
 
@@ -176,14 +179,14 @@ the Node entry.
 | SQS | Tested |
 | DynamoDB | Tested |
 | Lambda | Tested with Node functions, synchronous and `Event` invokes, in Node and in a page |
-| The rest of [ministack](https://pypi.org/project/ministack/)'s services | Untested. They may respond, but nothing here checks them |
+| The rest of [MiniStack](https://ministack.org/)'s services | Untested. They may respond, but nothing here checks them |
 
 Scheduled EventBridge rules and the DynamoDB TTL reaper never run. Pyodide has no threads, so
 the loops that drive them never start.
 
 ## How it works
 
-[ministack](https://pypi.org/project/ministack/), a Python AWS emulator, runs under
+[MiniStack](https://ministack.org/), a Python AWS emulator, runs under
 [Pyodide](https://github.com/pyodide/pyodide). Python can't open a socket under Pyodide, so JavaScript takes
 each request and passes it to the emulator directly. That call is `dispatch`. The SDK adapter
 is built on it, which is why no server is needed.
@@ -199,10 +202,10 @@ const response = await region.dispatch({
 Anything that speaks the AWS wire protocol works with it, and a service could later be
 rewritten without changing how you call it.
 
-Lambda crosses the boundary the other way. ministack keeps the functions and answers the
+Lambda crosses the boundary the other way. MiniStack keeps the functions and answers the
 Lambda API, and when something invokes a function, the invocation comes back out to
 JavaScript. Pocket Region runs the handler in a child process or a Web Worker, enforces its
-timeout and concurrency, and hands the result back to ministack, while the handler's own SDK
+timeout and concurrency, and hands the result back to MiniStack, while the handler's own SDK
 calls go through `dispatch` like any other request.
 
 `requestHandler`, `awsCli` and `serve` only ever call `dispatch`, so any object with a
@@ -222,9 +225,9 @@ const guarded = {
 const server = await serve(guarded);
 ```
 
-## Where it came from
+## In a real app
 
-Pocket Region started as the AWS region inside [Glass Garden](https://glass.garden/), where
-you drag load balancers, instance groups, and AWS services onto a canvas and watch requests
-move through real code. It was pulled out so the same region can run in a test or any other
-page.
+[Glass Garden](https://glass.garden/) runs on Pocket Region. It opens on a working project, a
+load balancer in front of an instance group, and you can drag S3, SQS, DynamoDB, and Lambda
+onto the canvas and watch requests move through real code. Pocket Region started there as its
+AWS region and was pulled out so the same region can run in a test or any other page.

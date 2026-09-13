@@ -1,0 +1,188 @@
+---
+import { Code } from 'astro:components';
+import Base from '../layouts/Base.astro';
+
+const example = `import { createRegion, requestHandler } from 'pocket-region';
+import { S3Client, CreateBucketCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+
+const region = await createRegion();
+
+const s3 = new S3Client({
+  region: 'us-east-1',
+  endpoint: 'http://localhost:4566', // not used, since nothing listens here
+  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
+  forcePathStyle: true,
+  requestHandler: requestHandler(region),
+});
+
+await s3.send(new CreateBucketCommand({ Bucket: 'photos' }));
+await s3.send(new PutObjectCommand({ Bucket: 'photos', Key: 'cat.txt', Body: 'meow' }));`;
+
+const features = [
+  {
+    title: 'No server, no container',
+    body: 'Requests reach the emulator in your process without a socket, so nothing listens on a port. In Node a region is ready in half a second.',
+  },
+  {
+    title: 'In a browser tab',
+    body: 'The same region runs in a page, with nothing behind it. A first visit downloads about 12 MB.',
+  },
+  {
+    title: 'Lambda',
+    body: 'Create functions from a zip and invoke them. Handlers run in child processes or Web Workers, with their timeouts and reserved concurrency, and their own SDK calls reach the region.',
+  },
+  {
+    title: 'A clean region per test',
+    body: 'Boot one region per test file and reset it to empty in under a millisecond, so every test starts clean.',
+  },
+  {
+    title: 'An AWS console in your page',
+    body: 'pocket-region/cli runs aws commands against a region and hands back the output, so people can paste commands from AWS’s documentation.',
+  },
+  {
+    title: 'Built on MiniStack',
+    body: 'The AWS APIs come from <a href="https://ministack.org/">MiniStack</a>, a Python AWS emulator running here under Pyodide. It answers for many more services, though only these four are tested here.',
+  },
+];
+---
+
+<Base title="Pocket Region">
+  <main>
+    <header class="hero">
+      <h1>Pocket Region</h1>
+      <p class="tagline">
+        S3, SQS, DynamoDB, and Lambda inside your Node process or a browser tab, called with the
+        ordinary AWS SDK. No container and no server.
+      </p>
+      <div class="actions">
+        <a class="button primary" href="/demo">Try it in this tab</a>
+        <code class="install">npm install pocket-region</code>
+      </div>
+    </header>
+
+    <section>
+      <Code code={example} lang="js" themes={{ light: 'github-light', dark: 'github-dark' }} />
+    </section>
+
+    <section class="features">
+      {
+        features.map(({ title, body }) => (
+          <div>
+            <h2>{title}</h2>
+            <p set:html={body} />
+          </div>
+        ))
+      }
+    </section>
+
+    <section class="origin">
+      <h2>See it in a real app</h2>
+      <p>
+        <a href="https://glass.garden/">Glass Garden</a> runs on Pocket Region. It opens on a
+        working project, a load balancer in front of an instance group, and you can drag S3, SQS,
+        DynamoDB, and Lambda onto the canvas and watch requests move through them. Pocket Region
+        started there as its AWS region.
+      </p>
+    </section>
+
+    <footer>
+      <a href="https://github.com/ThailerL/pocket-region">GitHub</a>
+      <a href="https://www.npmjs.com/package/pocket-region">npm</a>
+      <span>MIT licensed</span>
+    </footer>
+  </main>
+</Base>
+
+<style>
+  .hero {
+    padding: 1.5rem 0 2rem;
+  }
+
+  .hero h1 {
+    font-size: 2.5rem;
+  }
+
+  .tagline {
+    max-width: 40rem;
+    font-size: 1.25rem;
+    color: var(--faint);
+    margin: 0.5rem 0 1.5rem;
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .button {
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--line);
+    border-radius: 0.4rem;
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .button.primary {
+    background: CanvasText;
+    color: Canvas;
+    border-color: CanvasText;
+  }
+
+  .install {
+    padding: 0.5rem 0.75rem;
+    border: 1px dashed var(--line);
+    border-radius: 0.4rem;
+  }
+
+  section :global(.astro-code) {
+    padding: 1rem;
+    border: 1px solid var(--line);
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    section :global(.astro-code),
+    section :global(.astro-code span) {
+      color: var(--shiki-dark) !important;
+      background-color: var(--shiki-dark-bg) !important;
+    }
+  }
+
+  .features {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+    gap: 1.5rem 2rem;
+    margin: 2.5rem 0;
+  }
+
+  h2 {
+    font-size: 1.05rem;
+    margin: 0 0 0.25rem;
+  }
+
+  .features p,
+  .origin p {
+    margin: 0;
+    color: var(--faint);
+  }
+
+  .origin p {
+    max-width: 44rem;
+  }
+
+  .origin {
+    padding-top: 2rem;
+    border-top: 1px solid var(--line);
+  }
+
+  footer {
+    display: flex;
+    gap: 1.25rem;
+    margin-top: 3rem;
+    color: var(--faint);
+    font-size: 0.875rem;
+  }
+</style>
