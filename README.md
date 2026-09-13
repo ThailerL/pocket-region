@@ -135,13 +135,10 @@ Each concurrent invocation runs the handler in its own Node child process, which
 it has been idle for a minute.
 
 ```js
-import { createRegion, requestHandler, serve } from 'pocket-region';
+import { createRegion, requestHandler } from 'pocket-region';
 import { LambdaClient, CreateFunctionCommand, InvokeCommand } from '@aws-sdk/client-lambda';
 
 const region = await createRegion();
-// The handler runs in another process, so its SDK calls need the region served over HTTP
-const server = await serve(region);
-
 const lambda = new LambdaClient({ /* as above */ requestHandler: requestHandler(region) });
 await lambda.send(new CreateFunctionCommand({
   FunctionName: 'hello',
@@ -154,7 +151,9 @@ const { Payload } = await lambda.send(new InvokeCommand({ FunctionName: 'hello',
 ```
 
 The handler gets `AWS_ENDPOINT_URL`, `AWS_REGION` and test credentials in its environment, so
-an SDK client created with no options reaches the region. `Timeout`,
+an SDK client created with no options reaches the region. The region is served on its port
+from the first invocation on, since the handler is in another process; if you called `serve`
+yourself, that server is used instead. `Timeout`,
 `ReservedConcurrentExecutions`, `Environment`, `InvocationType: 'Event'` and `LogType: 'Tail'`
 work as they do on Lambda. A handler that throws comes back with `FunctionError: 'Unhandled'`.
 

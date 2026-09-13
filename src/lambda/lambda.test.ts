@@ -13,7 +13,7 @@ import { HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createRegion, type Region } from '../node.ts';
 import { requestHandler } from '../request-handler.ts';
-import { serve, type RegionServer } from '../server.ts';
+import { serve } from '../server.ts';
 import { authorization, clientConfig, freePort } from '../test-support.ts';
 
 const decoder = new TextDecoder();
@@ -64,14 +64,13 @@ export const handler = async (event, context) => {
 `;
 
 let region: Region;
-let server: RegionServer;
+let port: number;
 let lambda: LambdaClient;
 let s3: S3Client;
 
 beforeAll(async () => {
-  const port = await freePort();
+  port = await freePort();
   region = await createRegion({ port });
-  server = await serve(region, { port });
   const config = clientConfig({ requestHandler: requestHandler(region) });
   // One attempt, so a throttle is seen rather than retried until it clears
   lambda = new LambdaClient({ ...config, maxAttempts: 1 });
@@ -79,12 +78,11 @@ beforeAll(async () => {
 }, 30_000);
 
 afterAll(async () => {
-  await server?.close();
   await region?.stop();
 });
 
-const createFunction = (FunctionName: string, extra: object = {}, code = HANDLER) =>
-  lambda.send(
+const createFunction = (FunctionName: string, extra: object = {}, code = HANDLER, client = lambda) =>
+  client.send(
     new CreateFunctionCommand({
       FunctionName,
       Runtime: 'nodejs22.x',
@@ -95,8 +93,8 @@ const createFunction = (FunctionName: string, extra: object = {}, code = HANDLER
     }),
   );
 
-async function invoke(FunctionName: string, event: object, extra: object = {}) {
-  const response = await lambda.send(
+async function invoke(FunctionName: string, event: object, extra: object = {}, client = lambda) {
+  const response = await client.send(
     new InvokeCommand({ FunctionName, Payload: JSON.stringify(event), ...extra }),
   );
   return {
@@ -125,6 +123,17 @@ describe('Lambda', () => {
     expect((await invoke('echo', { bucket: 'made-by-lambda' })).payload).toEqual({ created: 200 });
     await expect(s3.send(new HeadBucketCommand({ Bucket: 'made-by-lambda' }))).resolves.toBeDefined();
   });
+
+  // The host serves the region itself, but a caller may already have
+  it('shares the port with a server the caller started', async () => {
+    const shared = await createRegion({ port: await freePort() });
+    const server = await serve(shared);
+    const own = new LambdaClient(clientConfig({ requestHandler: requestHandler(shared) }));
+    await createFunction('echo', {}, HANDLER, own);
+    expect((await invoke('echo', { bucket: 'shared' }, {}, own)).payload).toEqual({ created: 200 });
+    await shared.stop();
+    await server.close();
+  }, 30_000);
 
   it('reports a thrown handler as an unhandled function error', async () => {
     const thrown = await invoke('echo', { throw: true });

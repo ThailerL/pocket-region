@@ -12,6 +12,8 @@ export type ServeOptions = {
 export type RegionServer = {
   url: string;
   port: number;
+  // Let Node exit with the server still listening
+  unref(): void;
   close(): Promise<void>;
 };
 
@@ -75,6 +77,7 @@ export function serve(
       resolve({
         url: `http://${host}:${port}`,
         port,
+        unref: () => void server.unref(),
         close: () =>
           new Promise((done, failed) => {
             // Keep-alive sockets from an SDK client would hold the close open

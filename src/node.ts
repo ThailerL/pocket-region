@@ -9,7 +9,7 @@ import {
   type RegionSettings,
   type VendorManifest,
 } from './core.ts';
-import { createLambdaHost } from './lambda/host.ts';
+import { createProcessHost } from './lambda/process-host.ts';
 
 export type { OutputStream, Region, RegionRequest, RegionResponse } from './core.ts';
 
@@ -58,7 +58,7 @@ function mirrorToDisk(py: PyodideAPI, stateRoot: string, stateDir: string) {
   }
 }
 
-export function createRegion(options: NodeRegionOptions = {}): Promise<Region> {
+export async function createRegion(options: NodeRegionOptions = {}): Promise<Region> {
   const packageCacheDir =
     options.packageCacheDir ?? fileURLToPath(new URL('../vendor', import.meta.url));
   const manifest: VendorManifest = JSON.parse(
@@ -66,13 +66,15 @@ export function createRegion(options: NodeRegionOptions = {}): Promise<Region> {
   );
   const { stateDir, onOutput } = options;
   const port = options.port ?? DEFAULT_PORT;
-  // A handler runs in its own process, so its SDK calls need the region served on its port
-  const lambda = createLambdaHost({
-    endpoint: `http://127.0.0.1:${port}`,
+  // Nothing is invoked before boot resolves, so the region is there by the first dispatch
+  let region: Region;
+  const lambda = createProcessHost({
+    port,
+    dispatch: (request) => region.dispatch(request),
     onOutput: onOutput && ((line) => onOutput(line, 'stdout')),
   });
 
-  return bootRegion(
+  region = await bootRegion(
     {
       indexURL: options.indexURL,
       packageCacheDir,
@@ -93,4 +95,5 @@ export function createRegion(options: NodeRegionOptions = {}): Promise<Region> {
         },
     lambda,
   );
+  return region;
 }

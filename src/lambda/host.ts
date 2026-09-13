@@ -1,43 +1,28 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
 import type { CodeEntry, LambdaExecutor } from '../core.ts';
-import { failure, FunctionPool } from './pool.ts';
-import { RUNTIME_SOURCE } from './runtime.generated.ts';
+import { failure, FunctionPool, type SandboxFactory } from './pool.ts';
 
-export type LambdaHostOptions = {
-  // Handlers dial this from their own process, so the region must be served here
+// What a host adds to the pool: where a package goes and how an environment runs it
+export type HostPackaging<Package> = {
+  pack(codeSha256: string, entries: CodeEntry[]): Promise<Package>;
+  spawn(pkg: Package): SandboxFactory;
+  dispose(): Promise<void>;
+};
+
+export type HostOptions = {
+  // What a handler's AWS_ENDPOINT_URL names
   endpoint: string;
   onOutput?: (line: string) => void;
 };
 
-export function createLambdaHost({ endpoint, onOutput }: LambdaHostOptions): LambdaExecutor {
-  let root: Promise<string> | undefined;
-  const unpacked = new Map<string, Promise<string>>();
+export function createLambdaHost<Package>(
+  packaging: HostPackaging<Package>,
+  { endpoint, onOutput }: HostOptions,
+): LambdaExecutor {
+  const packed = new Map<string, Promise<Package>>();
   const pools = new Map<string, FunctionPool>();
 
-  const workspace = () =>
-    (root ??= mkdtemp(path.join(tmpdir(), 'pocket-region-lambda-')).then(async (directory) => {
-      await writeFile(path.join(directory, 'runtime.mjs'), RUNTIME_SOURCE);
-      return directory;
-    }));
-
-  async function unpack(codeSha256: string, entries: CodeEntry[]) {
-    // The hash is base64, which is not a directory name
-    const taskRoot = path.join(await workspace(), Buffer.from(codeSha256, 'base64').toString('hex'));
-    const files = entries
-      .map(([file, contents, mode]) => ({ target: path.join(taskRoot, file), contents, mode }))
-      .filter(({ target }) => target.startsWith(taskRoot + path.sep));
-    const directories = new Set(files.map(({ target }) => path.dirname(target)));
-    await Promise.all([...directories].map((directory) => mkdir(directory, { recursive: true })));
-    await Promise.all(
-      files.map(({ target, contents, mode }) => writeFile(target, contents, { mode: mode || undefined })),
-    );
-    return taskRoot;
-  }
-
   return {
-    needsCode: (codeSha256) => !unpacked.has(codeSha256),
+    needsCode: (codeSha256) => !packed.has(codeSha256),
 
     async execute(invocation) {
       const { config, code } = invocation;
@@ -48,9 +33,9 @@ export function createLambdaHost({ endpoint, onOutput }: LambdaHostOptions): Lam
           errorMessage: `Pocket Region runs nodejs functions only; this one is ${Runtime || 'a container image'}`,
         });
       }
-      if (code && !unpacked.has(CodeSha256)) unpacked.set(CodeSha256, unpack(CodeSha256, code));
-      const taskRoot = await unpacked.get(CodeSha256);
-      if (taskRoot === undefined) {
+      if (code && !packed.has(CodeSha256)) packed.set(CodeSha256, packaging.pack(CodeSha256, code));
+      const pkg = await packed.get(CodeSha256);
+      if (pkg === undefined) {
         return failure({ errorType: 'Runtime.InitError', errorMessage: 'The function has no code' });
       }
       // The hash gives updated code fresh environments while the old ones drain
@@ -58,8 +43,7 @@ export function createLambdaHost({ endpoint, onOutput }: LambdaHostOptions): Lam
       let pool = pools.get(key);
       if (!pool) {
         // No await between get and set, or two first invocations each make a pool
-        const runtimeScript = path.join(path.dirname(taskRoot), 'runtime.mjs');
-        pool = new FunctionPool({ runtimeScript, taskRoot, endpoint, onOutput });
+        pool = new FunctionPool({ spawn: packaging.spawn(pkg), endpoint, onOutput });
         pools.set(key, pool);
       }
       return pool.invoke(invocation);
@@ -68,7 +52,7 @@ export function createLambdaHost({ endpoint, onOutput }: LambdaHostOptions): Lam
     async stop() {
       await Promise.all([...pools.values()].map((pool) => pool.stop()));
       pools.clear();
-      if (root) await rm(await root, { recursive: true, force: true });
+      await packaging.dispose();
     },
   };
 }
