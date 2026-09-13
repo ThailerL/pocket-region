@@ -99,6 +99,58 @@ describe('createRegion', () => {
     expect(read.body.Item).toEqual(item);
   });
 
+  it('deletes an item once its TTL has passed', async () => {
+    await jsonApi('dynamodb', 'DynamoDB_20120810.CreateTable', {
+      TableName: 'sessions',
+      KeySchema: [{ AttributeName: 'pk', KeyType: 'HASH' }],
+      AttributeDefinitions: [{ AttributeName: 'pk', AttributeType: 'S' }],
+      BillingMode: 'PAY_PER_REQUEST',
+    });
+    await jsonApi('dynamodb', 'DynamoDB_20120810.UpdateTimeToLive', {
+      TableName: 'sessions',
+      TimeToLiveSpecification: { Enabled: true, AttributeName: 'expires' },
+    });
+    const now = Math.floor(Date.now() / 1000);
+    for (const [pk, expires] of [['expired', now - 60], ['live', now + 3600]] as const) {
+      await jsonApi('dynamodb', 'DynamoDB_20120810.PutItem', {
+        TableName: 'sessions',
+        Item: { pk: { S: pk }, expires: { N: String(expires) } },
+      });
+    }
+    const keys = async () => {
+      const { body } = await jsonApi('dynamodb', 'DynamoDB_20120810.Scan', { TableName: 'sessions' });
+      return body.Items.map((item: { pk: { S: string } }) => item.pk.S);
+    };
+
+    await expect.poll(keys, { timeout: 5_000 }).toEqual(['live']);
+  });
+
+  it('fires a one-time schedule that is already due', async () => {
+    const { QueueUrl } = (await jsonApi('sqs', 'AmazonSQS.CreateQueue', { QueueName: 'reminders' })).body;
+    const { Attributes } = (
+      await jsonApi('sqs', 'AmazonSQS.GetQueueAttributes', { QueueUrl, AttributeNames: ['QueueArn'] })
+    ).body;
+    const scheduled = await region.dispatch({
+      method: 'POST',
+      path: '/schedules/reminder',
+      headers: { host: 'localhost:4566', authorization: authorization('scheduler'), 'content-type': 'application/json' },
+      body: encoder.encode(
+        JSON.stringify({
+          ScheduleExpression: 'at(2020-01-01T00:00:00)',
+          FlexibleTimeWindow: { Mode: 'OFF' },
+          Target: { Arn: Attributes.QueueArn, RoleArn: 'arn:aws:iam::000000000000:role/scheduler', Input: '"wake up"' },
+        }),
+      ),
+    });
+    expect(scheduled.status).toBe(200);
+    const bodies = async () => {
+      const { body } = await jsonApi('sqs', 'AmazonSQS.ReceiveMessage', { QueueUrl, VisibilityTimeout: 0 });
+      return (body.Messages ?? []).map((message: { Body: string }) => message.Body);
+    };
+
+    await expect.poll(bodies, { timeout: 5_000 }).toEqual(['"wake up"']);
+  });
+
   it('resets to empty, and the same names can be used again', async () => {
     const fresh = await createRegion();
     const fifo = async () => {

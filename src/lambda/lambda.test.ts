@@ -2,7 +2,9 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { crc32 } from 'node:zlib';
 import {
+  CreateEventSourceMappingCommand,
   CreateFunctionCommand,
+  GetEventSourceMappingCommand,
   InvokeCommand,
   LambdaClient,
   PutFunctionConcurrencyCommand,
@@ -10,6 +12,12 @@ import {
   TooManyRequestsException,
 } from '@aws-sdk/client-lambda';
 import { HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  CreateQueueCommand,
+  GetQueueAttributesCommand,
+  SendMessageCommand,
+  SQSClient,
+} from '@aws-sdk/client-sqs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createRegion as createPageRegion, type PageRegion } from '../browser.ts';
 import { createRegion } from '../node.ts';
@@ -64,10 +72,22 @@ export const handler = async (event, context) => {
 };
 `;
 
+// Each record's body names a bucket to create, then optionally "fail" to throw after it
+const CONSUMER = `
+export const handler = async (event) => {
+  for (const record of event.Records) {
+    const [bucket, outcome] = record.body.split(' ');
+    await fetch(process.env.AWS_ENDPOINT_URL + '/' + bucket, { method: 'PUT', headers: { authorization: ${JSON.stringify(authorization('s3'))} } });
+    if (outcome === 'fail') throw new Error('batch failed');
+  }
+};
+`;
+
 let region: PageRegion;
 let vendor: Awaited<ReturnType<typeof serveVendor>> | undefined;
 let lambda: LambdaClient;
 let s3: S3Client;
+let sqs: SQSClient;
 
 // The same handler, unbundled, runs on both hosts: fetch and process.env are all it needs
 const HOSTS: [string, () => Promise<PageRegion>][] = [
@@ -106,6 +126,34 @@ async function invoke(FunctionName: string, event: object, extra: object = {}, c
   };
 }
 
+// A queue mapped to the consumer function, holding one message
+async function mapQueue(QueueName: string, MessageBody: string) {
+  const { QueueUrl } = await sqs.send(
+    new CreateQueueCommand({ QueueName, Attributes: { VisibilityTimeout: '30' } }),
+  );
+  const { Attributes } = await sqs.send(
+    new GetQueueAttributesCommand({ QueueUrl, AttributeNames: ['QueueArn'] }),
+  );
+  const { UUID } = await lambda.send(
+    new CreateEventSourceMappingCommand({ FunctionName: 'consumer', EventSourceArn: Attributes!.QueueArn, BatchSize: 1 }),
+  );
+  await sqs.send(new SendMessageCommand({ QueueUrl, MessageBody }));
+  return { UUID: UUID!, QueueUrl: QueueUrl! };
+}
+
+const lastProcessingResult = (UUID: string) =>
+  lambda.send(new GetEventSourceMappingCommand({ UUID })).then((mapping) => mapping.LastProcessingResult);
+
+async function messagesLeft(QueueUrl: string) {
+  const { Attributes } = await sqs.send(
+    new GetQueueAttributesCommand({
+      QueueUrl,
+      AttributeNames: ['ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible'],
+    }),
+  );
+  return Number(Attributes!.ApproximateNumberOfMessages) + Number(Attributes!.ApproximateNumberOfMessagesNotVisible);
+}
+
 describe.each(HOSTS)('Lambda %s', (_, boot) => {
   beforeAll(async () => {
     region = await boot();
@@ -113,6 +161,7 @@ describe.each(HOSTS)('Lambda %s', (_, boot) => {
     // One attempt, so a throttle is seen rather than retried until it clears
     lambda = new LambdaClient({ ...config, maxAttempts: 1 });
     s3 = new S3Client({ ...config, forcePathStyle: true });
+    sqs = new SQSClient(config);
   }, 60_000);
 
   afterAll(async () => {
@@ -179,6 +228,21 @@ describe.each(HOSTS)('Lambda %s', (_, boot) => {
     await expect.poll(() => s3.send(new HeadBucketCommand({ Bucket: 'made-asynchronously' })).then(() => true, () => false), { timeout: 10_000 }).toBe(true);
   });
 
+  it('runs a function from an SQS event source mapping, deleting only a batch that succeeded', async () => {
+    await createFunction('consumer', {}, CONSUMER);
+    const [ok, failed] = await Promise.all([
+      mapQueue('orders', 'made-by-mapping'),
+      mapQueue('refunds', 'made-before-failing fail'),
+    ]);
+
+    await expect.poll(() => lastProcessingResult(ok.UUID), { timeout: 10_000 }).toBe('OK - 1 records');
+    await expect.poll(() => lastProcessingResult(failed.UUID), { timeout: 10_000 }).toBe('FAILED');
+    await expect(s3.send(new HeadBucketCommand({ Bucket: 'made-by-mapping' }))).resolves.toBeDefined();
+    await expect(s3.send(new HeadBucketCommand({ Bucket: 'made-before-failing' }))).resolves.toBeDefined();
+    expect(await messagesLeft(ok.QueueUrl)).toBe(0);
+    expect(await messagesLeft(failed.QueueUrl)).toBe(1);
+  }, 30_000);
+
   it('refuses a runtime it cannot run', async () => {
     await createFunction('snake', { Runtime: 'python3.12', Handler: 'index.handler' }, 'def handler(e, c): return 1');
     const refused = await invoke('snake', {});
@@ -238,4 +302,31 @@ describe('Lambda in Node', () => {
   it('keeps Node running until an environment that died starting has been answered for', async () => {
     await runAlone('process.exit(3);', 'stopped before it asked for an invocation');
   }, 40_000);
+
+  // A child started without the flag lacks JSPI only on a Node where the flag had to supply it
+  it.runIf(process.execArgv.includes('--experimental-wasm-jspi'))(
+    'refuses an event source mapping without JSPI, saying what provides it',
+    async () => {
+      const module = JSON.stringify(new URL('../node.ts', import.meta.url).href);
+      const script = `
+        import { createRegion } from ${module};
+        const region = await createRegion();
+        const response = await region.dispatch({ method: 'POST', path: '/2015-03-31/event-source-mappings', headers: { host: 'localhost:4566', authorization: ${JSON.stringify(authorization('lambda'))}, 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify({ FunctionName: 'consumer', EventSourceArn: 'arn:aws:sqs:us-east-1:000000000000:orders' })) });
+        console.log(JSON.stringify({ status: response.status, body: new TextDecoder().decode(response.body) }));
+        await region.stop();
+      `;
+      const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
+        stdio: ['ignore', 'pipe', 'inherit'],
+        signal: AbortSignal.timeout(30_000),
+      });
+      let stdout = '';
+      child.stdout.on('data', (chunk) => (stdout += chunk));
+      await once(child, 'exit');
+      const { status, body } = JSON.parse(stdout.trim().split('\n').at(-1)!);
+      expect(status).toBe(400);
+      expect(body).toContain('InvalidParameterValueException');
+      expect(body).toContain('--experimental-wasm-jspi');
+    },
+    40_000,
+  );
 });

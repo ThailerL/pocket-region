@@ -10,7 +10,7 @@ import uuid
 import zipfile
 
 from js import Object
-from pyodide.ffi import to_js
+from pyodide.ffi import can_run_sync, to_js
 
 _LAMBDA_MODULE = "ministack.services.lambda_svc"
 
@@ -88,8 +88,25 @@ def _patch_lambda(lambda_svc):
 
         asyncio.ensure_future(attempt())
 
+    original_execute_function = lambda_svc._execute_function
+
+    # Synchronous callers, the event source mapping poller among them, can wait on JS only under JSPI
+    def execute_function(func, event):
+        if not can_run_sync():
+            return original_execute_function(func, event)
+        return run_sync_suspended(_execute(lambda_svc, func, event))
+
     lambda_svc.run_reentrant = run_reentrant
     lambda_svc.invoke_async_with_retry = invoke_async_with_retry
+    lambda_svc._execute_function = execute_function
+    # Accepted, a mapping would never run: the poller is ticked only under JSPI
+    if not JSPI:
+        lambda_svc._create_esm = lambda data: lambda_svc.error_response_json(
+            "InvalidParameterValueException",
+            "Event source mappings need WebAssembly JSPI: use Node 25 or later, Node 24 started with "
+            "--experimental-wasm-jspi, or a browser that has it",
+            400,
+        )
 
 
 # Patches on ministack's own lazy import; importing lambda_svc at boot costs 91 ms

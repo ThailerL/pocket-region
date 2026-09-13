@@ -79,8 +79,13 @@ yourself. `Timeout`,
 
 Only Node runtimes work, and the AWS SDK isn't preinstalled, so bundle it with your code. In a
 browser the package must be a single ES module, since CommonJS and relative imports don't
-load there, though imports from a full URL such as jsDelivr do. Asynchronous events are delivered once, with no retries or dead-letter queues,
-and SQS event source mappings don't poll yet.
+load there, though imports from a full URL such as jsDelivr do. Asynchronous events are delivered once, with no retries or dead-letter queues.
+
+SQS event source mappings hand a function batches from a queue, delete a batch once the function
+succeeds, and leave a failed batch on the queue. They need JSPI, WebAssembly's promise
+integration, so they work in Node 25 or later, in Node 24 started with
+`--experimental-wasm-jspi`, and in browsers that have it, such as Chrome. Anywhere else,
+`CreateEventSourceMapping` fails with an error that says so.
 
 ## The `aws` CLI
 
@@ -177,12 +182,15 @@ the Node entry.
 | --- | --- |
 | S3 | Tested, including bucket notifications into SQS |
 | SQS | Tested |
-| DynamoDB | Tested |
-| Lambda | Tested with Node functions, synchronous and `Event` invokes, in Node and in a page |
+| DynamoDB | Tested, including TTL expiry |
+| Lambda | Tested with Node functions, synchronous and `Event` invokes, and SQS event source mappings, in Node and in a page |
 | The rest of [MiniStack](https://ministack.org/)'s services | Untested. They may respond, but nothing here checks them |
 
-Scheduled EventBridge rules and the DynamoDB TTL reaper never run. Pyodide has no threads, so
-the loops that drive them never start.
+Pyodide has no threads, so the region itself runs scheduled EventBridge rules, EventBridge
+Scheduler schedules, and the DynamoDB TTL reaper, checking once a second. Anything already due
+fires within about a second, such as a one-time schedule in the past or an expired TTL. `rate()`
+and `cron()` wait real time, so a `rate(1 minute)` rule first fires a minute after it's created.
+Rules and schedules that invoke Lambda are untested.
 
 ## How it works
 

@@ -110,6 +110,14 @@ type PythonDispatch = (
 
 const STATE_ROOT = '/state';
 export const DEFAULT_PORT = 4566;
+// A pass measured 0.03 ms empty and 57 ms over 100,000 TTL items, 2026-09-12
+const TICK_INTERVAL_MS = 1000;
+
+// Timers must not hold Node open; a page has no such thing
+export const unref = (timer: ReturnType<typeof setTimeout>) => {
+  (timer as { unref?: () => void }).unref?.();
+  return timer;
+};
 
 export async function bootRegion(
   assets: RegionAssets,
@@ -158,6 +166,14 @@ export async function bootRegion(
   await lifespan('startup');
   dispatchPython = py.globals.get('region_dispatch');
   const savePython: () => void = py.globals.get('region_save');
+  const tickPython: () => Promise<void> = py.globals.get('region_tick');
+  // A pass can wait on a Lambda handler, so a slow one must not overlap the next
+  let ticking: Promise<void> | undefined;
+  const ticker = unref(
+    setInterval(() => {
+      ticking ??= tickPython().finally(() => (ticking = undefined));
+    }, TICK_INTERVAL_MS),
+  );
 
   return {
     port,
@@ -178,6 +194,8 @@ export async function bootRegion(
       await persistence.mirror(py, STATE_ROOT);
     },
     async stop() {
+      clearInterval(ticker);
+      await ticking;
       // Lifespan shutdown writes the state files; the mirror follows
       await lifespan('shutdown');
       await persistence?.mirror(py, STATE_ROOT);

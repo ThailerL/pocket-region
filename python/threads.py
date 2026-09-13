@@ -2,30 +2,82 @@
 # inline instead: fire-and-forget workers (S3 event fanout, SNS delivery) complete during
 # the request that triggered them, and loop-forever workers hit the first sleep and are
 # deferred. Must run before ministack is imported.
+import functools
 import sys
 import threading
 import time
+
+from js import WebAssembly
+from pyodide.ffi import run_sync
 
 
 class _Deferred(BaseException):
     """Not an Exception: workers wrap their bodies in `except Exception`."""
 
 
-def _no_sleep(seconds):
-    raise _Deferred(f"would sleep {seconds}s")
+# Each loops forever carrying nothing between passes and sleeping at least once per idle pass,
+# so one allowed sleep bounds a tick. Re-read the loops at every ministack bump before adding
+_TICKED = {
+    "ministack.services.eventbridge._scheduler_loop",
+    "ministack.services.scheduler._ticker_loop",
+    "ministack.services.dynamodb._ttl_reaper",
+}
+JSPI = hasattr(WebAssembly, "Suspending")
+# Its passes block on handlers, which only JSPI lets a synchronous caller do
+if JSPI and LAMBDA_EXECUTOR is not None:
+    _TICKED.add("ministack.services.lambda_svc._poll_loop")
+_ticked = []
+
+_real_sleep = time.sleep
+
+
+# Returns whether the worker stopped at a sleep beyond its budget
+def _run(name, target, sleeps):
+    def budgeted_sleep(seconds):
+        nonlocal sleeps
+        if sleeps == 0:
+            raise _Deferred(f"would sleep {seconds}s")
+        sleeps -= 1
+
+    outer_sleep = time.sleep
+    time.sleep = budgeted_sleep
+    try:
+        target()
+    except _Deferred:
+        return True
+    except Exception as error:
+        print(f"Background worker {name} failed: {error!r}", file=sys.stderr)
+    finally:
+        time.sleep = outer_sleep
+    return False
+
+
+# What runs while this stack is suspended must not spend its sleep budget
+def run_sync_suspended(awaitable):
+    own_sleep = time.sleep
+    time.sleep = _real_sleep
+    try:
+        return run_sync(awaitable)
+    finally:
+        time.sleep = own_sleep
+
+
+def _qualified_name(target):
+    return f"{getattr(target, '__module__', '')}.{getattr(target, '__qualname__', '')}"
 
 
 def _inline_start(self):
-    real_sleep = time.sleep
-    time.sleep = _no_sleep
-    try:
-        self.run()
-    except _Deferred:
-        pass
-    except Exception as error:
-        print(f"Background worker {self.name} failed: {error!r}", file=sys.stderr)
-    finally:
-        time.sleep = real_sleep
+    # Thread.run drops its target once it returns, so a second pass needs its own copy
+    target = functools.partial(self._target, *self._args, **self._kwargs)
+    ticked = _qualified_name(self._target) in _TICKED
+    if _run(self.name, self.run, 0) and ticked:
+        _ticked.append((self.name, target))
+
+
+# Called by the region on an interval. Async so a pass can wait on JS through run_sync
+async def region_tick():
+    for name, target in _ticked:
+        _run(name, target, 1)
 
 
 # The worker already ran inside start(), but the stdlib refuses to join a thread it never

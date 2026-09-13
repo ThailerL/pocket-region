@@ -1,4 +1,4 @@
-import type { FunctionConfig, Invocation, InvocationOutcome } from '../core.ts';
+import { unref, type FunctionConfig, type Invocation, type InvocationOutcome } from '../core.ts';
 
 // ministack's account cap is bypassed, so this is the only bound on environments
 const DEFAULT_CONCURRENCY = 10;
@@ -88,12 +88,6 @@ const environmentVariables = (config: FunctionConfig, logStream: string, endpoin
   AWS_ENDPOINT_URL: endpoint,
   ...config.Environment?.Variables,
 });
-
-// Timers must not hold Node open; a page has no such thing
-const unref = (timer: ReturnType<typeof setTimeout>) => {
-  (timer as { unref?: () => void }).unref?.();
-  return timer;
-};
 
 export class FunctionPool {
   private readonly environments = new Map<string, Environment>();
