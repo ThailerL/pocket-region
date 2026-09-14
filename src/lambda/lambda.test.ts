@@ -13,6 +13,7 @@ import {
   TooManyRequestsException,
   UpdateFunctionConfigurationCommand,
 } from '@aws-sdk/client-lambda';
+import { CreateTableCommand, DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { EventBridgeClient, PutEventsCommand, PutRuleCommand, PutTargetsCommand } from '@aws-sdk/client-eventbridge';
 import { CreateStreamCommand, DescribeStreamCommand, KinesisClient, PutRecordCommand } from '@aws-sdk/client-kinesis';
 import { HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
@@ -365,6 +366,29 @@ describe.each(HOSTS)('Lambda %s', (_, boot) => {
     expect(peak).toBe(5);
   }, 30_000);
 
+  it('keeps only the messages a handler reports as batch item failures', async () => {
+    const code = `
+      export const handler = async (event) => ({
+        batchItemFailures: event.Records.filter((record) => record.body === 'fail').map((record) => ({ itemIdentifier: record.messageId })),
+      });
+    `;
+    await createFunction('partial', {}, code);
+    const { QueueUrl, QueueArn } = await createQueue(sqs, 'partly-failing', { VisibilityTimeout: '30' });
+    await sqs.send(new SendMessageCommand({ QueueUrl, MessageBody: 'ok' }));
+    await sqs.send(new SendMessageCommand({ QueueUrl, MessageBody: 'fail' }));
+    const { UUID } = await lambda.send(
+      new CreateEventSourceMappingCommand({
+        FunctionName: 'partial',
+        EventSourceArn: QueueArn,
+        BatchSize: 2,
+        FunctionResponseTypes: ['ReportBatchItemFailures'],
+      }),
+    );
+
+    await expect.poll(() => lastProcessingResult(UUID!), { timeout: 10_000 }).toBe('OK - 1 records, 1 partial failures');
+    expect(await messagesLeft(QueueUrl)).toBe(1);
+  }, 30_000);
+
   it('runs the function an EventBridge rule targets', async () => {
     const events = new EventBridgeClient(clientConfig({ requestHandler: requestHandler(region) }));
     const { FunctionArn } = await createFunction('ruled');
@@ -399,6 +423,38 @@ describe.each(HOSTS)('Lambda %s', (_, boot) => {
     );
     await kinesis.send(new PutRecordCommand({ StreamName: 'clicks', PartitionKey: 'user', Data: new TextEncoder().encode('made-by-a-stream') }));
     await expect.poll(() => bucketExists('made-by-a-stream'), { timeout: 15_000 }).toBe(true);
+  }, 30_000);
+
+  it('runs a function from a DynamoDB Streams event source mapping', async () => {
+    const dynamodb = new DynamoDBClient(clientConfig({ requestHandler: requestHandler(region) }));
+    const code = `
+      export const handler = async (event) => {
+        for (const record of event.Records) {
+          const bucket = record.dynamodb.NewImage.bucket.S;
+          await fetch(process.env.AWS_ENDPOINT_URL + '/' + bucket, { method: 'PUT', headers: { authorization: ${JSON.stringify(authorization('s3'))} } });
+        }
+      };
+    `;
+    await createFunction('table-watcher', {}, code);
+    const { TableDescription } = await dynamodb.send(
+      new CreateTableCommand({
+        TableName: 'watched',
+        KeySchema: [{ AttributeName: 'id', KeyType: 'HASH' }],
+        AttributeDefinitions: [{ AttributeName: 'id', AttributeType: 'S' }],
+        BillingMode: 'PAY_PER_REQUEST',
+        StreamSpecification: { StreamEnabled: true, StreamViewType: 'NEW_IMAGE' },
+      }),
+    );
+    await lambda.send(
+      new CreateEventSourceMappingCommand({
+        FunctionName: 'table-watcher',
+        EventSourceArn: TableDescription!.LatestStreamArn,
+        StartingPosition: 'TRIM_HORIZON',
+        BatchSize: 1,
+      }),
+    );
+    await dynamodb.send(new PutItemCommand({ TableName: 'watched', Item: { id: { S: '1' }, bucket: { S: 'made-by-a-table' } } }));
+    await expect.poll(() => bucketExists('made-by-a-table'), { timeout: 15_000 }).toBe(true);
   }, 30_000);
 
   it('refuses a runtime it cannot run', async () => {

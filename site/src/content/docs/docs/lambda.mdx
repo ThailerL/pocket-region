@@ -89,11 +89,12 @@ An EventBridge rule that targets a function runs it once, as MiniStack does, wit
 
 ## Event source mappings
 
-MiniStack's poller hands a function batches from SQS queues and Kinesis streams, checking every
-second while a mapping exists. A Kinesis mapping runs one batch at a time. An SQS mapping runs as
-many batches at once as the function's concurrency allows, taking the next as each finishes, which
-MiniStack doesn't do yet. SQS and Kinesis are tested. DynamoDB Streams
-and `ReportBatchItemFailures` are untested.
+MiniStack's poller hands a function batches from SQS queues, Kinesis streams, and DynamoDB
+Streams, checking every second while a mapping exists. A stream mapping runs one batch at a time.
+An SQS mapping runs as many batches at once as the function's concurrency allows, taking the next
+as each finishes, which MiniStack doesn't do yet. All three sources are tested.
+`ReportBatchItemFailures` is tested on SQS, where a handler's `batchItemFailures` stay on the
+queue. As in MiniStack, stream mappings ignore it and move past the whole batch.
 
 ## Watching functions run
 
