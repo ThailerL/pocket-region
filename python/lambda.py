@@ -181,6 +181,8 @@ def _patch_lambda(lambda_svc):
         original_reset()
 
     lambda_svc._execute_function_warm = execute_function_warm
+    # Its bootstrap server blocks without suspending and freezes the host, so the executor refuses it instead
+    lambda_svc._execute_function_provided = execute_function_warm
     lambda_svc._poll_sqs = lambda: _poll_sqs(lambda_svc)
     lambda_runtime.reset = reset
 

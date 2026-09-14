@@ -465,6 +465,13 @@ describe.each(HOSTS)('Lambda %s', (_, boot) => {
     expect(refused.payload.errorMessage).toContain('python3.12');
   });
 
+  it('refuses a custom runtime, whose bootstrap MiniStack would spawn', async () => {
+    await createFunction('custom', { Runtime: 'provided.al2023', Handler: 'bootstrap', Code: { ZipFile: zipOf('bootstrap', '#!/bin/sh') } });
+    const refused = await invoke('custom', {});
+    expect(refused.error).toBe('Unhandled');
+    expect(refused.payload.errorMessage).toContain('provided.al2023');
+  });
+
   it('fails an invocation whose handler cannot load', async () => {
     await createFunction('broken', {}, 'export const notHandler = 1');
     const failed = await invoke('broken', {});

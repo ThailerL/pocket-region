@@ -44,8 +44,9 @@ The deployment package is any zip. This one is built with [fflate](https://githu
 
 ## Runtimes and packages
 
-Only `nodejs*` runtimes run. Any other runtime, and container images, fail each invocation with
-`Runtime.Unsupported`. The AWS SDK isn't preinstalled, so bundle it with your code.
+Only `nodejs*` runtimes run. `python*` and `provided.*` functions fail each invocation with a
+`Runtime.HandlerError` naming the runtime. Java, .NET, and Ruby functions answer MiniStack's own
+200 "Mock response" without running. The AWS SDK isn't preinstalled, so bundle it with your code.
 
 | | Node | Page |
 | --- | --- | --- |
