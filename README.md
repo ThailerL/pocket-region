@@ -19,7 +19,11 @@ import { createRegion, requestHandler } from 'pocket-region/node';
 import { S3Client, CreateBucketCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 
 const region = await createRegion();
-const s3 = new S3Client({ requestHandler: requestHandler(region) });
+const s3 = new S3Client({
+  region: 'us-east-1',
+  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
+  requestHandler: requestHandler(region),
+});
 
 await s3.send(new CreateBucketCommand({ Bucket: 'photos' }));
 await s3.send(new PutObjectCommand({ Bucket: 'photos', Key: 'cat.txt', Body: 'meow' }));
@@ -55,7 +59,11 @@ import { createRegion, requestHandler } from 'pocket-region/node';
 import { LambdaClient, CreateFunctionCommand, InvokeCommand } from '@aws-sdk/client-lambda';
 
 const region = await createRegion();
-const lambda = new LambdaClient({ /* as above */ requestHandler: requestHandler(region) });
+const lambda = new LambdaClient({
+  region: 'us-east-1',
+  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
+  requestHandler: requestHandler(region),
+});
 await lambda.send(new CreateFunctionCommand({
   FunctionName: 'hello',
   Runtime: 'nodejs22.x',
