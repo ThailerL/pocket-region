@@ -79,7 +79,11 @@ yourself. `Timeout`,
 
 Only Node runtimes work, and the AWS SDK isn't preinstalled, so bundle it with your code. In a
 browser the package must be a single ES module, since CommonJS and relative imports don't
-load there, though imports from a full URL such as jsDelivr do. Asynchronous events are delivered once, with no retries or dead-letter queues.
+load there, though imports from a full URL such as jsDelivr do.
+
+A failed asynchronous invocation is retried as Lambda does, honouring `MaximumRetryAttempts` and
+`MaximumEventAgeInSeconds`, then sent to its `OnFailure` destination or `DeadLetterConfig` target
+(SNS untested). Retries start up to a second late.
 
 SQS event source mappings work everywhere. They hand a function batches from a queue, as many at
 once as its reserved concurrency allows (10 without one). A batch is deleted once the function

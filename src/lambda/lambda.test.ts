@@ -8,6 +8,7 @@ import {
   InvokeCommand,
   LambdaClient,
   PutFunctionConcurrencyCommand,
+  PutFunctionEventInvokeConfigCommand,
   ResourceNotFoundException,
   TooManyRequestsException,
   UpdateFunctionConfigurationCommand,
@@ -16,6 +17,7 @@ import { HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
 import {
   CreateQueueCommand,
   GetQueueAttributesCommand,
+  ReceiveMessageCommand,
   SendMessageCommand,
   SQSClient,
 } from '@aws-sdk/client-sqs';
@@ -135,23 +137,37 @@ async function invoke(FunctionName: string, event: object, extra: object = {}, c
   };
 }
 
-// A queue mapped to the consumer function, holding one message
-async function mapQueue(QueueName: string, MessageBody: string) {
-  const { QueueUrl } = await sqs.send(
-    new CreateQueueCommand({ QueueName, Attributes: { VisibilityTimeout: '30' } }),
-  );
-  const { Attributes } = await sqs.send(
+async function createQueue(QueueName: string, Attributes?: Record<string, string>) {
+  const { QueueUrl } = await sqs.send(new CreateQueueCommand({ QueueName, Attributes }));
+  const { Attributes: created } = await sqs.send(
     new GetQueueAttributesCommand({ QueueUrl, AttributeNames: ['QueueArn'] }),
   );
+  return { QueueUrl: QueueUrl!, QueueArn: created!.QueueArn! };
+}
+
+// A queue mapped to the consumer function, holding one message
+async function mapQueue(QueueName: string, MessageBody: string) {
+  const { QueueUrl, QueueArn } = await createQueue(QueueName, { VisibilityTimeout: '30' });
   const { UUID } = await lambda.send(
-    new CreateEventSourceMappingCommand({ FunctionName: 'consumer', EventSourceArn: Attributes!.QueueArn, BatchSize: 1 }),
+    new CreateEventSourceMappingCommand({ FunctionName: 'consumer', EventSourceArn: QueueArn, BatchSize: 1 }),
   );
   await sqs.send(new SendMessageCommand({ QueueUrl, MessageBody }));
-  return { UUID: UUID!, QueueUrl: QueueUrl! };
+  return { UUID: UUID!, QueueUrl };
 }
 
 const lastProcessingResult = (UUID: string) =>
   lambda.send(new GetEventSourceMappingCommand({ UUID })).then((mapping) => mapping.LastProcessingResult);
+
+async function nextMessage(QueueUrl: string) {
+  let body: string | undefined;
+  await expect
+    .poll(async () => (body = (await sqs.send(new ReceiveMessageCommand({ QueueUrl }))).Messages?.[0]?.Body), { timeout: 15_000 })
+    .toBeDefined();
+  return JSON.parse(body!);
+}
+
+const completedOf = (functionName: string) =>
+  eventsOf(functionName).filter((event) => event.kind === 'invocation' && event.phase === 'completed');
 
 async function messagesLeft(QueueUrl: string) {
   const { Attributes } = await sqs.send(
@@ -278,6 +294,51 @@ describe.each(HOSTS)('Lambda %s', (_, boot) => {
     await expect.poll(() => s3.send(new HeadBucketCommand({ Bucket: 'made-asynchronously' })).then(() => true, () => false), { timeout: 10_000 }).toBe(true);
   });
 
+  it('retries a failed Event invocation twice, then sends it to the dead-letter queue', async () => {
+    const { QueueUrl, QueueArn } = await createQueue('dead-letters');
+    await createFunction('doomed', { DeadLetterConfig: { TargetArn: QueueArn } });
+    await invoke('doomed', { throw: true }, { InvocationType: 'Event' });
+    expect(await nextMessage(QueueUrl)).toMatchObject({
+      requestContext: { condition: 'RetriesExhausted' },
+      requestPayload: { throw: true },
+      responseContext: { functionError: 'Unhandled' },
+    });
+    expect(completedOf('doomed')).toHaveLength(3);
+  }, 30_000);
+
+  it('sends a failed Event invocation to its OnFailure destination after the configured retries', async () => {
+    const { QueueUrl, QueueArn } = await createQueue('on-failure');
+    await createFunction('once');
+    await lambda.send(
+      new PutFunctionEventInvokeConfigCommand({
+        FunctionName: 'once',
+        MaximumRetryAttempts: 0,
+        DestinationConfig: { OnFailure: { Destination: QueueArn } },
+      }),
+    );
+    await invoke('once', { throw: true }, { InvocationType: 'Event' });
+    expect(await nextMessage(QueueUrl)).toMatchObject({ requestPayload: { throw: true } });
+    expect(completedOf('once')).toHaveLength(1);
+  }, 30_000);
+
+  it('stops retrying an Event invocation once an attempt succeeds', async () => {
+    const { QueueUrl, QueueArn } = await createQueue('never-used');
+    const code = `
+      export const handler = async () => {
+        const url = process.env.AWS_ENDPOINT_URL + '/retried-once';
+        const headers = { authorization: ${JSON.stringify(authorization('s3'))} };
+        if ((await fetch(url, { method: 'HEAD', headers })).status !== 404) return;
+        await fetch(url, { method: 'PUT', headers });
+        throw new Error('first attempt');
+      };
+    `;
+    await createFunction('flaky', { DeadLetterConfig: { TargetArn: QueueArn } }, code);
+    await invoke('flaky', {}, { InvocationType: 'Event' });
+    await expect.poll(() => completedOf('flaky').length, { timeout: 15_000 }).toBe(2);
+    expect(completedOf('flaky')).toMatchObject([{ failed: true }, { failed: false }]);
+    expect(await messagesLeft(QueueUrl)).toBe(0);
+  }, 30_000);
+
   it('runs a function from an SQS event source mapping, deleting only a batch that succeeded', async () => {
     await createFunction('consumer', {}, CONSUMER);
     const [ok, failed] = await Promise.all([
@@ -296,18 +357,17 @@ describe.each(HOSTS)('Lambda %s', (_, boot) => {
   it('runs mapped batches concurrently, up to the reserved concurrency', async () => {
     await createFunction('drainer', {}, 'export const handler = () => new Promise((resolve) => setTimeout(resolve, 300));');
     await lambda.send(new PutFunctionConcurrencyCommand({ FunctionName: 'drainer', ReservedConcurrentExecutions: 5 }));
-    const { QueueUrl } = await sqs.send(new CreateQueueCommand({ QueueName: 'backlog' }));
+    const { QueueUrl, QueueArn } = await createQueue('backlog');
     await Promise.all(
       Array.from({ length: 10 }, (_, index) => sqs.send(new SendMessageCommand({ QueueUrl, MessageBody: String(index) }))),
     );
-    const { Attributes } = await sqs.send(new GetQueueAttributesCommand({ QueueUrl, AttributeNames: ['QueueArn'] }));
     await lambda.send(
-      new CreateEventSourceMappingCommand({ FunctionName: 'drainer', EventSourceArn: Attributes!.QueueArn, BatchSize: 1 }),
+      new CreateEventSourceMappingCommand({ FunctionName: 'drainer', EventSourceArn: QueueArn, BatchSize: 1 }),
     );
 
     await expect.poll(() => eventsOf('drainer').length, { timeout: 5_000 }).toBeGreaterThan(0);
     const started = performance.now();
-    await expect.poll(() => messagesLeft(QueueUrl!), { timeout: 10_000, interval: 20 }).toBe(0);
+    await expect.poll(() => messagesLeft(QueueUrl), { timeout: 10_000, interval: 20 }).toBe(0);
     expect(performance.now() - started).toBeLessThan(1_500);
 
     let running = 0;

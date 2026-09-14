@@ -89,6 +89,34 @@ async def _invoke(lambda_svc, func, event):
     return result
 
 
+# ministack's invoke_async_with_retry, whose backoff sleeps the thread shim would defer
+async def _invoke_async(lambda_svc, func, event, attempt, started):
+    config = func.get("config") or func
+    account, region = lambda_svc._account_region_from_function_config(config)
+    lambda_svc._request_account_id.set(account)
+    lambda_svc._request_region.set(region)
+    try:
+        result = await _execute(lambda_svc, func, event)
+        if not result.get("error"):
+            return
+        eic = lambda_svc._event_invoke_config(func, None) or {}
+        max_retries = eic.get("MaximumRetryAttempts")
+        if attempt < (2 if max_retries is None else int(max_retries)):
+            delay = min(
+                lambda_svc._LAMBDA_ASYNC_RETRY_BASE_SECONDS * 2**attempt, lambda_svc._LAMBDA_ASYNC_RETRY_MAX_SECONDS
+            )
+            if time.time() - started + delay <= int(eic.get("MaximumEventAgeInSeconds", 21600)):
+                call_later(delay, lambda: _invoke_async(lambda_svc, func, event, attempt + 1, started))
+                return
+        target = (eic.get("DestinationConfig") or {}).get("OnFailure", {}).get("Destination") or (
+            config.get("DeadLetterConfig") or {}
+        ).get("TargetArn")
+        if target:
+            lambda_svc._route_async_failure(target, config.get("FunctionName", "unknown"), event, result)
+    except Exception as error:
+        print(f"An asynchronous invocation failed: {error!r}", file=sys.stderr)
+
+
 # As ministack's _poll_sqs builds it
 def _sqs_record(lambda_svc, msg, source_arn, now):
     attributes = {
@@ -228,16 +256,8 @@ def _patch_lambda(lambda_svc):
             return await _execute(lambda_svc, *args)
         return await original_run_reentrant(fn, *args, thread_name=thread_name)
 
-    # One attempt: no retries or dead-lettering yet. ministack's own loop cannot serve, since
-    # the thread shim defers its backoff sleeps
     def invoke_async_with_retry(func, event):
-        async def attempt():
-            try:
-                await _execute(lambda_svc, func, event)
-            except Exception as error:
-                print(f"An asynchronous invocation failed: {error!r}", file=sys.stderr)
-
-        asyncio.ensure_future(attempt())
+        asyncio.ensure_future(_invoke_async(lambda_svc, func, event, 0, time.time()))
 
     original_execute_function = lambda_svc._execute_function
 

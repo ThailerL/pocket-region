@@ -2,6 +2,7 @@
 # inline instead: fire-and-forget workers (S3 event fanout, SNS delivery) complete during
 # the request that triggered them, and loop-forever workers hit the first sleep and are
 # deferred. Must run before ministack is imported.
+import asyncio
 import functools
 import sys
 import threading
@@ -71,10 +72,26 @@ def _inline_start(self):
         _ticked.append((self.name, target))
 
 
+# (due time, coroutine function)
+_later = []
+
+
+# Started by the tick rather than a timer: a cancelled Pyodide timer holds Node for its full delay
+def call_later(seconds, start):
+    _later.append((time.time() + seconds, start))
+
+
 # Called by the region on an interval. Async so a pass can wait on JS through run_sync
 async def region_tick():
     for name, target in _ticked:
         _run(name, target, 1)
+    now = time.time()
+    pending, _later[:] = _later[:], []
+    for due, start in pending:
+        if due <= now:
+            asyncio.ensure_future(start())
+        else:
+            _later.append((due, start))
     for hook in TICK_HOOKS:
         await hook()
 
