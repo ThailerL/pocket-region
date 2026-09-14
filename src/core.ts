@@ -69,21 +69,19 @@ export type FunctionConfig = {
 export type Invocation = {
   requestId: string;
   config: FunctionConfig;
-  // Reserved through PutFunctionConcurrency, or the emulator's default
-  concurrency: number;
   // The event as JSON text, handed to the runtime verbatim
   event: string;
   // Present only when the host answered needsCode(CodeSha256) with true
   code?: CodeEntry[];
 };
 
-// payload is JSON text: the handler's result, or Lambda's { errorType, errorMessage } shape
-export type InvocationOutcome = {
-  status: 'ok' | 'error' | 'throttled';
-  payload: string | null;
-  // Framed with Lambda's START, END, and REPORT lines; output is what the function wrote
+// payload is the handler's result as JSON text. An error carries only its message, as MiniStack's warm workers do
+export type InvocationOutcome = (
+  | { status: 'ok'; payload: string | null }
+  | { status: 'error'; message: string }
+) & {
+  // What the function wrote, which the emulator frames for CloudWatch Logs
   log: string;
-  output: string;
 };
 
 // Supplied by the entry point: child processes in Node, workers in a page
@@ -116,8 +114,7 @@ export type LambdaEvent =
       durationMs: number;
       initMs?: number;
       failed: boolean;
-    }
-  | { kind: 'throttled'; functionName: string };
+    };
 
 export type LambdaObserver = {
   onOutput?(line: string, source: { functionName: string; environment: string }): void;
@@ -146,8 +143,6 @@ type PythonDispatch = (
 
 const STATE_ROOT = '/state';
 export const DEFAULT_PORT = 4566;
-// A pass measured 0.03 ms empty and 57 ms over 100,000 TTL items, 2026-09-12
-const TICK_INTERVAL_MS = 1000;
 
 // A host reports to the observer alone; the region's untagged onOutput hears each line too
 export const hostObserver = ({ onOutput, lambda }: RegionSettings): LambdaObserver => ({
@@ -207,6 +202,21 @@ export async function bootRegion(
   py.globals.set('STATE_ROOT', STATE_ROOT);
   py.globals.set('REGION_PORT', port);
   py.globals.set('LAMBDA_EXECUTOR', executor ?? null);
+  // A worker's sleeps, owned here: a cancelled Pyodide timer would hold Node for its full delay
+  const wakes = new Set<() => void>();
+  let stopped = false;
+  py.globals.set('REGION_SLEEP', (seconds: number) =>
+    new Promise<void>((resolve) => {
+      if (stopped) return resolve();
+      const wake = () => {
+        clearTimeout(timer);
+        wakes.delete(wake);
+        resolve();
+      };
+      const timer = unref(setTimeout(wake, seconds * 1000));
+      wakes.add(wake);
+    }),
+  );
   await persistence?.restore(py, STATE_ROOT);
   // One shared namespace, in the generated order
   for (const source of PYTHON_SOURCES) {
@@ -216,14 +226,7 @@ export async function bootRegion(
   await lifespan('startup');
   dispatchPython = py.globals.get('region_dispatch');
   const savePython: () => void = py.globals.get('region_save');
-  const tickPython: () => Promise<void> = py.globals.get('region_tick');
-  // A pass can wait on a Lambda handler, so a slow one must not overlap the next
-  let ticking: Promise<void> | undefined;
-  const ticker = unref(
-    setInterval(() => {
-      ticking ??= tickPython().finally(() => (ticking = undefined));
-    }, TICK_INTERVAL_MS),
-  );
+  const endWorkers: () => void = py.globals.get('end_workers');
 
   return {
     port,
@@ -246,8 +249,9 @@ export async function bootRegion(
       await persistence.mirror(py, STATE_ROOT);
     },
     async stop() {
-      clearInterval(ticker);
-      await ticking;
+      endWorkers();
+      stopped = true;
+      for (const wake of [...wakes]) wake();
       // Lifespan shutdown writes the state files; the mirror follows
       await lifespan('shutdown');
       await persistence?.mirror(py, STATE_ROOT);

@@ -35,8 +35,7 @@ exports[`runnable docs examples > services.mdx example 2 prints what it did 1`] 
 
 exports[`runnable docs examples > services.mdx example 3 prints what it did 1`] = `
 [
-  "before: ["expired","live"]",
-  "after: ["live"]",
+  "sessions: ["alice","bob"]",
 ]
 `;
 

@@ -13,6 +13,8 @@ import {
   TooManyRequestsException,
   UpdateFunctionConfigurationCommand,
 } from '@aws-sdk/client-lambda';
+import { EventBridgeClient, PutEventsCommand, PutRuleCommand, PutTargetsCommand } from '@aws-sdk/client-eventbridge';
+import { CreateStreamCommand, DescribeStreamCommand, KinesisClient, PutRecordCommand } from '@aws-sdk/client-kinesis';
 import { HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
 import { GetQueueAttributesCommand, SendMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -153,8 +155,10 @@ async function nextMessage(QueueUrl: string) {
 const invocationsOf = (functionName: string, phase: 'started' | 'completed') =>
   eventsOf(functionName).filter((event) => event.kind === 'invocation' && event.phase === phase);
 
-// A first retry's 1 s backoff and the tick that starts it, with margin
+// A first retry's 1 s backoff, with margin
 const pastFirstRetry = () => new Promise((resolve) => setTimeout(resolve, 2_500));
+
+const bucketExists = (Bucket: string) => s3.send(new HeadBucketCommand({ Bucket })).then(() => true, () => false);
 
 async function messagesLeft(QueueUrl: string) {
   const { Attributes } = await sqs.send(
@@ -230,7 +234,7 @@ describe.each(HOSTS)('Lambda %s', (_, boot) => {
     const thrown = await invoke('echo', { throw: true });
     expect(thrown.status).toBe(200);
     expect(thrown.error).toBe('Unhandled');
-    expect(thrown.payload).toMatchObject({ errorType: 'Error', errorMessage: 'handler failed' });
+    expect(thrown.payload).toEqual({ errorType: 'Runtime.HandlerError', errorMessage: 'handler failed' });
   });
 
   it("returns the handler's log with LogType Tail", async () => {
@@ -238,20 +242,11 @@ describe.each(HOSTS)('Lambda %s', (_, boot) => {
     expect(tailed.log).toContain('handling {"tail":1}');
   });
 
-  it("frames the log with Lambda's START, END, and REPORT lines, Init Duration on the first only", async () => {
-    await createFunction('reported');
-    const cold = (await invoke('reported', {}, { LogType: 'Tail' })).log!;
-    const warm = (await invoke('reported', {}, { LogType: 'Tail' })).log!;
-    expect(cold).toMatch(/^START RequestId: \S+ Version: \$LATEST\n.*\nEND RequestId: \S+\nREPORT RequestId: \S+\tDuration: [\d.]+ ms\t.*\tInit Duration: [\d.]+ ms$/s);
-    expect(warm).toMatch(/\nREPORT RequestId: \S+\tDuration: [\d.]+ ms/);
-    expect(warm).not.toContain('Init Duration');
-  }, 30_000);
-
   it('times out with Lambda’s message, and the next invocation still runs', async () => {
     await createFunction('slow', { Timeout: 1 });
     const late = await invoke('slow', { sleep: 1500 });
     expect(late.error).toBe('Unhandled');
-    expect(late.payload).toEqual({ errorType: 'Sandbox.Timedout', errorMessage: 'Task timed out after 1.00 seconds' });
+    expect(late.payload).toEqual({ errorType: 'Runtime.ExitError', errorMessage: 'Task timed out after 1.00 seconds' });
     // A fresh environment: the timed-out one was not reused
     expect((await invoke('slow', {})).payload.calls).toBe(1);
     expect(eventsOf('slow')).toContainEqual(expect.objectContaining({ phase: 'completed', failed: true }));
@@ -272,13 +267,12 @@ describe.each(HOSTS)('Lambda %s', (_, boot) => {
     const refused = outcomes.filter((outcome) => outcome.status === 'rejected');
     expect(refused).toHaveLength(1);
     expect(refused[0]!.reason).toBeInstanceOf(TooManyRequestsException);
-    expect(eventsOf('single')).toContainEqual({ kind: 'throttled', functionName: 'single' });
   }, 30_000);
 
   it('accepts an Event invocation before the handler runs it', async () => {
     const accepted = await invoke('echo', { bucket: 'made-asynchronously' }, { InvocationType: 'Event' });
     expect(accepted.status).toBe(202);
-    await expect.poll(() => s3.send(new HeadBucketCommand({ Bucket: 'made-asynchronously' })).then(() => true, () => false), { timeout: 10_000 }).toBe(true);
+    await expect.poll(() => bucketExists('made-asynchronously'), { timeout: 10_000 }).toBe(true);
   });
 
   it('retries a failed Event invocation twice, then sends it to the dead-letter queue', async () => {
@@ -364,12 +358,47 @@ describe.each(HOSTS)('Lambda %s', (_, boot) => {
     let running = 0;
     let peak = 0;
     for (const event of eventsOf('drainer')) {
-      if (event.kind === 'throttled') throw new Error('a mapping batch was throttled');
       if (event.kind !== 'invocation') continue;
       running += event.phase === 'started' ? 1 : -1;
       peak = Math.max(peak, running);
     }
     expect(peak).toBe(5);
+  }, 30_000);
+
+  it('runs the function an EventBridge rule targets', async () => {
+    const events = new EventBridgeClient(clientConfig({ requestHandler: requestHandler(region) }));
+    const { FunctionArn } = await createFunction('ruled');
+    await events.send(new PutRuleCommand({ Name: 'to-echo', EventPattern: JSON.stringify({ source: ['orders'] }) }));
+    await events.send(
+      new PutTargetsCommand({ Rule: 'to-echo', Targets: [{ Id: 'ruled', Arn: FunctionArn, Input: JSON.stringify({ bucket: 'made-by-a-rule' }) }] }),
+    );
+    await events.send(new PutEventsCommand({ Entries: [{ Source: 'orders', DetailType: 'placed', Detail: '{}' }] }));
+    await expect.poll(() => bucketExists('made-by-a-rule'), { timeout: 10_000 }).toBe(true);
+  });
+
+  it('runs a function from a Kinesis event source mapping', async () => {
+    const kinesis = new KinesisClient(clientConfig({ requestHandler: requestHandler(region) }));
+    const code = `
+      export const handler = async (event) => {
+        for (const record of event.Records) {
+          const bucket = atob(record.kinesis.data);
+          await fetch(process.env.AWS_ENDPOINT_URL + '/' + bucket, { method: 'PUT', headers: { authorization: ${JSON.stringify(authorization('s3'))} } });
+        }
+      };
+    `;
+    await createFunction('streamer', {}, code);
+    await kinesis.send(new CreateStreamCommand({ StreamName: 'clicks', ShardCount: 1 }));
+    const { StreamDescription } = await kinesis.send(new DescribeStreamCommand({ StreamName: 'clicks' }));
+    await lambda.send(
+      new CreateEventSourceMappingCommand({
+        FunctionName: 'streamer',
+        EventSourceArn: StreamDescription!.StreamARN,
+        StartingPosition: 'TRIM_HORIZON',
+        BatchSize: 1,
+      }),
+    );
+    await kinesis.send(new PutRecordCommand({ StreamName: 'clicks', PartitionKey: 'user', Data: new TextEncoder().encode('made-by-a-stream') }));
+    await expect.poll(() => bucketExists('made-by-a-stream'), { timeout: 15_000 }).toBe(true);
   }, 30_000);
 
   it('refuses a runtime it cannot run', async () => {
@@ -387,13 +416,13 @@ describe.each(HOSTS)('Lambda %s', (_, boot) => {
   });
 
   // Last in the block: the reset empties the region the tests above share
-  it('drops an Event invocation waiting to retry when the region resets', async () => {
-    await createFunction('forgotten');
-    await invoke('forgotten', { throw: true }, { InvocationType: 'Event' });
-    await expect.poll(() => invocationsOf('forgotten', 'completed').length, { timeout: 10_000 }).toBe(1);
+  it('still retries an Event invocation that was waiting when the region reset, as MiniStack does', async () => {
+    await createFunction('remembered');
+    await invoke('remembered', { throw: true }, { InvocationType: 'Event' });
+    await expect.poll(() => invocationsOf('remembered', 'completed').length, { timeout: 10_000 }).toBe(1);
     await region.reset();
     await pastFirstRetry();
-    expect(invocationsOf('forgotten', 'completed')).toHaveLength(1);
+    expect(invocationsOf('remembered', 'completed')).toHaveLength(2);
   }, 30_000);
 
   it('fails an invocation running when the region resets, and cold-starts the next', async () => {
@@ -403,22 +432,9 @@ describe.each(HOSTS)('Lambda %s', (_, boot) => {
     await region.reset();
     const failed = await running;
     expect(failed.error).toBe('Unhandled');
-    expect(failed.payload).toEqual({ errorType: 'Runtime.ExitError', errorMessage: 'Runtime exited with error: the region reset' });
+    expect(failed.payload).toEqual({ errorType: 'Runtime.HandlerError', errorMessage: 'Runtime exited with error: the region reset' });
     await createFunction('interrupted');
     expect((await invoke('interrupted', {})).payload.calls).toBe(1);
-  }, 30_000);
-
-  it('drops an Event invocation that a reset over HTTP interrupts, with no retry or dead letter', async () => {
-    const { QueueArn } = await createQueue(sqs, 'interrupted-letters');
-    await createFunction('cut-short', { DeadLetterConfig: { TargetArn: QueueArn } });
-    await invoke('cut-short', { sleep: 5_000 }, { InvocationType: 'Event' });
-    await expect.poll(() => invocationsOf('cut-short', 'started').length, { timeout: 10_000 }).toBe(1);
-    // The emulator's own route, as over HTTP, where nothing waits for the environments to stop
-    await region.dispatch({ method: 'POST', path: '/_ministack/reset', headers: { host: `localhost:${region.port}` } });
-    const { QueueUrl } = await createQueue(sqs, 'interrupted-letters');
-    await pastFirstRetry();
-    expect(invocationsOf('cut-short', 'started')).toHaveLength(1);
-    expect(await messagesLeft(QueueUrl)).toBe(0);
   }, 30_000);
 
   it('stops a mapped batch the reset interrupts before it writes to the fresh region', async () => {

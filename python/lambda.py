@@ -1,5 +1,4 @@
 # LAMBDA_EXECUTOR is set by bootRegion, and None where functions cannot run
-import asyncio
 import importlib.abc
 import importlib.util
 import io
@@ -13,8 +12,6 @@ from js import Object
 from pyodide.ffi import to_js
 
 _LAMBDA_MODULE = "ministack.services.lambda_svc"
-# ministack's account cap is bypassed, so this is the only bound on a function's environments
-_DEFAULT_CONCURRENCY = 10
 
 
 def _code_entries(code_zip):
@@ -26,102 +23,17 @@ def _code_entries(code_zip):
     return entries
 
 
-# ministack stores the reservation as an int or a dict, depending on the call that set it
-def _concurrency(func):
-    reserved = func.get("concurrency")
-    if isinstance(reserved, dict):
-        reserved = reserved.get("ReservedConcurrentExecutions")
-    return _DEFAULT_CONCURRENCY if reserved is None else reserved
-
-
-def _invocation(func, config, event, request_id):
-    invocation = {
-        "requestId": request_id,
-        "config": config,
-        "concurrency": _concurrency(func),
-        "event": json.dumps(event),
-    }
+def _invocation(func, event):
+    config = func.get("config") or func
+    invocation = {"requestId": str(uuid.uuid4()), "config": config, "event": json.dumps(event)}
     # The zip crosses to JS once per code hash
     if func.get("code_zip") and LAMBDA_EXECUTOR.needsCode(config.get("CodeSha256", "")):
         invocation["code"] = _code_entries(func["code_zip"])
     return to_js(invocation, dict_converter=Object.fromEntries)
 
 
-# (account, region, function name) -> invocations started and not yet answered
-_in_flight = {}
-
-# An asynchronous invocation the reset interrupted sees this change and neither retries nor dead-letters
-_resets = 0
-
-
-# Counted before anything awaits, so a pass that starts several batches sees each one
-def _hold(lambda_svc, func):
-    config = func.get("config") or func
-    key = (lambda_svc.get_account_id(), lambda_svc.get_region(), config.get("FunctionName"))
-    _in_flight[key] = _in_flight.get(key, 0) + 1
-    return key
-
-
-async def _execute(lambda_svc, func, event):
-    key = _hold(lambda_svc, func)
-    try:
-        return await _invoke(lambda_svc, func, event)
-    finally:
-        _in_flight[key] -= 1
-
-
-# Returns the result dict ministack's _execute_function would have
-async def _invoke(lambda_svc, func, event):
-    config = func.get("config") or func
-    request_id = str(uuid.uuid4())
-    started = time.time()
-    outcome = (await LAMBDA_EXECUTOR.execute(_invocation(func, config, event, request_id))).to_py()
-    duration_ms = int((time.time() - started) * 1000)
-    if outcome["status"] == "throttled":
-        return lambda_svc._throttle_response(
-            "ReservedFunctionConcurrentInvocationLimitExceeded",
-            f"Rate Exceeded: function {config.get('FunctionName', 'unknown')} at ReservedConcurrentExecutions",
-        )
-    failed = outcome["status"] == "error"
-    # It frames the output as the host framed the log
-    lambda_svc._emit_lambda_logs(func, request_id, outcome["output"], failed, duration_ms)
-    payload = None if outcome["payload"] is None else json.loads(outcome["payload"])
-    result = {"body": payload, "log": outcome["log"]}
-    if failed:
-        result.update(error=True, function_error="Unhandled")
-    return result
-
-
-# ministack's invoke_async_with_retry, whose backoff sleeps the thread shim would defer
-async def _invoke_async(lambda_svc, func, event, attempt, started):
-    resets = _resets
-    config = func.get("config") or func
-    account, region = lambda_svc._account_region_from_function_config(config)
-    lambda_svc._request_account_id.set(account)
-    lambda_svc._request_region.set(region)
-    try:
-        result = await _execute(lambda_svc, func, event)
-        if not result.get("error") or resets != _resets:
-            return
-        eic = lambda_svc._event_invoke_config(func, None) or lambda_svc._event_invoke_config(func, "$LATEST") or {}
-        max_retries = eic.get("MaximumRetryAttempts")
-        if attempt < (2 if max_retries is None else int(max_retries)):
-            delay = min(
-                lambda_svc._LAMBDA_ASYNC_RETRY_BASE_SECONDS * 2**attempt, lambda_svc._LAMBDA_ASYNC_RETRY_MAX_SECONDS
-            )
-            if time.time() - started + delay <= int(eic.get("MaximumEventAgeInSeconds", 21600)):
-                call_later(delay, lambda: _invoke_async(lambda_svc, func, event, attempt + 1, started))
-                return
-        target = (eic.get("DestinationConfig") or {}).get("OnFailure", {}).get("Destination") or (
-            config.get("DeadLetterConfig") or {}
-        ).get("TargetArn")
-        if target:
-            lambda_svc._route_async_failure(target, config.get("FunctionName", "unknown"), event, result)
-    except Exception as error:
-        print(f"An asynchronous invocation failed: {error!r}", file=sys.stderr)
-
-
-# As ministack's _poll_sqs builds it
+# From here to _poll_sqs, and its assignment in _patch_lambda: ministack's _poll_sqs with each batch on a
+# worker holding a concurrency slot, as proposed upstream. Delete at the ministack bump that ships it
 def _sqs_record(lambda_svc, msg, source_arn, now):
     attributes = {
         "ApproximateReceiveCount": str(msg.get("receive_count", 1)),
@@ -169,9 +81,6 @@ def _batch_item_failures(esm, body):
 
 
 def _settle(lambda_svc, sqs, esm, queue_url, batch, result):
-    # A throttled batch stays invisible until its visibility timeout, as a failed one does
-    if result.get("throttle"):
-        return
     if result.get("error"):
         esm["LastProcessingResult"] = "FAILED"
         lambda_svc._esm_backoff_until[esm["UUID"]] = time.time() + lambda_svc._ESM_BACKOFF_SECONDS
@@ -186,102 +95,94 @@ def _settle(lambda_svc, sqs, esm, queue_url, batch, result):
     )
 
 
-async def _deliver(lambda_svc, sqs, esm, func, queue_url, batch, records, key):
-    try:
-        _settle(lambda_svc, sqs, esm, queue_url, batch, await _invoke(lambda_svc, func, {"Records": records}))
-    except Exception as error:
-        print(f"An event source mapping batch failed: {error!r}", file=sys.stderr)
-    finally:
-        _in_flight[key] -= 1
-        await poll_mappings()
-
-
-def _start_batches(lambda_svc, sqs, esm):
-    if not esm.get("Enabled", True):
-        return
+# A received batch with the slot that holds it, or None when the mapping has no slot or no messages
+def _next_sqs_batch(lambda_svc, sqs, esm):
+    if not esm.get("Enabled", True) or lambda_svc._esm_backoff_until.get(esm["UUID"], 0) > time.time():
+        return None
     source_arn = esm.get("EventSourceArn", "")
     try:
         spec = lambda_svc.parse_arn(source_arn)
     except lambda_svc.ArnParseError:
-        return
+        return None
     if spec.service != "sqs" or spec.account_id != lambda_svc.get_account_id() or spec.region != lambda_svc.get_region():
-        return
+        return None
     queue_name = lambda_svc._sqs_queue_name_from_arn_spec(spec)
     func, _ = lambda_svc._get_func_record_for_qualifier(esm["FunctionName"], esm.get("Qualifier"))
     if not queue_name or func is None:
-        return
+        return None
     queue_url = sqs._queue_url(queue_name)
     queue = sqs._queues.get(queue_url)
     if not queue or queue.get("attributes", {}).get("QueueArn") != source_arn:
-        return
-
-    config = func.get("config") or func
-    key = (lambda_svc.get_account_id(), lambda_svc.get_region(), config.get("FunctionName"))
-    while _in_flight.get(key, 0) < _concurrency(func) and lambda_svc._esm_backoff_until.get(esm["UUID"], 0) <= time.time():
+        return None
+    while True:
+        slot, _ = lambda_svc._acquire_execution_slot(func, func.get("config") or func)
+        if slot is None:
+            return None
         batch = sqs._receive_messages_for_esm(queue_url, esm.get("BatchSize", 10))
         if not batch:
-            return
+            lambda_svc._release_execution_slot(slot)
+            return None
         now = time.time()
         records = lambda_svc._apply_filter_criteria([_sqs_record(lambda_svc, msg, source_arn, now) for msg in batch], esm)
+        if records:
+            return slot, func, queue_url, batch, records
         # Lambda drops what the filter rejects before the handler runs
-        if not records:
-            sqs._delete_messages_for_esm(queue_url, {msg["receipt_handle"] for msg in batch})
-            continue
-        asyncio.ensure_future(_deliver(lambda_svc, sqs, esm, func, queue_url, batch, records, _hold(lambda_svc, func)))
+        lambda_svc._release_execution_slot(slot)
+        sqs._delete_messages_for_esm(queue_url, {msg["receipt_handle"] for msg in batch})
 
 
-# Awaits nothing, so no other pass runs between counting a function's invocations and starting one.
-# Run by every tick and whenever a batch finishes
-async def poll_mappings():
-    lambda_svc = sys.modules.get(_LAMBDA_MODULE)
-    if lambda_svc is None:
-        return
+# Takes the mapping's next batch as each finishes, so a freed slot is not left for the poller's idle sleep
+def _run_sqs_batches(lambda_svc, sqs, esm, taken):
+    while taken is not None:
+        slot, func, queue_url, batch, records = taken
+        # _execute_function takes it back before anything can suspend, so nothing else runs in between
+        lambda_svc._release_execution_slot(slot)
+        _settle(lambda_svc, sqs, esm, queue_url, batch, lambda_svc._execute_function(func, {"Records": records}))
+        taken = _next_sqs_batch(lambda_svc, sqs, esm)
+
+
+def _poll_sqs(lambda_svc):
+    from ministack.core.concurrency import spawn_background
     from ministack.services import sqs
 
+    started = False
     for account, region, esm in lambda_svc._iter_all_esms():
         account_token = lambda_svc._request_account_id.set(account)
         region_token = lambda_svc._request_region.set(region)
         try:
-            _start_batches(lambda_svc, sqs, esm)
-        except Exception as error:
-            print(f"An event source mapping pass failed: {error!r}", file=sys.stderr)
+            while (taken := _next_sqs_batch(lambda_svc, sqs, esm)) is not None:
+                spawn_background(_run_sqs_batches, lambda_svc, sqs, esm, taken, thread_name="sqs-batches")
+                started = True
         finally:
             lambda_svc._request_account_id.reset(account_token)
             lambda_svc._request_region.reset(region_token)
+    return started
 
 
 # Reaches into ministack's private names and record shape: re-run the Lambda tests on a bump
 def _patch_lambda(lambda_svc):
-    original_run_reentrant = lambda_svc.run_reentrant
+    # ministack's executor for python and nodejs, so its slot, request id, and log framing stay its own
+    def execute_function_warm(func, event):
+        outcome = suspend(LAMBDA_EXECUTOR.execute(_invocation(func, event))).to_py()
+        if outcome["status"] != "error":
+            payload = None if outcome["payload"] is None else json.loads(outcome["payload"])
+            return {"body": payload, "log": outcome["log"]}
+        # As ministack's warm executor shapes a worker's error
+        message = outcome["message"]
+        error_type = "Runtime.ExitError" if "timed out" in message.lower() else "Runtime.HandlerError"
+        return {"body": {"errorMessage": message, "errorType": error_type}, "error": True, "log": outcome["log"]}
 
-    # Awaited rather than threaded, so a running handler can still call the region
-    async def run_reentrant(fn, *args, thread_name="ministack-reentrant"):
-        if fn is lambda_svc._execute_function_with_config_scope:
-            return await _execute(lambda_svc, *args)
-        return await original_run_reentrant(fn, *args, thread_name=thread_name)
+    lambda_runtime = sys.modules["ministack.core.lambda_runtime"]
+    original_reset = lambda_runtime.reset
 
-    def invoke_async_with_retry(func, event):
-        asyncio.ensure_future(_invoke_async(lambda_svc, func, event, 0, time.time()))
-
-    def execute_function(func, event):
-        return run_sync_suspended(_execute(lambda_svc, func, event))
-
-    original_reset = lambda_svc.reset
-
-    # Retries and running invocations hold the deleted function records, so neither outlives it
+    # ministack's reset kills its warm workers here, and the pool's environments are those workers
     def reset():
-        global _resets
-        _resets += 1
-        clear_later()
         LAMBDA_EXECUTOR.reset()
         original_reset()
 
-    lambda_svc.run_reentrant = run_reentrant
-    lambda_svc.reset = reset
-    lambda_svc.invoke_async_with_retry = invoke_async_with_retry
-    lambda_svc._execute_function = execute_function
-    # Its one pass at CreateEventSourceMapping would take a batch serially; poll_mappings owns SQS
-    lambda_svc._poll_sqs = lambda: False
+    lambda_svc._execute_function_warm = execute_function_warm
+    lambda_svc._poll_sqs = lambda: _poll_sqs(lambda_svc)
+    lambda_runtime.reset = reset
 
 
 # Patches on ministack's own lazy import; importing lambda_svc at boot costs 91 ms
@@ -302,7 +203,6 @@ class _PatchOnImport(importlib.abc.MetaPathFinder):
 
 
 if LAMBDA_EXECUTOR is not None:
-    TICK_HOOKS.append(poll_mappings)
     if _LAMBDA_MODULE in sys.modules:
         _patch_lambda(sys.modules[_LAMBDA_MODULE])
     else:

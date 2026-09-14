@@ -73,8 +73,8 @@ So an SDK client created inside a handler with no options reaches the region. In
 
 | | Behaviour |
 | --- | --- |
-| `Timeout` | Past it, the invocation fails with `Sandbox.Timedout`, and that environment is stopped rather than reused |
-| Concurrency | `ReservedConcurrentExecutions`, or 10 without one |
+| `Timeout` | Past it, the invocation fails with `Runtime.ExitError`, and that environment is stopped rather than reused |
+| Concurrency | `ReservedConcurrentExecutions` per function, and MiniStack's account cap across all of them, measured at 97 in Node and in a page |
 | An idle environment | Stopped after 60 s |
 | A code or configuration change | New invocations get fresh environments. The old ones finish what they're running |
 
@@ -82,18 +82,18 @@ So an SDK client created inside a handler with no options reaches the region. In
 
 A failed `Event` invocation is retried twice by default, or up to the function's
 `MaximumRetryAttempts`, with backoff of 1 s then 2 s, capped at 30 s, rather than AWS's minutes.
-Retries start up to a second late, because they wait on the region's once-a-second timer. When
-retries run out, the event goes to the `OnFailure` destination or the `DeadLetterConfig` target.
-SQS targets are tested, SNS targets aren't.
+When retries run out, the event goes to the `OnFailure` destination or the `DeadLetterConfig`
+target. SQS targets are tested, SNS targets aren't.
 
-EventBridge rules that target Lambda don't reach the handler at all, found by reading
-MiniStack's source and not yet run.
+An EventBridge rule that targets a function runs it once, as MiniStack does, with no retries.
 
 ## Event source mappings
 
-SQS mappings hand a function batches from a queue, as many at once as its concurrency allows.
-`ReportBatchItemFailures` is untested. Kinesis and DynamoDB Streams mappings are accepted but
-don't poll yet.
+MiniStack's poller hands a function batches from SQS queues and Kinesis streams, checking every
+second while a mapping exists. A Kinesis mapping runs one batch at a time. An SQS mapping runs as
+many batches at once as the function's concurrency allows, taking the next as each finishes, which
+MiniStack doesn't do yet. SQS and Kinesis are tested. DynamoDB Streams
+and `ReportBatchItemFailures` are untested.
 
 ## Watching functions run
 
@@ -106,13 +106,15 @@ Pass `lambda` to `createRegion`. `onOutput` gets every line a handler writes, in
 | `environment` | `started`, `stopped` | `functionName`, `environment`, and `reason` when stopped |
 | `invocation` | `started` | `functionName`, `environment`, `requestId`, `event` (JSON text), `coldStart` |
 | `invocation` | `completed` | `functionName`, `environment`, `requestId`, `durationMs`, `initMs` (first invocation only), `failed` |
-| `throttled` | | `functionName` |
+
+Throttles aren't reported here. MiniStack publishes them as the `AWS/Lambda` `Throttles` metric in
+CloudWatch.
 
 ```js
 const region = await createRegion({
   lambda: {
     onOutput: (line, { functionName, environment }) => console.log(`[${functionName} ${environment}] ${line}`),
-    onEvent: (event) => { if (event.kind === 'throttled') console.warn(`${event.functionName} throttled`); },
+    onEvent: (event) => { if (event.kind === 'invocation' && event.phase === 'completed' && event.failed) console.warn(`${event.functionName} failed`); },
   },
 });
 ```

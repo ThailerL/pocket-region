@@ -62,14 +62,15 @@ millisecond for a typical test and about 3.5 ms with 20 resources, measured in N
 if the emulator answers with anything but `200`.
 
 Lambda functions are deleted with everything else, and every execution environment is stopped.
-An invocation still running fails with `Runtime.ExitError`. Asynchronous invocations, whether
-running or waiting to retry, are dropped without reaching a dead-letter queue or failure
-destination.
+An invocation still running fails with `Runtime.HandlerError`. Background work keeps running
+through a reset, as it does in MiniStack: an asynchronous invocation waiting to retry still
+retries, with the function it was invoked with, so its handler can write into the emptied region.
 
 With a `stateDir`, a reset doesn't touch the disk. The files stay until the next `save` or
 `stop`, which overwrites them with the empty state.
 
-To start every test empty, boot one region per test file and reset it before each test:
+To start every test empty, boot one region per test file and reset it before each test. A retry
+one test leaves waiting can still run during the next:
 
 ```js
 let region;
@@ -99,7 +100,7 @@ format version on each file.
 
 ### `stop()`
 
-Stops the once-a-second timer that runs [scheduled work](/docs/services/#scheduled-work) and
-waits for a pass already running. Then it shuts the emulator down, mirrors state into `stateDir`
-if there is one, and stops every Lambda environment. Asynchronous invocations waiting to retry
-are dropped. Once it resolves, nothing the region started keeps Node running.
+Ends MiniStack's background work, including [scheduled work](/docs/services/#scheduled-work) and
+asynchronous invocations waiting to retry. Then it shuts the emulator down, mirrors state into
+`stateDir` if there is one, and stops every Lambda environment. Once it resolves, nothing the
+region started keeps Node running.

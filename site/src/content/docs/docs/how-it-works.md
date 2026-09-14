@@ -20,20 +20,16 @@ itself over HTTP on its own port.
 ## No threads
 
 Pyodide has no threads either, and MiniStack starts background threads for several jobs.
-Pocket Region replaces thread start-up with an inline call:
-
-- **Work that finishes straight away**, such as S3 notification fan-out or SNS delivery, completes
-  inside the request that started it.
-- **Loops that sleep between passes**, such as EventBridge's scheduler and DynamoDB's TTL reaper,
-  are run one pass at a time by a timer once a second. See
-  [scheduled work](/docs/services/#scheduled-work).
-- **Work that sleeps before acting once** is dropped. That is why Step Functions executions stay
-  `RUNNING`.
+Pocket Region starts each one as a task on the event loop instead. WebAssembly JSPI lets a task
+pause in the middle of MiniStack's synchronous code, so when a thread sleeps or waits, only that
+task pauses, and requests keep being answered. MiniStack's background work runs as written: Lambda
+retries and event source mappings, Step Functions executions, and the loops behind
+[scheduled work](/docs/services/#scheduled-work).
 
 ## Lambda
 
 Lambda crosses the boundary the other way. MiniStack keeps the functions and answers the Lambda
 API. When something invokes a function, the invocation comes back out to JavaScript, which runs
-the handler in a child process or a Web Worker, enforces its timeout and concurrency, and hands
-the result back to MiniStack. The handler's own SDK calls go through `dispatch` like any other
+the handler in a child process or a Web Worker, enforces its timeout, and hands the result back to
+MiniStack, which counts concurrency and throttles. The handler's own SDK calls go through `dispatch` like any other
 request, so a handler can call the region while its own invocation is still waiting.

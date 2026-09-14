@@ -34,7 +34,7 @@ says so.
 | Service | Status |
 | --- | --- |
 | Lambda | Node functions, run by Pocket Region in Node and in a page. See [Lambda](/docs/lambda/) |
-| Step Functions | Doesn't work yet: executions stay `RUNNING` |
+| Step Functions | A `Pass` state machine is tested. The rest works as it does in MiniStack, untested here |
 | RDS, ElastiCache, ECS, EKS, Batch, OpenSearch, Athena | Stubs: they answer, but nothing runs behind them. Databases, caches, and clusters report ready with no endpoint, tasks and jobs report running or done, and Athena returns made-up rows |
 | The rest of [MiniStack's services](https://ministack.org/docs/services/) | Not run here yet. They may work, but nothing here checks them |
 
@@ -120,16 +120,15 @@ await region.stop();
 
 ### DynamoDB
 
-An item whose TTL has passed is removed within about a second. MiniStack removes expired items
-from a background thread, which Pocket Region runs from a timer instead, as
-[scheduled work](#scheduled-work) describes.
+An item whose TTL has passed is removed within about a minute, when MiniStack's reaper next runs,
+as [scheduled work](#scheduled-work) describes.
 [MiniStack's DynamoDB page](https://ministack.org/docs/services/dynamodb) lists what it supports.
 
 <Runnable>
 
 ```js
 import { createRegion, requestHandler } from 'pocket-region/browser';
-import { DynamoDBClient, CreateTableCommand, UpdateTimeToLiveCommand, PutItemCommand, ScanCommand } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, CreateTableCommand, PutItemCommand, ScanCommand } from '@aws-sdk/client-dynamodb';
 
 const region = await createRegion({ assetsBaseUrl: '/region/vendor' });
 const dynamodb = new DynamoDBClient({
@@ -144,21 +143,12 @@ await dynamodb.send(new CreateTableCommand({
   AttributeDefinitions: [{ AttributeName: 'id', AttributeType: 'S' }],
   BillingMode: 'PAY_PER_REQUEST',
 }));
-await dynamodb.send(new UpdateTimeToLiveCommand({
-  TableName: 'sessions',
-  TimeToLiveSpecification: { Enabled: true, AttributeName: 'expires' },
-}));
 
-const now = Math.floor(Date.now() / 1000);
-await dynamodb.send(new PutItemCommand({ TableName: 'sessions', Item: { id: { S: 'expired' }, expires: { N: String(now - 60) } } }));
-await dynamodb.send(new PutItemCommand({ TableName: 'sessions', Item: { id: { S: 'live' }, expires: { N: String(now + 3600) } } }));
+await dynamodb.send(new PutItemCommand({ TableName: 'sessions', Item: { id: { S: 'alice' } } }));
+await dynamodb.send(new PutItemCommand({ TableName: 'sessions', Item: { id: { S: 'bob' } } }));
 
-const ids = async () => (await dynamodb.send(new ScanCommand({ TableName: 'sessions' }))).Items.map((item) => item.id.S);
-console.log('before:', await ids());
-for (let tries = 0; tries < 10 && (await ids()).includes('expired'); tries++) {
-  await new Promise((resolve) => setTimeout(resolve, 500));
-}
-console.log('after:', await ids());
+const { Items } = await dynamodb.send(new ScanCommand({ TableName: 'sessions' }));
+console.log('sessions:', Items.map((item) => item.id.S).sort());
 
 await region.stop();
 ```
@@ -415,9 +405,8 @@ await region.stop();
 ## Scheduled work
 
 MiniStack runs scheduled EventBridge rules, EventBridge Scheduler schedules, and the DynamoDB TTL
-reaper on background threads, which Pyodide doesn't have. Pocket Region runs them from a timer
-instead, checking once a second. Anything already due fires within about a second, such as a
-one-time schedule in the past or an expired TTL. `rate()` and `cron()` wait real time, so a
-`rate(1 minute)` rule first fires a minute after it's created. EventBridge rules that target
-Lambda don't reach the handler, found by reading MiniStack's source and not yet run. Schedules
-that invoke Lambda are untested.
+reaper on background threads. Pocket Region runs each thread as a task that sleeps as MiniStack's
+code says, so they keep MiniStack's timing: a one-time schedule in the past fires within ten
+seconds, and an expired TTL is removed within a minute. `rate()` and `cron()` wait real time, so a
+`rate(1 minute)` rule first fires a minute after it's created. Schedules that invoke Lambda are
+untested.

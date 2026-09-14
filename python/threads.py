@@ -1,9 +1,8 @@
-# Pyodide has no pthreads, so ministack's background workers cannot start. Run each one
-# inline instead: fire-and-forget workers (S3 event fanout, SNS delivery) complete during
-# the request that triggered them, and loop-forever workers hit the first sleep and are
-# deferred. Must run before ministack is imported.
+# Pyodide has no pthreads. A started thread runs as an event-loop callback instead, and under
+# JSPI its sleeps and waits suspend it rather than the loop. Must run before ministack is imported.
+# REGION_SLEEP is set by bootRegion
 import asyncio
-import functools
+import contextvars
 import sys
 import threading
 import time
@@ -11,95 +10,81 @@ import time
 from pyodide.ffi import run_sync
 
 
-class _Deferred(BaseException):
+class _Ended(BaseException):
     """Not an Exception: workers wrap their bodies in `except Exception`."""
 
 
-# Each loops forever carrying nothing between passes and sleeping at least once per idle pass,
-# so one allowed sleep bounds a tick. Re-read the loops at every ministack bump before adding
-_TICKED = {
-    "ministack.services.eventbridge._scheduler_loop",
-    "ministack.services.scheduler._ticker_loop",
-    "ministack.services.dynamodb._ttl_reaper",
-}
-_ticked = []
-# Run after the ticked workers, by sources that follow this one
-TICK_HOOKS = []
-
-_real_sleep = time.sleep
+# Whether a worker is running. Not a ContextVar: ministack runs thread bodies under contexts of its own
+_in_worker = False
+_stopping = False
 
 
-# Returns whether the worker stopped at a sleep beyond its budget
-def _run(name, target, sleeps):
-    def budgeted_sleep(seconds):
-        nonlocal sleeps
-        if sleeps == 0:
-            raise _Deferred(f"would sleep {seconds}s")
-        sleeps -= 1
-
-    outer_sleep = time.sleep
-    time.sleep = budgeted_sleep
-    try:
-        target()
-    except _Deferred:
-        return True
-    except Exception as error:
-        print(f"Background worker {name} failed: {error!r}", file=sys.stderr)
-    finally:
-        time.sleep = outer_sleep
-    return False
+def end_workers():
+    global _stopping
+    _stopping = True
 
 
-# What runs while this stack is suspended must not spend its sleep budget
-def run_sync_suspended(awaitable):
-    own_sleep = time.sleep
-    time.sleep = _real_sleep
+# A worker the region's stop ended unwinds here. A reset leaves workers running, as ministack's threads do
+def suspend(awaitable):
+    global _in_worker
+    in_worker, _in_worker = _in_worker, False
     try:
         return run_sync(awaitable)
     finally:
-        time.sleep = own_sleep
+        _in_worker = in_worker
+        if in_worker and _stopping:
+            raise _Ended()
 
 
-def _qualified_name(target):
-    return f"{getattr(target, '__module__', '')}.{getattr(target, '__qualname__', '')}"
+def _sleep(seconds):
+    suspend(REGION_SLEEP(max(seconds, 0)))
 
 
-def _inline_start(self):
-    # Thread.run drops its target once it returns, so a second pass needs its own copy
-    target = functools.partial(self._target, *self._args, **self._kwargs)
-    ticked = _qualified_name(self._target) in _TICKED
-    if _run(self.name, self.run, 0) and ticked:
-        _ticked.append((self.name, target))
+# Whether done() came true within timeout, checked every 50 ms
+def _wait_until(done, timeout):
+    deadline = None if timeout is None else time.monotonic() + timeout
+    while not done():
+        remaining = None if deadline is None else deadline - time.monotonic()
+        if remaining is not None and remaining <= 0:
+            return False
+        _sleep(0.05 if remaining is None else min(0.05, remaining))
+    return True
 
 
-# (due time, coroutine function)
-_later = []
+def _wait(self, timeout=None):
+    return _wait_until(self.is_set, timeout)
 
 
-# Started by the tick rather than a timer: a cancelled Pyodide timer holds Node for its full delay
-def call_later(seconds, start):
-    _later.append((time.time() + seconds, start))
+def _start(self):
+    self._region_done = False
+
+    def run():
+        global _in_worker
+        _in_worker = True
+        try:
+            self.run()
+        except _Ended:
+            pass
+        except Exception as error:
+            print(f"Background worker {self.name} failed: {error!r}", file=sys.stderr)
+        finally:
+            _in_worker = False
+            self._region_done = True
+
+    # A real thread starts with an empty context
+    asyncio.get_event_loop().call_soon(run, context=contextvars.Context())
 
 
-def clear_later():
-    _later.clear()
+# Outside a worker nothing can suspend, and lifespan startup joins a reaper that never ends
+def _join(self, timeout=None):
+    if _in_worker:
+        _wait_until(lambda: self._region_done, timeout)
 
 
-# Called by the region on an interval. Async so a pass can wait on JS through run_sync
-async def region_tick():
-    for name, target in _ticked:
-        _run(name, target, 1)
-    now = time.time()
-    due = [start for when, start in _later if when <= now]
-    _later[:] = [entry for entry in _later if entry[0] > now]
-    for start in due:
-        asyncio.ensure_future(start())
-    for hook in TICK_HOOKS:
-        await hook()
-
-
-# The worker already ran inside start(), but the stdlib refuses to join a thread it never
-# saw start, and lifespan startup joins the container reaper
-threading.Thread.start = _inline_start
-threading.Thread.join = lambda self, timeout=None: None
-threading.Thread.is_alive = lambda self: False
+time.sleep = _sleep
+threading.Event.wait = _wait
+# A thread never started counts as done, as the stdlib's is_alive has it
+threading.Thread._region_done = True
+threading.Thread.start = _start
+threading.Thread.join = _join
+threading.Thread.is_alive = lambda self: not self._region_done

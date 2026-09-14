@@ -41,15 +41,12 @@ export function createLambdaHost<Package>(
       const { config, code } = invocation;
       const { Runtime, CodeSha256, FunctionName, RevisionId } = config;
       if (!Runtime.startsWith('nodejs')) {
-        return failure({
-          errorType: 'Runtime.Unsupported',
-          errorMessage: `Pocket Region runs nodejs functions only; this one is ${Runtime || 'a container image'}`,
-        });
+        return failure(`Pocket Region runs nodejs functions only; this one is ${Runtime || 'a container image'}`);
       }
       if (code && !packed.has(CodeSha256)) packed.set(CodeSha256, packaging.pack(CodeSha256, code));
       const pkg = await packed.get(CodeSha256);
       if (pkg === undefined) {
-        return failure({ errorType: 'Runtime.InitError', errorMessage: 'The function has no code' });
+        return failure('The function has no code');
       }
       // Updated code or configuration gets fresh environments while the old ones drain
       const key = `${FunctionName}:${RevisionId}`;

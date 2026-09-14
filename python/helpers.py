@@ -55,7 +55,6 @@ _quarantine_refused_state()
 from ministack.app import app, _build_persistence_save_dict
 from ministack.core.persistence import save_all
 
-
 # _build_persistence_save_dict is private to ministack, but it is the same call its own
 # lifespan shutdown makes; a patch release could move it
 def region_save():

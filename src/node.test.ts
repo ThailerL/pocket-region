@@ -109,32 +109,6 @@ describe('createRegion', () => {
     expect(read.body.Item).toEqual(item);
   });
 
-  it('deletes an item once its TTL has passed', async () => {
-    await jsonApi('dynamodb', 'DynamoDB_20120810.CreateTable', {
-      TableName: 'sessions',
-      KeySchema: [{ AttributeName: 'pk', KeyType: 'HASH' }],
-      AttributeDefinitions: [{ AttributeName: 'pk', AttributeType: 'S' }],
-      BillingMode: 'PAY_PER_REQUEST',
-    });
-    await jsonApi('dynamodb', 'DynamoDB_20120810.UpdateTimeToLive', {
-      TableName: 'sessions',
-      TimeToLiveSpecification: { Enabled: true, AttributeName: 'expires' },
-    });
-    const now = Math.floor(Date.now() / 1000);
-    for (const [pk, expires] of [['expired', now - 60], ['live', now + 3600]] as const) {
-      await jsonApi('dynamodb', 'DynamoDB_20120810.PutItem', {
-        TableName: 'sessions',
-        Item: { pk: { S: pk }, expires: { N: String(expires) } },
-      });
-    }
-    const keys = async () => {
-      const { body } = await jsonApi('dynamodb', 'DynamoDB_20120810.Scan', { TableName: 'sessions' });
-      return body.Items.map((item: { pk: { S: string } }) => item.pk.S);
-    };
-
-    await expect.poll(keys, { timeout: 5_000 }).toEqual(['live']);
-  });
-
   it('fires a one-time schedule that is already due', async () => {
     const { QueueUrl } = (await jsonApi('sqs', 'AmazonSQS.CreateQueue', { QueueName: 'reminders' })).body;
     const { Attributes } = (
@@ -158,8 +132,9 @@ describe('createRegion', () => {
       return (body.Messages ?? []).map((message: { Body: string }) => message.Body);
     };
 
-    await expect.poll(bodies, { timeout: 5_000 }).toEqual(['"wake up"']);
-  });
+    // MiniStack's scheduler sweeps every 10 s
+    await expect.poll(bodies, { timeout: 15_000 }).toEqual(['"wake up"']);
+  }, 20_000);
 
   it('resets to empty, and the same names can be used again', async () => {
     const fresh = await createRegion();

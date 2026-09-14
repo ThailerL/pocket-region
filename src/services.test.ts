@@ -34,7 +34,7 @@ import { GetParameterCommand, GetParametersByPathCommand, PutParameterCommand, S
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createRegion, type Region } from './node.ts';
 import { requestHandler } from './request-handler.ts';
-import { bodies, clientConfig, createQueue } from './test-support.ts';
+import { authorization, bodies, clientConfig, createQueue } from './test-support.ts';
 
 let region: Region;
 let config: ReturnType<typeof clientConfig>;
@@ -152,6 +152,37 @@ describe('services through the SDK', () => {
     await expect
       .poll(() => bodies(sqs, QueueUrl), { timeout: 5_000 })
       .toEqual([expect.objectContaining({ Type: 'Notification', TopicArn, Subject: 'placed', Message: 'order 42' })]);
+  });
+
+  it('runs a Step Functions execution to completion', async () => {
+    const states = async (operation: string, body: object) => {
+      const response = await region.dispatch({
+        method: 'POST',
+        path: '/',
+        headers: {
+          host: 'localhost:4566',
+          authorization: authorization('states'),
+          'content-type': 'application/x-amz-json-1.0',
+          'x-amz-target': `AWSStepFunctions.${operation}`,
+        },
+        body: new TextEncoder().encode(JSON.stringify(body)),
+      });
+      return JSON.parse(new TextDecoder().decode(response.body));
+    };
+    const { stateMachineArn } = await states('CreateStateMachine', {
+      name: 'greeter',
+      roleArn: 'arn:aws:iam::000000000000:role/states',
+      definition: JSON.stringify({
+        StartAt: 'Greet',
+        States: { Greet: { Type: 'Pass', Result: { greeting: 'hello' }, End: true } },
+      }),
+    });
+    const { executionArn } = await states('StartExecution', { stateMachineArn, input: '{}' });
+    let execution: { status: string; output: string } | undefined;
+    await expect
+      .poll(async () => (execution = await states('DescribeExecution', { executionArn })).status, { timeout: 5_000 })
+      .toBe('SUCCEEDED');
+    expect(JSON.parse(execution!.output)).toEqual({ greeting: 'hello' });
   });
 
   it('routes only the EventBridge events a rule matches to its SQS target', async () => {

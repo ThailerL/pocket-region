@@ -99,7 +99,7 @@ Parameter Store.
 | Service | Status |
 | --- | --- |
 | Lambda | Node functions, run by Pocket Region in Node and in a page |
-| Step Functions | Doesn't work yet: executions stay `RUNNING` |
+| Step Functions | A `Pass` state machine is tested. The rest works as it does in MiniStack, untested here |
 | RDS, ElastiCache, ECS, EKS, Batch, OpenSearch, Athena | Stubs: they answer, but nothing runs behind them |
 | The rest of [MiniStack's services](https://ministack.org/docs/services/) | Not run here yet. They may work, but nothing here checks them |
 
