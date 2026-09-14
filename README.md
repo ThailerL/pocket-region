@@ -27,9 +27,6 @@ await s3.send(new PutObjectCommand({ Bucket: 'photos', Key: 'cat.txt', Body: 'me
 await region.stop();
 ```
 
-The SDK still wants a region and credentials, and any values do, such as `AWS_REGION=us-east-1`,
-`AWS_ACCESS_KEY_ID=test`, and `AWS_SECRET_ACCESS_KEY=test` in the environment.
-
 ## In a browser
 
 The browser entry loads the emulator from the package's `vendor/` directory, served from your
