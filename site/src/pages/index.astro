@@ -21,7 +21,7 @@ await s3.send(new PutObjectCommand({ Bucket: 'photos', Key: 'cat.txt', Body: 'me
 const features = [
   {
     title: 'No server, no container',
-    body: 'Requests reach the emulator in your process without a socket, so nothing listens on a port. In Node a region is ready in half a second.',
+    body: 'Requests reach the emulator in your process as function calls, with no container to start. In Node a region is ready in half a second.',
   },
   {
     title: 'In a browser tab',
@@ -41,7 +41,7 @@ const features = [
   },
   {
     title: 'Built on MiniStack',
-    body: 'The AWS APIs come from <a href="https://ministack.org/">MiniStack</a>, a Python AWS emulator running here under Pyodide. It answers for many more services, though only these four are tested here.',
+    body: 'The AWS APIs come from <a href="https://ministack.org/">MiniStack</a>, a Python AWS emulator running here under Pyodide. It answers for many more services, and <a href="/docs/services/">the docs list which ones are tested</a>.',
   },
 ];
 ---
@@ -51,13 +51,14 @@ const features = [
     <header class="hero">
       <h1>Pocket Region</h1>
       <p class="tagline">
-        S3, SQS, DynamoDB, and Lambda inside your Node process or a browser tab, called with the
+        AWS services like S3, DynamoDB, and Lambda inside your Node process or a browser tab, called with the
         ordinary AWS SDK. No container and no server.
       </p>
       <div class="actions">
         <a class="button primary" href="/demo">Try it in this tab</a>
-        <code class="install">npm install pocket-region</code>
+        <a class="button" href="/docs/">Read the docs</a>
       </div>
+      <code class="install">npm install pocket-region</code>
     </header>
 
     <section>
@@ -95,7 +96,7 @@ const features = [
 
 <style>
   .hero {
-    padding: 1.5rem 0 2rem;
+    padding: 1.5rem 0 1.25rem;
   }
 
   .hero h1 {
@@ -131,12 +132,15 @@ const features = [
   }
 
   .install {
+    display: inline-block;
+    margin-top: 0.75rem;
     padding: 0.5rem 0.75rem;
     border: 1px dashed var(--line);
     border-radius: 0.4rem;
   }
 
   section :global(.astro-code) {
+    margin: 0;
     padding: 1rem;
     border: 1px solid var(--line);
     border-radius: 0.5rem;

@@ -1,14 +1,17 @@
 # Pocket Region
 
-Pocket Region runs S3, SQS, DynamoDB, and Lambda inside your Node process or a browser tab,
-and you call them with the ordinary AWS SDK. Requests reach the emulator without a socket, so
-there's no container to start and no server to reach. Lambda
-handlers run in child processes or Web Workers, and a region resets to empty in under a
-millisecond, so every test can start clean. In Node, a region is ready in half a second, and
-later ones in the same process in about 350 ms.
+Pocket Region runs AWS services like S3, DynamoDB, and Lambda inside your Node process or a
+browser tab, and you call them with the ordinary AWS SDK. Your SDK calls reach the emulator as
+function calls, without a socket, so there's no container to start and no server to reach.
+Lambda handlers run in child processes or Web Workers.
+
+A region resets to empty in under a millisecond, so every test can start clean. In Node, a
+region is ready in half a second, and later ones in the same process in about 350 ms.
 
 The AWS APIs come from [MiniStack](https://ministack.org/), a Python AWS emulator that runs
 here under [Pyodide](https://github.com/pyodide/pyodide).
+
+Read the docs at [pocket-region.dev/docs](https://pocket-region.dev/docs/).
 
 ```js
 import { createRegion, requestHandler } from 'pocket-region/node';
@@ -69,48 +72,9 @@ await lambda.send(new CreateFunctionCommand({
 const { Payload } = await lambda.send(new InvokeCommand({ FunctionName: 'hello', Payload: '{}' }));
 ```
 
-The handler's environment has `AWS_ENDPOINT_URL`, `AWS_REGION`, and test credentials. In Node,
-an SDK client created with no options reaches the region. In a browser, pass them to the client
-yourself. `Timeout`,
-`ReservedConcurrentExecutions`, `Environment`, `InvocationType: 'Event'`, and
-`LogType: 'Tail'` work as they do on Lambda, and a thrown error comes back as
-`FunctionError: 'Unhandled'`.
-
-Only Node runtimes work, and the AWS SDK isn't preinstalled, so bundle it with your code. In a
-browser the package must be a single ES module, since CommonJS and relative imports don't
-load there, though imports from a full URL such as jsDelivr do.
-
-A failed asynchronous invocation is retried as Lambda does, honouring `MaximumRetryAttempts` and
-`MaximumEventAgeInSeconds`, then sent to its `OnFailure` destination or `DeadLetterConfig` target
-(SNS untested). Retries start up to a second late.
-
-SQS event source mappings work everywhere. They hand a function batches from a queue, as many at
-once as its reserved concurrency allows (10 without one). A batch is deleted once the function
-succeeds, and a failed batch stays on the queue. Kinesis and DynamoDB Streams mappings are
-accepted but don't poll yet. Where JSPI, WebAssembly's promise integration,
-is present (Node 24.20 or later, earlier Node 24 releases started with
-`--experimental-wasm-jspi`, and browsers that have it), it also serves MiniStack's remaining
-synchronous paths to Lambda, which are untested.
-
-To watch functions run, pass `lambda` to `createRegion`. `onOutput` gets each line a handler
-writes, Lambda's `START`, `END`, and `REPORT` lines included, tagged with the function and its
-execution environment. `onEvent` gets environments starting and stopping, invocations starting
-and completing (with `coldStart`, `durationMs`, and `initMs`), and throttles.
-
-```js
-const region = await createRegion({
-  lambda: {
-    onOutput: (line, { functionName, environment }) => console.log(`[${functionName} ${environment}] ${line}`),
-    onEvent: (event) => { if (event.kind === 'throttled') console.warn(`${event.functionName} throttled`); },
-  },
-});
-```
-
 ## The `aws` CLI
 
-`awsCli` runs `aws` commands, so you can put an AWS console in your own page, where people
-paste commands from AWS's documentation. It returns the output instead of printing it, so you
-decide where it shows.
+`awsCli` runs `aws` commands, so you can put an AWS console in your own page. It returns the output instead of printing it, so you decide where it shows.
 
 ```js
 import { awsCli } from 'pocket-region/browser';
@@ -119,81 +83,6 @@ const aws = awsCli(region);
 await aws('s3api create-bucket --bucket notes');
 const { stdout } = await aws('sqs create-queue --queue-name orders');
 ```
-
-Pass a command as a string or as an array of arguments. It resolves to
-`{ stdout, stderr, code }`. A failed command gives a non-zero `code`, like the real CLI,
-unless you pass `{ throwOnError: true }` to make it throw. Any service works if its SDK client
-is installed. An `sns` command needs `@aws-sdk/client-sns`, and tells you if it's missing.
-
-### Supplying the clients yourself
-
-The CLI imports each client the first time a command uses it. Bundlers can't see those
-imports, so in a bundle, a page or a worker, pass the client modules in yourself. Key them by
-SDK name, so `s3` also covers `s3api`. Anything in `client` is added to every client's config,
-such as your own endpoint and credentials.
-
-```js
-import * as s3 from '@aws-sdk/client-s3';
-import * as sqs from '@aws-sdk/client-sqs';
-
-const aws = awsCli(region, {
-  modules: { s3, sqs },
-  client: { credentials: { accessKeyId: 'node-7', secretAccessKey: 'shh' } },
-});
-```
-
-You can pass either, both or neither. S3 always uses path-style addressing, whatever you
-put in `client`.
-
-## Persistence
-
-State is kept in memory unless you give the region a directory. It never saves on its own,
-so call `save` when you want the state written.
-
-```js
-const region = await createRegion({ stateDir: './.region' });
-// ... requests ...
-await region.save();   // writes the state to ./.region
-await region.stop();   // saves, then shuts down
-```
-
-A browser has nowhere to write, so the browser region has no `save`.
-
-## A clean region per test
-
-One region can serve a whole test file, reset to empty before each test. `reset` calls
-MiniStack's own reset, so every service comes back empty, not only the tested ones. A reset takes under
-a millisecond for a typical test and about 3.5 ms with 20 resources, while booting a region
-takes 350-500 ms.
-
-```js
-let region;
-beforeAll(async () => { region = await createRegion(); });
-beforeEach(() => region.reset());
-afterAll(() => region.stop());
-```
-
-If the region has a `stateDir`, its files stay on disk until the next `save` or `stop`, which
-overwrites them with the empty state.
-
-## Over HTTP
-
-Some callers can't be handed a request handler, such as another process, a program in
-another language, or the real AWS CLI. `serve` gives them an endpoint to call.
-
-```js
-import { createRegion, serve } from 'pocket-region/node';
-
-const region = await createRegion();
-const server = await serve(region);
-// aws --endpoint-url http://127.0.0.1:4566 s3 ls
-await server.close();
-```
-
-It listens on the port the region builds its queue URLs with, 4566 unless you gave
-`createRegion` a `port`, so a client following a queue URL arrives at the server. Pass
-`{ port }` to listen somewhere else. A browser can't listen on a port, so `serve` is only in
-the Node entry.
 
 ## What works
 
@@ -209,54 +98,6 @@ the Node entry.
 | Step Functions | Doesn't work yet: executions stay `RUNNING` |
 | RDS, ElastiCache, ECS, EKS, Batch, OpenSearch, Athena | Accept calls but run nothing. Databases, caches, and clusters report ready with no endpoint behind them, tasks and jobs report running or done, and Athena returns made-up rows |
 | The rest of [MiniStack](https://ministack.org/)'s services | Untested. They may respond, but nothing here checks them |
-
-MiniStack runs scheduled EventBridge rules, EventBridge Scheduler schedules, and the DynamoDB TTL
-reaper on background threads, which Pyodide doesn't have. Pocket Region runs them from a timer
-instead, checking once a second. Anything already due
-fires within about a second, such as a one-time schedule in the past or an expired TTL. `rate()`
-and `cron()` wait real time, so a `rate(1 minute)` rule first fires a minute after it's created.
-Rules and schedules that invoke Lambda are untested.
-
-## How it works
-
-[MiniStack](https://ministack.org/), a Python AWS emulator, runs under
-[Pyodide](https://github.com/pyodide/pyodide). Python can't open a socket under Pyodide, so JavaScript takes
-each request and passes it to the emulator directly. That call is `dispatch`. The SDK adapter
-is built on it, which is why no server is needed.
-
-```js
-const response = await region.dispatch({
-  method: 'GET',
-  path: '/photos/cat.txt',
-  headers: { host: 'localhost:4566', authorization: '...' },
-});
-```
-
-Anything that speaks the AWS wire protocol works with it, and a service could later be
-rewritten without changing how you call it.
-
-Lambda crosses the boundary the other way. MiniStack keeps the functions and answers the
-Lambda API, and when something invokes a function, the invocation comes back out to
-JavaScript. Pocket Region runs the handler in a child process or a Web Worker, enforces its
-timeout and concurrency, and hands the result back to MiniStack, while the handler's own SDK
-calls go through `dispatch` like any other request.
-
-`requestHandler`, `awsCli` and `serve` only ever call `dispatch`, so any object with a
-`dispatch` method works in place of a region. Wrap one to refuse, log or count requests before
-they reach the emulator.
-
-```js
-const guarded = {
-  dispatch(request) {
-    if (request.method === 'DELETE') {
-      return { status: 403, headers: {}, body: new TextEncoder().encode('no DELETE requests') };
-    }
-    return region.dispatch(request);
-  },
-};
-
-const server = await serve(guarded);
-```
 
 ## In a real app
 
