@@ -43,10 +43,33 @@ export type RegionAssets = {
 export type StateFiles = Map<string, Uint8Array>;
 
 export type StateStore = {
+  // Rejects while another region holds the store
   load(): Promise<StateFiles>;
   // Everything absent from files was deleted since the last save
   replace(files: StateFiles): Promise<void>;
+  close?(): Promise<void>;
 };
+
+// load and close around a lock; a refused acquire leaves the holder's release in place
+export function lockedLoad(acquire: () => Promise<() => void | Promise<void>>, read: () => Promise<StateFiles>) {
+  let release: (() => void | Promise<void>) | undefined;
+  return {
+    async load() {
+      release = await acquire();
+      try {
+        return await read();
+      } catch (error) {
+        await release();
+        release = undefined;
+        throw error;
+      }
+    },
+    async close() {
+      await release?.();
+      release = undefined;
+    },
+  };
+}
 
 // Python file IO stays in MEMFS: under Vivari, writes through a node mount are corrupt
 function writeStateFiles(py: PyodideAPI, files: StateFiles) {
@@ -182,6 +205,34 @@ export async function bootRegion(
     );
   }
   const { store } = settings;
+  // Before Pyodide loads, so a store in use fails fast
+  const files = await store?.load();
+  let region: Region;
+  try {
+    region = await startRegion(assets, settings, files, lambda);
+  } catch (error) {
+    await store?.close?.();
+    throw error;
+  }
+  return {
+    ...region,
+    async stop() {
+      try {
+        await region.stop();
+      } finally {
+        await store?.close?.();
+      }
+    },
+  };
+}
+
+async function startRegion(
+  assets: RegionAssets,
+  settings: RegionSettings,
+  files: StateFiles | undefined,
+  lambda?: LambdaHostFactory,
+): Promise<Region> {
+  const { store } = settings;
   const onOutput = settings.onOutput ?? (() => {});
 
   const py = await loadPyodide({
@@ -230,7 +281,7 @@ export async function bootRegion(
     }),
   );
   // Before the emulator imports, since each service reads its own state file then
-  if (store !== undefined) writeStateFiles(py, await store.load());
+  if (files !== undefined) writeStateFiles(py, files);
   // One shared namespace, in the generated order
   for (const source of PYTHON_SOURCES) {
     await py.runPythonAsync(source);

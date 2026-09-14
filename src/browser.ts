@@ -1,6 +1,7 @@
 import {
   bootRegion,
   hostObserver,
+  lockedLoad,
   type Region,
   type RegionSettings,
   type StateStore,
@@ -47,18 +48,43 @@ function openStateDb(name: string) {
   return settle(request);
 }
 
+// Freed by the returned release, or when the tab closes
+function lockDatabase(name: string) {
+  return new Promise<() => Promise<void>>((resolve, reject) => {
+    const held = navigator.locks.request(`pocket-region:${name}`, { ifAvailable: true }, (lock) => {
+      if (lock === null) {
+        reject(new Error(`IndexedDB database ${name} is in use by another region`));
+        return;
+      }
+      return new Promise<void>((release) =>
+        resolve(async () => {
+          release();
+          // Firefox frees the lock a task after its callback's promise settles; this settles after
+          await held;
+        }),
+      );
+    });
+    held.catch(reject);
+  });
+}
+
+async function readStateDb(name: string) {
+  const db = await openStateDb(name);
+  try {
+    const store = db.transaction(OBJECT_STORE).objectStore(OBJECT_STORE);
+    const [keys, contents] = await Promise.all([settle(store.getAllKeys()), settle(store.getAll())]);
+    return new Map(keys.map((key, index) => [String(key), contents[index]]));
+  } finally {
+    db.close();
+  }
+}
+
 export function indexedDbStore(name: string): StateStore {
   return {
-    async load() {
-      const db = await openStateDb(name);
-      try {
-        const store = db.transaction(OBJECT_STORE).objectStore(OBJECT_STORE);
-        const [keys, contents] = await Promise.all([settle(store.getAllKeys()), settle(store.getAll())]);
-        return new Map(keys.map((key, index) => [String(key), contents[index]]));
-      } finally {
-        db.close();
-      }
-    },
+    ...lockedLoad(
+      () => lockDatabase(name),
+      () => readStateDb(name),
+    ),
     // One transaction: a tab closed partway through keeps the previous save whole
     async replace(files) {
       const db = await openStateDb(name);

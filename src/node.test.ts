@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { createRegion, directoryStore } from './node.ts';
+import { createRegion, directoryStore, type StateStore } from './node.ts';
 import { jsonApi, s3 } from './test-clients.ts';
 
 const decoder = new TextDecoder();
@@ -29,10 +29,7 @@ describe('createRegion', () => {
     await s3('PUT', '/saved/keep.txt', 'kept', first);
     await first.save();
     await first.reset();
-
-    const unsaved = await createRegion({ store });
-    expect((await s3('GET', '/saved/keep.txt', undefined, unsaved)).status).toBe(200);
-    await unsaved.stop();
+    expect((await readdir(stateDir, { recursive: true })).some((file) => file.endsWith('keep.txt'))).toBe(true);
 
     // Stopping saves, so the reset reaches disk here
     await first.stop();
@@ -61,6 +58,35 @@ describe('createRegion', () => {
     expect(decoder.decode(kept.body)).toBe('kept');
     expect((await s3('GET', '/saved/gone.txt', undefined, second)).status).toBe(404);
     await second.stop();
+    await rm(stateDir, { recursive: true, force: true });
+  }, 60_000);
+
+  it('refuses a second region on a store in use until the first stops', async () => {
+    const stateDir = await mkdtemp(path.join(tmpdir(), 'pocket-region-lock-'));
+    const first = await createRegion({ store: directoryStore(stateDir) });
+    await expect(createRegion({ store: directoryStore(stateDir) })).rejects.toThrow('in use by another region');
+    expect((await s3('PUT', '/still-answering', undefined, first)).status).toBe(200);
+    await first.stop();
+
+    const second = await createRegion({ store: directoryStore(stateDir) });
+    expect((await s3('HEAD', '/still-answering', undefined, second)).status).toBe(200);
+    await second.stop();
+    await rm(stateDir, { recursive: true, force: true });
+  }, 60_000);
+
+  it('releases the store when boot fails after taking it', async () => {
+    const stateDir = await mkdtemp(path.join(tmpdir(), 'pocket-region-failed-boot-'));
+    const store = directoryStore(stateDir);
+    // A file and a directory at one path, which boot fails to write into Pyodide's filesystem
+    const clashing: StateStore = {
+      ...store,
+      load: async () => new Map([...(await store.load()), ['state', new Uint8Array()], ['state/sqs.json', new Uint8Array()]]),
+    };
+    await expect(createRegion({ store: clashing })).rejects.toMatchObject({ name: 'ErrnoError' });
+
+    const next = directoryStore(stateDir);
+    expect((await next.load()).size).toBe(0);
+    await next.close?.();
     await rm(stateDir, { recursive: true, force: true });
   }, 60_000);
 

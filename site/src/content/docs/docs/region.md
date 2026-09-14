@@ -115,18 +115,24 @@ type StateFiles = Map<string, Uint8Array>;
 type StateStore = {
   load(): Promise<StateFiles>;
   replace(files: StateFiles): Promise<void>;
+  close?(): Promise<void>;
 };
 ```
 
-Only the region calls a store's methods. Pass a store to `createRegion` and leave `load` and
-`replace` to it, the built-in stores included, since how a region uses its store may change.
+Only the region calls a store's methods. Pass a store to `createRegion` and leave `load`,
+`replace`, and `close` to it, the built-in stores included, since how a region uses its store may
+change.
+
+A store serves one region at a time. `createRegion` rejects with a store another region is using,
+before it boots, and the store is free again once that region's `stop()` resolves or its boot
+fails.
 
 Each entry ships a store:
 
 | Store | Entry | |
 | --- | --- | --- |
-| `directoryStore(dir)` | Node | Files in a directory, created if missing. A save writes each file and deletes the ones state no longer has, one file at a time. |
-| `indexedDbStore(name)` | browser | An IndexedDB database of that name. A save replaces the previous one in a single transaction, so a tab closed partway through keeps the previous save. |
+| `directoryStore(dir)` | Node | Files in a directory, created if missing. A save writes each file and deletes the ones state no longer has, one file at a time. A `.lock` file names the process using it; a lock left by a process that has exited on the same machine is taken over. |
+| `indexedDbStore(name)` | browser | An IndexedDB database of that name. A save replaces the previous one in a single transaction, so a tab closed partway through keeps the previous save. A [Web Lock](https://developer.mozilla.org/en-US/docs/Web/API/Web_Locks_API) keeps other tabs and workers of the origin out, and closing the tab releases it. |
 
 ```js
 import { createRegion, indexedDbStore } from 'pocket-region/browser';
@@ -135,14 +141,17 @@ const region = await createRegion({ assetsBaseUrl: '/region/vendor', store: inde
 await region.save();   // writes the state to the my-app database
 ```
 
-A page can't wait for a save while it closes, so save after the changes you want to keep. Two tabs
-sharing a database don't coordinate: the last one to save wins.
+A page can't wait for a save while it closes, so save after the changes you want to keep. A second
+tab creating a region on the same database is refused until the first tab stops its region or
+closes.
 
 To keep state anywhere else, such as OPFS or a server, write your own store. `load` resolves with
 everything the last `replace` was given, or an empty map before the first save. `replace` gets
 every file, keyed by paths like `state/sqs.json`; any key it no longer receives was deleted and
 has to go, or deleted resources come back at the next boot. Treat the keys as opaque, since a
-release can change them. How safe a save interrupted partway is depends on the store.
+release can change them. How safe a save interrupted partway is depends on the store. To keep
+a second region out, reject in `load` while the store is held and release it in `close`; a store
+without `close` isn't locked.
 
 ```js
 let saved = new Map();
