@@ -7,6 +7,7 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'Pocket Region',
+      customCss: ['./src/styles/docs.css'],
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/ThailerL/pocket-region' }],
       head: [
         { tag: 'script', attrs: { type: 'importmap' }, content: JSON.stringify(importMap) },
@@ -17,7 +18,7 @@ export default defineConfig({
       ],
       sidebar: [
         { slug: 'docs' },
-        { slug: 'docs/create-region' },
+        { slug: 'docs/region' },
         { slug: 'docs/clients' },
         { slug: 'docs/lambda' },
         { slug: 'docs/cli' },

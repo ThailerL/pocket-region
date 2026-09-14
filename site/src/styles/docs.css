@@ -1,0 +1,29 @@
+@import './palette.css';
+
+/* Starlight's grey scale, mixed from the palette at Starlight's own lightness steps per theme */
+:root {
+  --sl-color-white: var(--foreground);
+  --sl-color-gray-1: color-mix(in oklch, var(--foreground) 93%, var(--background));
+  --sl-color-gray-2: color-mix(in oklch, var(--foreground) 74%, var(--background));
+  --sl-color-gray-3: color-mix(in oklch, var(--foreground) 51%, var(--background));
+  --sl-color-gray-4: color-mix(in oklch, var(--foreground) 29%, var(--background));
+  --sl-color-gray-5: color-mix(in oklch, var(--foreground) 14%, var(--background));
+  --sl-color-gray-6: color-mix(in oklch, var(--foreground) 7%, var(--background));
+  --sl-color-black: var(--background);
+  --sl-color-accent-high: var(--accent);
+  --sl-color-accent: color-mix(in oklch, var(--accent) 75%, var(--background));
+  --sl-color-accent-low: color-mix(in oklch, var(--accent) 20%, var(--background));
+}
+
+:root[data-theme='light'] {
+  --sl-color-gray-1: color-mix(in oklch, var(--foreground) 93%, var(--background));
+  --sl-color-gray-2: color-mix(in oklch, var(--foreground) 86%, var(--background));
+  --sl-color-gray-3: color-mix(in oklch, var(--foreground) 71%, var(--background));
+  --sl-color-gray-4: color-mix(in oklch, var(--foreground) 49%, var(--background));
+  --sl-color-gray-5: color-mix(in oklch, var(--foreground) 26%, var(--background));
+  --sl-color-gray-6: color-mix(in oklch, var(--foreground) 7%, var(--background));
+  --sl-color-gray-7: color-mix(in oklch, var(--foreground) 3%, var(--background));
+  --sl-color-accent-high: color-mix(in oklch, var(--accent) 65%, var(--foreground));
+  --sl-color-accent: var(--accent);
+  --sl-color-accent-low: var(--accent-fill);
+}

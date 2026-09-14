@@ -1,5 +1,5 @@
 ---
-title: createRegion
+title: The region
 description: The options a region boots with, and the port, dispatch, reset, save, and stop of the region it returns.
 ---
 

@@ -1,12 +1,14 @@
+@import './palette.css';
+
 :root {
   color-scheme: light dark;
   /* The landing page scrolls and the demo doesn't; without this the centred header moves */
   scrollbar-gutter: stable;
-  --line: color-mix(in srgb, currentColor 15%, transparent);
-  --faint: color-mix(in srgb, currentColor 60%, transparent);
 }
 
 body {
+  background: var(--background);
+  color: var(--foreground);
   box-sizing: border-box;
   margin: 0 auto;
   padding: 1.5rem 1rem 3rem;
@@ -14,8 +16,13 @@ body {
   font: 16px/1.5 system-ui, sans-serif;
 }
 
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 a {
-  color: inherit;
+  color: var(--accent);
   text-underline-offset: 0.2em;
 }
 

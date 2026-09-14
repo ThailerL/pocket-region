@@ -34,6 +34,7 @@ const path = Astro.url.pathname.replace(/\/$/, '');
 
   .home {
     font-weight: 600;
+    color: inherit;
   }
 
   .home:hover {
@@ -51,8 +52,11 @@ const path = Astro.url.pathname.replace(/\/$/, '');
     color: var(--faint);
   }
 
-  nav a:hover,
-  nav a[aria-current='page'] {
+  nav a:hover {
     color: inherit;
+  }
+
+  nav a[aria-current='page'] {
+    color: var(--accent);
   }
 </style>
