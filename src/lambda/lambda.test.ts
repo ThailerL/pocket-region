@@ -14,19 +14,13 @@ import {
   UpdateFunctionConfigurationCommand,
 } from '@aws-sdk/client-lambda';
 import { HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
-import {
-  CreateQueueCommand,
-  GetQueueAttributesCommand,
-  ReceiveMessageCommand,
-  SendMessageCommand,
-  SQSClient,
-} from '@aws-sdk/client-sqs';
+import { GetQueueAttributesCommand, SendMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createRegion as createPageRegion, type PageRegion } from '../browser.ts';
 import { createRegion, type LambdaEvent, type LambdaObserver } from '../node.ts';
 import { requestHandler } from '../request-handler.ts';
 import { serve } from '../server.ts';
-import { authorization, clientConfig, freePort, installWorkerShim, serveVendor } from '../test-support.ts';
+import { authorization, bodies, clientConfig, createQueue, freePort, installWorkerShim, serveVendor } from '../test-support.ts';
 
 const decoder = new TextDecoder();
 
@@ -137,17 +131,9 @@ async function invoke(FunctionName: string, event: object, extra: object = {}, c
   };
 }
 
-async function createQueue(QueueName: string, Attributes?: Record<string, string>) {
-  const { QueueUrl } = await sqs.send(new CreateQueueCommand({ QueueName, Attributes }));
-  const { Attributes: created } = await sqs.send(
-    new GetQueueAttributesCommand({ QueueUrl, AttributeNames: ['QueueArn'] }),
-  );
-  return { QueueUrl: QueueUrl!, QueueArn: created!.QueueArn! };
-}
-
 // A queue mapped to the consumer function, holding one message
 async function mapQueue(QueueName: string, MessageBody: string) {
-  const { QueueUrl, QueueArn } = await createQueue(QueueName, { VisibilityTimeout: '30' });
+  const { QueueUrl, QueueArn } = await createQueue(sqs, QueueName, { VisibilityTimeout: '30' });
   const { UUID } = await lambda.send(
     new CreateEventSourceMappingCommand({ FunctionName: 'consumer', EventSourceArn: QueueArn, BatchSize: 1 }),
   );
@@ -159,11 +145,9 @@ const lastProcessingResult = (UUID: string) =>
   lambda.send(new GetEventSourceMappingCommand({ UUID })).then((mapping) => mapping.LastProcessingResult);
 
 async function nextMessage(QueueUrl: string) {
-  let body: string | undefined;
-  await expect
-    .poll(async () => (body = (await sqs.send(new ReceiveMessageCommand({ QueueUrl }))).Messages?.[0]?.Body), { timeout: 15_000 })
-    .toBeDefined();
-  return JSON.parse(body!);
+  let found: unknown;
+  await expect.poll(async () => (found = (await bodies(sqs, QueueUrl))[0]), { timeout: 15_000 }).toBeDefined();
+  return found;
 }
 
 const completedOf = (functionName: string) =>
@@ -295,7 +279,7 @@ describe.each(HOSTS)('Lambda %s', (_, boot) => {
   });
 
   it('retries a failed Event invocation twice, then sends it to the dead-letter queue', async () => {
-    const { QueueUrl, QueueArn } = await createQueue('dead-letters');
+    const { QueueUrl, QueueArn } = await createQueue(sqs, 'dead-letters');
     await createFunction('doomed', { DeadLetterConfig: { TargetArn: QueueArn } });
     await invoke('doomed', { throw: true }, { InvocationType: 'Event' });
     expect(await nextMessage(QueueUrl)).toMatchObject({
@@ -306,39 +290,27 @@ describe.each(HOSTS)('Lambda %s', (_, boot) => {
     expect(completedOf('doomed')).toHaveLength(3);
   }, 30_000);
 
-  it('sends a failed Event invocation to its OnFailure destination after the configured retries', async () => {
-    const { QueueUrl, QueueArn } = await createQueue('on-failure');
-    await createFunction('once');
+  it.each([
+    { put: 'without a qualifier', queue: 'on-failure', name: 'once', qualifier: {} },
+    { put: 'for $LATEST', queue: 'latest-failures', name: 'latest', qualifier: { Qualifier: '$LATEST' } },
+  ])('sends a failed Event invocation to the OnFailure destination of a config put $put', async ({ queue, name, qualifier }) => {
+    const { QueueUrl, QueueArn } = await createQueue(sqs, queue);
+    await createFunction(name);
     await lambda.send(
       new PutFunctionEventInvokeConfigCommand({
-        FunctionName: 'once',
+        FunctionName: name,
+        ...qualifier,
         MaximumRetryAttempts: 0,
         DestinationConfig: { OnFailure: { Destination: QueueArn } },
       }),
     );
-    await invoke('once', { throw: true }, { InvocationType: 'Event' });
+    await invoke(name, { throw: true }, { InvocationType: 'Event' });
     expect(await nextMessage(QueueUrl)).toMatchObject({ requestPayload: { throw: true } });
-    expect(completedOf('once')).toHaveLength(1);
-  }, 30_000);
-
-  it('applies an event invoke config put for $LATEST to an unqualified invocation', async () => {
-    const { QueueUrl, QueueArn } = await createQueue('latest-failures');
-    await createFunction('latest');
-    await lambda.send(
-      new PutFunctionEventInvokeConfigCommand({
-        FunctionName: 'latest',
-        Qualifier: '$LATEST',
-        MaximumRetryAttempts: 0,
-        DestinationConfig: { OnFailure: { Destination: QueueArn } },
-      }),
-    );
-    await invoke('latest', { throw: true }, { InvocationType: 'Event' });
-    expect(await nextMessage(QueueUrl)).toMatchObject({ requestPayload: { throw: true } });
-    expect(completedOf('latest')).toHaveLength(1);
+    expect(completedOf(name)).toHaveLength(1);
   }, 30_000);
 
   it('stops retrying an Event invocation once an attempt succeeds', async () => {
-    const { QueueUrl, QueueArn } = await createQueue('never-used');
+    const { QueueUrl, QueueArn } = await createQueue(sqs, 'never-used');
     const code = `
       export const handler = async () => {
         const url = process.env.AWS_ENDPOINT_URL + '/retried-once';
@@ -373,7 +345,7 @@ describe.each(HOSTS)('Lambda %s', (_, boot) => {
   it('runs mapped batches concurrently, up to the reserved concurrency', async () => {
     await createFunction('drainer', {}, 'export const handler = () => new Promise((resolve) => setTimeout(resolve, 300));');
     await lambda.send(new PutFunctionConcurrencyCommand({ FunctionName: 'drainer', ReservedConcurrentExecutions: 5 }));
-    const { QueueUrl, QueueArn } = await createQueue('backlog');
+    const { QueueUrl, QueueArn } = await createQueue(sqs, 'backlog');
     await Promise.all(
       Array.from({ length: 10 }, (_, index) => sqs.send(new SendMessageCommand({ QueueUrl, MessageBody: String(index) }))),
     );

@@ -28,12 +28,12 @@ import {
   SecretsManagerClient,
 } from '@aws-sdk/client-secrets-manager';
 import { CreateTopicCommand, PublishCommand, SNSClient, SubscribeCommand } from '@aws-sdk/client-sns';
-import { CreateQueueCommand, GetQueueAttributesCommand, ReceiveMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
+import { SQSClient } from '@aws-sdk/client-sqs';
 import { GetParameterCommand, GetParametersByPathCommand, PutParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createRegion, type Region } from './node.ts';
 import { requestHandler } from './request-handler.ts';
-import { clientConfig } from './test-support.ts';
+import { bodies, clientConfig, createQueue } from './test-support.ts';
 
 let region: Region;
 let config: ReturnType<typeof clientConfig>;
@@ -49,21 +49,10 @@ afterAll(async () => {
   await region?.stop();
 });
 
-async function createQueue(QueueName: string) {
-  const { QueueUrl } = await sqs.send(new CreateQueueCommand({ QueueName }));
-  const { Attributes } = await sqs.send(new GetQueueAttributesCommand({ QueueUrl, AttributeNames: ['QueueArn'] }));
-  return { QueueUrl: QueueUrl!, QueueArn: Attributes!.QueueArn! };
-}
-
-async function bodies(QueueUrl: string) {
-  const { Messages = [] } = await sqs.send(new ReceiveMessageCommand({ QueueUrl, MaxNumberOfMessages: 10 }));
-  return Messages.map((message) => JSON.parse(message.Body!));
-}
-
 describe('services through the SDK', () => {
   it('sends an S3 object-created notification to an SQS queue', async () => {
     const s3 = new S3Client({ ...config, forcePathStyle: true });
-    const { QueueUrl, QueueArn } = await createQueue('uploads');
+    const { QueueUrl, QueueArn } = await createQueue(sqs, 'uploads');
     await s3.send(new CreateBucketCommand({ Bucket: 'photos' }));
     await s3.send(
       new PutBucketNotificationConfigurationCommand({
@@ -72,7 +61,7 @@ describe('services through the SDK', () => {
       }),
     );
     await s3.send(new PutObjectCommand({ Bucket: 'photos', Key: 'cat.jpg', Body: 'meow' }));
-    const records = async () => (await bodies(QueueUrl)).flatMap((body) => body.Records ?? []);
+    const records = async () => (await bodies(sqs, QueueUrl)).flatMap((body) => body.Records ?? []);
     await expect
       .poll(records, { timeout: 5_000 })
       .toEqual([
@@ -147,18 +136,18 @@ describe('services through the SDK', () => {
 
   it('fans an SNS message out to an SQS subscription in the notification envelope', async () => {
     const sns = new SNSClient(config);
-    const { QueueUrl, QueueArn } = await createQueue('order-emails');
+    const { QueueUrl, QueueArn } = await createQueue(sqs, 'order-emails');
     const { TopicArn } = await sns.send(new CreateTopicCommand({ Name: 'orders' }));
     await sns.send(new SubscribeCommand({ TopicArn, Protocol: 'sqs', Endpoint: QueueArn }));
     await sns.send(new PublishCommand({ TopicArn, Subject: 'placed', Message: 'order 42' }));
     await expect
-      .poll(() => bodies(QueueUrl), { timeout: 5_000 })
+      .poll(() => bodies(sqs, QueueUrl), { timeout: 5_000 })
       .toEqual([expect.objectContaining({ Type: 'Notification', TopicArn, Subject: 'placed', Message: 'order 42' })]);
   });
 
   it('routes only the EventBridge events a rule matches to its SQS target', async () => {
     const events = new EventBridgeClient(config);
-    const { QueueUrl, QueueArn } = await createQueue('large-orders');
+    const { QueueUrl, QueueArn } = await createQueue(sqs, 'large-orders');
     await events.send(
       new PutRuleCommand({
         Name: 'large-orders',
@@ -176,7 +165,7 @@ describe('services through the SDK', () => {
     );
     expect(FailedEntryCount).toBe(0);
     await expect
-      .poll(() => bodies(QueueUrl), { timeout: 5_000 })
+      .poll(() => bodies(sqs, QueueUrl), { timeout: 5_000 })
       .toEqual([expect.objectContaining({ source: 'shop', 'detail-type': 'order placed', detail: { total: 250 } })]);
   });
 });

@@ -86,12 +86,10 @@ async def region_tick():
     for name, target in _ticked:
         _run(name, target, 1)
     now = time.time()
-    pending, _later[:] = _later[:], []
-    for due, start in pending:
-        if due <= now:
-            asyncio.ensure_future(start())
-        else:
-            _later.append((due, start))
+    due = [start for when, start in _later if when <= now]
+    _later[:] = [entry for entry in _later if entry[0] > now]
+    for start in due:
+        asyncio.ensure_future(start())
     for hook in TICK_HOOKS:
         await hook()
 

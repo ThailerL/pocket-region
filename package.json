@@ -1,7 +1,7 @@
 {
   "name": "pocket-region",
   "version": "0.5.1",
-  "description": "Real S3, SQS, DynamoDB, and Lambda inside Node or a browser tab, reached with the ordinary AWS SDK",
+  "description": "Real AWS services like S3, DynamoDB, and Lambda inside Node or a browser tab, reached with the ordinary AWS SDK",
   "keywords": [
     "aws",
     "localstack",
@@ -50,7 +50,7 @@
     "pretest": "npm run vendor",
     "test": "npm run embed && vitest run",
     "vendor": "node scripts/vendor.mjs",
-    "site": "npm run build && npm --prefix site run dev"
+    "site": "npm run build && npm --prefix site run dev --"
   },
   "dependencies": {
     "pyodide": "314.0.6"
