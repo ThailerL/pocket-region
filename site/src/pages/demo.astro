@@ -7,7 +7,10 @@ import { importMap } from '../import-map.mjs';
 import '../styles/demo.css';
 ---
 
-<Base title="Pocket Region demo">
+<Base
+  title="Pocket Region demo"
+  description="Real S3, SQS, DynamoDB, and Lambda running in your browser tab, driven from an aws terminal. No server answers it."
+>
   <script type="importmap" is:inline slot="head" set:html={JSON.stringify(importMap)} />
 
   <h1>Pocket Region demo</h1>
