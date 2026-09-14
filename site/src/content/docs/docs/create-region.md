@@ -61,8 +61,10 @@ Empties every service, not only the ones [listed as running here](/docs/services
 millisecond for a typical test and about 3.5 ms with 20 resources, measured in Node. It rejects
 if the emulator answers with anything but `200`.
 
-Lambda functions are deleted with everything else. Environments that are already running keep
-running until they go idle, and asynchronous invocations waiting to retry are not cancelled.
+Lambda functions are deleted with everything else, and every execution environment is stopped.
+An invocation still running fails with `Runtime.ExitError`. Asynchronous invocations, whether
+running or waiting to retry, are dropped without reaching a dead-letter queue or failure
+destination.
 
 With a `stateDir`, a reset doesn't touch the disk. The files stay until the next `save` or
 `stop`, which overwrites them with the empty state.

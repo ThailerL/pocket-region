@@ -150,8 +150,11 @@ async function nextMessage(QueueUrl: string) {
   return found;
 }
 
-const completedOf = (functionName: string) =>
-  eventsOf(functionName).filter((event) => event.kind === 'invocation' && event.phase === 'completed');
+const invocationsOf = (functionName: string, phase: 'started' | 'completed') =>
+  eventsOf(functionName).filter((event) => event.kind === 'invocation' && event.phase === phase);
+
+// A first retry's 1 s backoff and the tick that starts it, with margin
+const pastFirstRetry = () => new Promise((resolve) => setTimeout(resolve, 2_500));
 
 async function messagesLeft(QueueUrl: string) {
   const { Attributes } = await sqs.send(
@@ -287,7 +290,7 @@ describe.each(HOSTS)('Lambda %s', (_, boot) => {
       requestPayload: { throw: true },
       responseContext: { functionError: 'Unhandled' },
     });
-    expect(completedOf('doomed')).toHaveLength(3);
+    expect(invocationsOf('doomed', 'completed')).toHaveLength(3);
   }, 30_000);
 
   it.each([
@@ -306,7 +309,7 @@ describe.each(HOSTS)('Lambda %s', (_, boot) => {
     );
     await invoke(name, { throw: true }, { InvocationType: 'Event' });
     expect(await nextMessage(QueueUrl)).toMatchObject({ requestPayload: { throw: true } });
-    expect(completedOf(name)).toHaveLength(1);
+    expect(invocationsOf(name, 'completed')).toHaveLength(1);
   }, 30_000);
 
   it('stops retrying an Event invocation once an attempt succeeds', async () => {
@@ -322,8 +325,8 @@ describe.each(HOSTS)('Lambda %s', (_, boot) => {
     `;
     await createFunction('flaky', { DeadLetterConfig: { TargetArn: QueueArn } }, code);
     await invoke('flaky', {}, { InvocationType: 'Event' });
-    await expect.poll(() => completedOf('flaky').length, { timeout: 15_000 }).toBe(2);
-    expect(completedOf('flaky')).toMatchObject([{ failed: true }, { failed: false }]);
+    await expect.poll(() => invocationsOf('flaky', 'completed').length, { timeout: 15_000 }).toBe(2);
+    expect(invocationsOf('flaky', 'completed')).toMatchObject([{ failed: true }, { failed: false }]);
     expect(await messagesLeft(QueueUrl)).toBe(0);
   }, 30_000);
 
@@ -382,6 +385,59 @@ describe.each(HOSTS)('Lambda %s', (_, boot) => {
     expect(failed.error).toBe('Unhandled');
     expect(failed.payload.errorMessage).toContain('does not export a function named "handler"');
   });
+
+  // Last in the block: the reset empties the region the tests above share
+  it('drops an Event invocation waiting to retry when the region resets', async () => {
+    await createFunction('forgotten');
+    await invoke('forgotten', { throw: true }, { InvocationType: 'Event' });
+    await expect.poll(() => invocationsOf('forgotten', 'completed').length, { timeout: 10_000 }).toBe(1);
+    await region.reset();
+    await pastFirstRetry();
+    expect(invocationsOf('forgotten', 'completed')).toHaveLength(1);
+  }, 30_000);
+
+  it('fails an invocation running when the region resets, and cold-starts the next', async () => {
+    await createFunction('interrupted');
+    const running = invoke('interrupted', { sleep: 5_000 });
+    await expect.poll(() => invocationsOf('interrupted', 'started').length, { timeout: 10_000 }).toBe(1);
+    await region.reset();
+    const failed = await running;
+    expect(failed.error).toBe('Unhandled');
+    expect(failed.payload).toEqual({ errorType: 'Runtime.ExitError', errorMessage: 'Runtime exited with error: the region reset' });
+    await createFunction('interrupted');
+    expect((await invoke('interrupted', {})).payload.calls).toBe(1);
+  }, 30_000);
+
+  it('drops an Event invocation that a reset over HTTP interrupts, with no retry or dead letter', async () => {
+    const { QueueArn } = await createQueue(sqs, 'interrupted-letters');
+    await createFunction('cut-short', { DeadLetterConfig: { TargetArn: QueueArn } });
+    await invoke('cut-short', { sleep: 5_000 }, { InvocationType: 'Event' });
+    await expect.poll(() => invocationsOf('cut-short', 'started').length, { timeout: 10_000 }).toBe(1);
+    // The emulator's own route, as over HTTP, where nothing waits for the environments to stop
+    await region.dispatch({ method: 'POST', path: '/_ministack/reset', headers: { host: `localhost:${region.port}` } });
+    const { QueueUrl } = await createQueue(sqs, 'interrupted-letters');
+    await pastFirstRetry();
+    expect(invocationsOf('cut-short', 'started')).toHaveLength(1);
+    expect(await messagesLeft(QueueUrl)).toBe(0);
+  }, 30_000);
+
+  it('stops a mapped batch the reset interrupts before it writes to the fresh region', async () => {
+    const code = `
+      export const handler = async () => {
+        await new Promise((resolve) => setTimeout(resolve, 1_500));
+        await fetch(process.env.AWS_ENDPOINT_URL + '/written-after-reset', { method: 'PUT', headers: { authorization: ${JSON.stringify(authorization('s3'))} } });
+      };
+    `;
+    await createFunction('late-writer', {}, code);
+    const { QueueUrl, QueueArn } = await createQueue(sqs, 'late-writes');
+    await lambda.send(new CreateEventSourceMappingCommand({ FunctionName: 'late-writer', EventSourceArn: QueueArn, BatchSize: 1 }));
+    await sqs.send(new SendMessageCommand({ QueueUrl, MessageBody: 'go' }));
+    await expect.poll(() => invocationsOf('late-writer', 'started').length, { timeout: 10_000 }).toBe(1);
+    await region.reset();
+    // Already stopped when reset resolves, so the write that follows the sleep never comes
+    expect(eventsOf('late-writer')).toContainEqual(expect.objectContaining({ phase: 'stopped', reason: 'the region reset' }));
+    await expect(s3.send(new HeadBucketCommand({ Bucket: 'written-after-reset' }))).rejects.toThrow();
+  }, 30_000);
 });
 
 describe('Lambda in Node', () => {

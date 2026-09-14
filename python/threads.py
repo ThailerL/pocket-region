@@ -81,6 +81,10 @@ def call_later(seconds, start):
     _later.append((time.time() + seconds, start))
 
 
+def clear_later():
+    _later.clear()
+
+
 # Called by the region on an interval. Async so a pass can wait on JS through run_sync
 async def region_tick():
     for name, target in _ticked:

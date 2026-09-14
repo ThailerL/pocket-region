@@ -28,6 +28,12 @@ export function createLambdaHost<Package>(
   const packed = new Map<string, Promise<Package>>();
   const pools = new Map<string, FunctionPool>();
 
+  const stopPools = async (reason: string) => {
+    const stopping = [...pools.values()];
+    pools.clear();
+    await Promise.all(stopping.map((pool) => pool.stop(reason)));
+  };
+
   return {
     needsCode: (codeSha256) => !packed.has(codeSha256),
 
@@ -56,9 +62,11 @@ export function createLambdaHost<Package>(
       return pool.invoke(invocation);
     },
 
+    // Packages are named by their code hash, so they stay valid across a reset
+    reset: () => stopPools('the region reset'),
+
     async stop() {
-      await Promise.all([...pools.values()].map((pool) => pool.stop()));
-      pools.clear();
+      await stopPools('the region stopped');
       await packaging.dispose();
     },
   };

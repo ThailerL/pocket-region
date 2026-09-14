@@ -50,6 +50,9 @@ def _invocation(func, config, event, request_id):
 # (account, region, function name) -> invocations started and not yet answered
 _in_flight = {}
 
+# An asynchronous invocation the reset interrupted sees this change and neither retries nor dead-letters
+_resets = 0
+
 
 # Counted before anything awaits, so a pass that starts several batches sees each one
 def _hold(lambda_svc, func):
@@ -91,13 +94,14 @@ async def _invoke(lambda_svc, func, event):
 
 # ministack's invoke_async_with_retry, whose backoff sleeps the thread shim would defer
 async def _invoke_async(lambda_svc, func, event, attempt, started):
+    resets = _resets
     config = func.get("config") or func
     account, region = lambda_svc._account_region_from_function_config(config)
     lambda_svc._request_account_id.set(account)
     lambda_svc._request_region.set(region)
     try:
         result = await _execute(lambda_svc, func, event)
-        if not result.get("error"):
+        if not result.get("error") or resets != _resets:
             return
         eic = lambda_svc._event_invoke_config(func, None) or lambda_svc._event_invoke_config(func, "$LATEST") or {}
         max_retries = eic.get("MaximumRetryAttempts")
@@ -268,7 +272,18 @@ def _patch_lambda(lambda_svc):
             return original_execute_function(func, event)
         return run_sync_suspended(_execute(lambda_svc, func, event))
 
+    original_reset = lambda_svc.reset
+
+    # Retries and running invocations hold the deleted function records, so neither outlives it
+    def reset():
+        global _resets
+        _resets += 1
+        clear_later()
+        LAMBDA_EXECUTOR.reset()
+        original_reset()
+
     lambda_svc.run_reentrant = run_reentrant
+    lambda_svc.reset = reset
     lambda_svc.invoke_async_with_retry = invoke_async_with_retry
     lambda_svc._execute_function = execute_function
     # Its one pass at CreateEventSourceMapping would take a batch serially; poll_mappings owns SQS

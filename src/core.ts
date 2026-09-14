@@ -90,6 +90,8 @@ export type InvocationOutcome = {
 export type LambdaExecutor = {
   needsCode(codeSha256: string): boolean;
   execute(invocation: Invocation): Promise<InvocationOutcome>;
+  // Stops every environment and fails what they were running, and keeps the host usable
+  reset(): Promise<void>;
   stop(): Promise<void>;
 };
 
@@ -222,6 +224,8 @@ export async function bootRegion(
     port,
     dispatch,
     async reset() {
+      // Awaited so no killed handler writes after this resolves; a reset over HTTP can't wait
+      await executor?.reset();
       const response = await dispatch({
         method: 'POST',
         path: '/_ministack/reset',

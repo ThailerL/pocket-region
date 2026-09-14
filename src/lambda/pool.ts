@@ -67,6 +67,8 @@ type Environment = {
   idleTimer?: ReturnType<typeof setTimeout>;
   initTimer: ReturnType<typeof setTimeout>;
   startupFailed?: boolean;
+  // Why the pool killed it, which the sandbox's own exit reason can't say
+  reapedFor?: string;
   onExit?: () => void;
 };
 
@@ -79,7 +81,10 @@ export const failure = (error: LambdaError, log = '', output = log): InvocationO
 
 const startLine = ({ requestId, config }: Invocation) => `START RequestId: ${requestId} Version: ${config.Version}`;
 
-const REGION_STOPPED =failure({ errorType: 'Runtime.ExitError', errorMessage: 'The region stopped' });
+const exitError = (reason: string): LambdaError => ({
+  errorType: 'Runtime.ExitError',
+  errorMessage: `Runtime exited with error: ${reason}`,
+});
 
 // The runtime's error payload; anything else is a runtime that died mid-sentence
 export function parseError(text: string): LambdaError {
@@ -111,7 +116,7 @@ export class FunctionPool {
   private readonly environments = new Map<string, Environment>();
   private readonly pending: Pending[] = [];
   private readonly inFlight = new Map<string, Running>();
-  private stopped = false;
+  private stoppedBy: string | undefined;
   // PutFunctionConcurrency can change it between invocations
   private cap = 0;
   private readonly settings: PoolSettings;
@@ -133,7 +138,7 @@ export class FunctionPool {
   // Lambda throttles past the cap rather than queueing
   invoke(invocation: Invocation): Promise<InvocationOutcome> {
     return new Promise((resolve) => {
-      if (this.stopped) return resolve(REGION_STOPPED);
+      if (this.stoppedBy !== undefined) return resolve(failure(exitError(this.stoppedBy)));
       this.cap = invocation.concurrency;
       if (this.capacity() < 1) {
         this.emit({ kind: 'throttled', functionName: invocation.config.FunctionName });
@@ -205,7 +210,8 @@ export class FunctionPool {
     this.tell(env, line);
   }
 
-  private exited(env: Environment, reason: string, initError?: LambdaError) {
+  private exited(env: Environment, exitReason: string, initError?: LambdaError) {
+    const reason = env.reapedFor ?? exitReason;
     clearTimeout(env.initTimer);
     clearTimeout(env.idleTimer);
     if (!this.environments.delete(env.id)) return;
@@ -220,7 +226,7 @@ export class FunctionPool {
       );
     }
     if (env.running) {
-      this.complete(env.running, { errorType: 'Runtime.ExitError', errorMessage: `Runtime exited with error: ${reason}` });
+      this.complete(env.running, exitError(reason));
     }
     env.onExit?.();
     this.dispatch();
@@ -236,6 +242,7 @@ export class FunctionPool {
   private reap(env: Environment, reason: string) {
     if (!this.environments.has(env.id)) return;
     this.tell(env, `Stopping execution environment ${env.id}: ${reason}`);
+    env.reapedFor = reason;
     env.sandbox.kill();
   }
 
@@ -312,14 +319,14 @@ export class FunctionPool {
     running.resolve(error ? failure(error, framed, output) : { status: 'ok', payload: result ?? null, log: framed, output });
   }
 
-  async stop() {
-    this.stopped = true;
-    for (const { resolve } of this.pending.splice(0)) resolve(REGION_STOPPED);
+  async stop(reason: string) {
+    this.stoppedBy = reason;
+    for (const { resolve } of this.pending.splice(0)) resolve(failure(exitError(reason)));
     const exits = [...this.environments.values()].map(
       (env) =>
         new Promise<void>((done) => {
           env.onExit = done;
-          this.reap(env, 'the region stopped');
+          this.reap(env, reason);
         }),
     );
     await Promise.all(exits);
