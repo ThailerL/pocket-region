@@ -8,6 +8,8 @@ import {
 import { createWorkerHost } from './lambda/worker-host.ts';
 
 export type { LambdaEvent, LambdaObserver, OutputStream, Region, RegionRequest, RegionResponse } from './core.ts';
+export * from './cli/index.ts';
+export * from './request-handler.ts';
 
 // A page has nowhere to save to, so it is not offered: IndexedDB is its own decision
 export type PageRegion = Omit<Region, 'save'>;

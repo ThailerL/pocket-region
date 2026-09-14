@@ -12,7 +12,7 @@ async function boot() {
   status.replaceChildren();
   try {
     const started = performance.now();
-    const [browser, cli, sdk, lambdaSdk] = await loadModules();
+    const [browser, lambdaSdk] = await loadModules();
     const region = await browser.createRegion({ assetsBaseUrl: '/region/vendor' });
     const lambda = {
       sdk: lambdaSdk,
@@ -20,14 +20,14 @@ async function boot() {
         region: 'us-east-1',
         endpoint: 'http://localhost:4566',
         credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
-        requestHandler: sdk.requestHandler(region),
+        requestHandler: browser.requestHandler(region),
       }),
     };
     write(`ready in ${Math.round(performance.now() - started)} ms. Try a command.\n`);
     for (const button of examples.querySelectorAll('button')) button.disabled = false;
     connectHello(lambda);
     connectHashing(lambda);
-    connect(cli.awsCli(region));
+    connect(browser.awsCli(region));
   } catch (error) {
     write(`failed to boot: ${(error as Error).message}\n`, 'failed');
     const retry = document.createElement('button');

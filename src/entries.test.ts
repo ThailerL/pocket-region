@@ -1,0 +1,23 @@
+import { readFile } from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
+
+const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+
+describe('entry points', () => {
+  it('publishes one entry for Node and one for a page, and nothing else', () => {
+    expect(manifest.exports).toEqual({
+      './node': { types: './dist/index.d.ts', default: './dist/index.js' },
+      './browser': { types: './dist/browser.d.ts', default: './dist/browser.js' },
+    });
+  });
+
+  it('gives Node everything from one import', async () => {
+    const node = await import('./index.ts');
+    expect(Object.keys(node).sort()).toEqual(['CliError', 'awsCli', 'createRegion', 'requestHandler', 'serve']);
+  });
+
+  it('gives a page everything from one import', async () => {
+    const page = await import('./browser.ts');
+    expect(Object.keys(page).sort()).toEqual(['CliError', 'awsCli', 'createRegion', 'requestHandler']);
+  });
+});

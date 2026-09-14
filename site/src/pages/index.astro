@@ -2,7 +2,7 @@
 import { Code } from 'astro:components';
 import Base from '../layouts/Base.astro';
 
-const example = `import { createRegion, requestHandler } from 'pocket-region';
+const example = `import { createRegion, requestHandler } from 'pocket-region/node';
 import { S3Client, CreateBucketCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 
 const region = await createRegion();
@@ -37,7 +37,7 @@ const features = [
   },
   {
     title: 'An AWS console in your page',
-    body: 'pocket-region/cli runs aws commands against a region and hands back the output, so people can paste commands from AWS’s documentation.',
+    body: 'awsCli runs aws commands against a region and hands back the output, so people can paste commands from AWS’s documentation.',
   },
   {
     title: 'Built on MiniStack',

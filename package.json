@@ -24,25 +24,13 @@
   "type": "module",
   "license": "MIT",
   "exports": {
-    ".": {
+    "./node": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
     "./browser": {
       "types": "./dist/browser.d.ts",
       "default": "./dist/browser.js"
-    },
-    "./cli": {
-      "types": "./dist/cli/index.d.ts",
-      "default": "./dist/cli/index.js"
-    },
-    "./server": {
-      "types": "./dist/server.d.ts",
-      "default": "./dist/server.js"
-    },
-    "./sdk": {
-      "types": "./dist/request-handler.d.ts",
-      "default": "./dist/request-handler.js"
     }
   },
   "files": [

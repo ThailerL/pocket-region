@@ -11,7 +11,7 @@ The AWS APIs come from [MiniStack](https://ministack.org/), a Python AWS emulato
 here under [Pyodide](https://github.com/pyodide/pyodide).
 
 ```js
-import { createRegion, requestHandler } from 'pocket-region';
+import { createRegion, requestHandler } from 'pocket-region/node';
 import { S3Client, CreateBucketCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 
 const region = await createRegion();
@@ -38,8 +38,7 @@ you pass `indexURL`. A first visit downloads about 12 MB: 8 MB of wheels and Pyt
 library from your site, which are already compressed, and 3.7 MB of Pyodide from jsDelivr.
 
 ```js
-import { createRegion } from 'pocket-region/browser';
-import { requestHandler } from 'pocket-region/sdk';
+import { createRegion, requestHandler } from 'pocket-region/browser';
 
 const region = await createRegion({ assetsBaseUrl: '/vendor' });
 ```
@@ -55,7 +54,7 @@ Functions are created from a zipped deployment package and invoked with `InvokeC
 Handlers run in Node child processes, or in Web Workers in a browser.
 
 ```js
-import { createRegion, requestHandler } from 'pocket-region';
+import { createRegion, requestHandler } from 'pocket-region/node';
 import { LambdaClient, CreateFunctionCommand, InvokeCommand } from '@aws-sdk/client-lambda';
 
 const region = await createRegion();
@@ -114,7 +113,7 @@ paste commands from AWS's documentation. It returns the output instead of printi
 decide where it shows.
 
 ```js
-import { awsCli } from 'pocket-region/cli';
+import { awsCli } from 'pocket-region/browser';
 
 const aws = awsCli(region);
 await aws('s3api create-bucket --bucket notes');
@@ -183,7 +182,7 @@ Some callers can't be handed a request handler, such as another process, a progr
 another language, or the real AWS CLI. `serve` gives them an endpoint to call.
 
 ```js
-import { createRegion, serve } from 'pocket-region';
+import { createRegion, serve } from 'pocket-region/node';
 
 const region = await createRegion();
 const server = await serve(region);
