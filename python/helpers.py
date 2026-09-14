@@ -5,6 +5,7 @@ import glob
 import os
 import tempfile
 from collections import namedtuple
+from urllib.parse import unquote
 
 # Temp files stay in MEMFS: under Vivari, writes through a node mount are corrupt
 os.makedirs("/tmp", exist_ok=True)
@@ -96,7 +97,7 @@ async def asgi_request(method, target, headers, body):
         "asgi": {"version": "3.0"},
         "http_version": "1.1",
         "method": method,
-        "path": path,
+        "path": unquote(path),
         "raw_path": path.encode(),
         "query_string": query.encode(),
         "headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()],

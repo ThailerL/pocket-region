@@ -17,6 +17,7 @@ import {
 import { CreateKeyCommand, DecryptCommand, EncryptCommand, KMSClient } from '@aws-sdk/client-kms';
 import {
   CreateBucketCommand,
+  ListObjectsV2Command,
   PutBucketNotificationConfigurationCommand,
   PutObjectCommand,
   S3Client,
@@ -71,6 +72,14 @@ describe('services through the SDK', () => {
           s3: expect.objectContaining({ bucket: expect.objectContaining({ name: 'photos' }), object: expect.objectContaining({ key: 'cat.jpg' }) }),
         }),
       ]);
+  });
+
+  it('lists an S3 key with characters the SDK percent-encodes as it was put', async () => {
+    const s3 = new S3Client({ ...config, forcePathStyle: true });
+    await s3.send(new CreateBucketCommand({ Bucket: 'notes' }));
+    await s3.send(new PutObjectCommand({ Bucket: 'notes', Key: 'a b/ü+?.txt', Body: 'hi' }));
+    const { Contents } = await s3.send(new ListObjectsV2Command({ Bucket: 'notes' }));
+    expect(Contents?.map((object) => object.Key)).toEqual(['a b/ü+?.txt']);
   });
 
   it('stores a secret and returns its latest version', async () => {
