@@ -51,6 +51,16 @@ async function jsonApi(
 }
 
 describe('createRegion', () => {
+  it('refuses to boot without JSPI', async () => {
+    const suspending = Object.getOwnPropertyDescriptor(WebAssembly, 'Suspending')!;
+    Reflect.deleteProperty(WebAssembly, 'Suspending');
+    try {
+      await expect(createRegion()).rejects.toThrow('needs WebAssembly JSPI');
+    } finally {
+      Object.defineProperty(WebAssembly, 'Suspending', suspending);
+    }
+  });
+
   it('lets Node exit once stopped', async () => {
     const module = JSON.stringify(new URL('./node.ts', import.meta.url).href);
     const child = spawn(

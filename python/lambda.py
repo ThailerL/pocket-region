@@ -10,7 +10,7 @@ import uuid
 import zipfile
 
 from js import Object
-from pyodide.ffi import can_run_sync, to_js
+from pyodide.ffi import to_js
 
 _LAMBDA_MODULE = "ministack.services.lambda_svc"
 # ministack's account cap is bypassed, so this is the only bound on a function's environments
@@ -263,13 +263,7 @@ def _patch_lambda(lambda_svc):
     def invoke_async_with_retry(func, event):
         asyncio.ensure_future(_invoke_async(lambda_svc, func, event, 0, time.time()))
 
-    original_execute_function = lambda_svc._execute_function
-
-    # Synchronous callers, a Lambda failure destination and the Kinesis and DynamoDB stream mappings,
-    # can wait on JS only under JSPI
     def execute_function(func, event):
-        if not can_run_sync():
-            return original_execute_function(func, event)
         return run_sync_suspended(_execute(lambda_svc, func, event))
 
     original_reset = lambda_svc.reset

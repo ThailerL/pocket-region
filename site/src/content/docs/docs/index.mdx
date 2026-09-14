@@ -14,6 +14,9 @@ npm install pocket-region
 The AWS SDK clients aren't dependencies. Install the ones you use, such as
 `@aws-sdk/client-s3`.
 
+Pocket Region needs WebAssembly JSPI, so it runs on Node 24.20 or later and in browsers that
+support JSPI. Safari doesn't yet, and `createRegion` throws there.
+
 ## In Node
 
 ```js

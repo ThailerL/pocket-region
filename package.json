@@ -40,7 +40,7 @@
     "LICENSE"
   ],
   "engines": {
-    "node": ">=22"
+    "node": ">=24.20"
   },
   "scripts": {
     "prepack": "npm run vendor && npm run build",

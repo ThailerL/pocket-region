@@ -170,6 +170,11 @@ export async function bootRegion(
   persistence?: RegionPersistence,
   lambda?: LambdaHostFactory,
 ): Promise<Region> {
+  if (!('Suspending' in WebAssembly)) {
+    throw new Error(
+      'Pocket Region needs WebAssembly JSPI (WebAssembly.Suspending), which Node has from 24.20 and some browsers lack',
+    );
+  }
   const onOutput = settings.onOutput ?? (() => {});
 
   const py = await loadPyodide({

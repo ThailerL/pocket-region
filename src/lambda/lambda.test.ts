@@ -485,45 +485,4 @@ describe('Lambda in Node', () => {
     await runAlone('process.exit(3);', 'stopped before it asked for an invocation');
   }, 40_000);
 
-  // A child started without the flag lacks JSPI only on a Node where the flag had to supply it
-  it.runIf(process.execArgv.includes('--experimental-wasm-jspi'))('runs a mapping without JSPI', async () => {
-    const url = (file: string) => JSON.stringify(new URL(file, import.meta.url).href);
-    const zip = JSON.stringify(zipOf('index.mjs', 'export const handler = async () => {};').toString('base64'));
-    const script = `
-      import { LambdaClient, CreateFunctionCommand, CreateEventSourceMappingCommand } from '@aws-sdk/client-lambda';
-      import { SQSClient, CreateQueueCommand, GetQueueAttributesCommand, SendMessageCommand } from '@aws-sdk/client-sqs';
-      import { createRegion } from ${url('../node.ts')};
-      import { requestHandler } from ${url('../request-handler.ts')};
-      if (typeof WebAssembly.Suspending === 'function') throw new Error('this child has JSPI');
-      const region = await createRegion();
-      const config = { region: 'us-east-1', endpoint: 'http://localhost:4566', credentials: { accessKeyId: 'test', secretAccessKey: 'test' }, requestHandler: requestHandler(region) };
-      const lambda = new LambdaClient(config);
-      const sqs = new SQSClient(config);
-      await lambda.send(new CreateFunctionCommand({ FunctionName: 'consumer', Runtime: 'nodejs22.x', Handler: 'index.handler', Role: 'r', Code: { ZipFile: Buffer.from(${zip}, 'base64') } }));
-      const { QueueUrl } = await sqs.send(new CreateQueueCommand({ QueueName: 'orders' }));
-      await sqs.send(new SendMessageCommand({ QueueUrl, MessageBody: 'one' }));
-      const { Attributes } = await sqs.send(new GetQueueAttributesCommand({ QueueUrl, AttributeNames: ['QueueArn'] }));
-      await lambda.send(new CreateEventSourceMappingCommand({ FunctionName: 'consumer', EventSourceArn: Attributes.QueueArn, BatchSize: 1 }));
-      for (let attempt = 0; attempt < 100; attempt++) {
-        const { Attributes: counts } = await sqs.send(new GetQueueAttributesCommand({ QueueUrl, AttributeNames: ['ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible'] }));
-        if (counts.ApproximateNumberOfMessages === '0' && counts.ApproximateNumberOfMessagesNotVisible === '0') break;
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
-      const { Attributes: left } = await sqs.send(new GetQueueAttributesCommand({ QueueUrl, AttributeNames: ['ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible'] }));
-      console.log(JSON.stringify(left));
-      await region.stop();
-    `;
-    const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
-      stdio: ['ignore', 'pipe', 'inherit'],
-      signal: AbortSignal.timeout(30_000),
-    });
-    let stdout = '';
-    child.stdout.on('data', (chunk) => (stdout += chunk));
-    const [exitCode] = await once(child, 'exit');
-    expect(exitCode).toBe(0);
-    expect(JSON.parse(stdout.trim().split('\n').at(-1)!)).toEqual({
-      ApproximateNumberOfMessages: '0',
-      ApproximateNumberOfMessagesNotVisible: '0',
-    });
-  }, 40_000);
 });

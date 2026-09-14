@@ -14,6 +14,9 @@ here under [Pyodide](https://github.com/pyodide/pyodide).
 Read the docs at [pocket-region.dev/docs](https://pocket-region.dev/docs/), where you can edit
 and run the examples in your browser tab.
 
+It needs WebAssembly JSPI: Node 24.20 or later, or a browser that supports it, which Safari
+doesn't yet.
+
 ```js
 import { createRegion, requestHandler } from 'pocket-region/node';
 import { S3Client, CreateBucketCommand, PutObjectCommand } from '@aws-sdk/client-s3';
