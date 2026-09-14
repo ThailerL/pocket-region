@@ -1,0 +1,71 @@
+---
+title: Getting started
+description: Install Pocket Region, boot a region in Node or a page, and point an AWS SDK client at it.
+---
+
+import Runnable from '../../../components/Runnable.astro';
+
+## Install
+
+```sh
+npm install pocket-region
+```
+
+The AWS SDK clients aren't dependencies. Install the ones you use, such as
+`@aws-sdk/client-s3`.
+
+## In Node
+
+```js
+import { createRegion, requestHandler } from 'pocket-region/node';
+import { S3Client, CreateBucketCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+
+const region = await createRegion();
+const s3 = new S3Client({ requestHandler: requestHandler(region) });
+
+await s3.send(new CreateBucketCommand({ Bucket: 'photos' }));
+await s3.send(new PutObjectCommand({ Bucket: 'photos', Key: 'cat.txt', Body: 'meow' }));
+
+await region.stop();
+```
+
+The SDK still wants a region and credentials before it builds a request, and any values do,
+so set them wherever you normally would, such as `AWS_REGION=us-east-1`,
+`AWS_ACCESS_KEY_ID=test`, and `AWS_SECRET_ACCESS_KEY=test` in the environment. Nothing is
+dialed.
+
+## In a page
+
+A page loads the emulator over HTTP, so serve the package's `vendor/` directory from your site
+and tell `createRegion` where it is. A page has no environment, so pass the client its region and
+credentials. This site serves `vendor/` at `/region/vendor`, and examples with a Run button run as
+shown, in this tab.
+
+<Runnable>
+
+```js
+import { createRegion, requestHandler } from 'pocket-region/browser';
+import { S3Client, CreateBucketCommand, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+
+const region = await createRegion({ assetsBaseUrl: '/region/vendor' });
+
+const s3 = new S3Client({
+  region: 'us-east-1',
+  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
+  requestHandler: requestHandler(region),
+});
+
+await s3.send(new CreateBucketCommand({ Bucket: 'photos' }));
+await s3.send(new PutObjectCommand({ Bucket: 'photos', Key: 'cat.txt', Body: 'meow' }));
+const { Body } = await s3.send(new GetObjectCommand({ Bucket: 'photos', Key: 'cat.txt' }));
+console.log(await Body.transformToString());
+
+await region.stop();
+```
+
+</Runnable>
+
+A first visit downloads about 12 MB: 8 MB of wheels and the Python standard library from your
+site, already compressed, and 3.7 MB of Pyodide from jsDelivr, unless you pass `indexURL`.
+Everything else works as it does in Node, except that Lambda handlers run in Web Workers and
+there is no `save` or `serve`.

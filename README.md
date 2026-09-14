@@ -11,27 +11,24 @@ region is ready in half a second, and later ones in the same process in about 35
 The AWS APIs come from [MiniStack](https://ministack.org/), a Python AWS emulator that runs
 here under [Pyodide](https://github.com/pyodide/pyodide).
 
-Read the docs at [pocket-region.dev/docs](https://pocket-region.dev/docs/).
+Read the docs at [pocket-region.dev/docs](https://pocket-region.dev/docs/), where you can edit
+and run the examples in your browser tab.
 
 ```js
 import { createRegion, requestHandler } from 'pocket-region/node';
 import { S3Client, CreateBucketCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 
 const region = await createRegion();
-
-const s3 = new S3Client({
-  region: 'us-east-1',
-  endpoint: 'http://localhost:4566', // not used, since nothing listens here
-  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
-  forcePathStyle: true,
-  requestHandler: requestHandler(region),
-});
+const s3 = new S3Client({ requestHandler: requestHandler(region) });
 
 await s3.send(new CreateBucketCommand({ Bucket: 'photos' }));
 await s3.send(new PutObjectCommand({ Bucket: 'photos', Key: 'cat.txt', Body: 'meow' }));
 
 await region.stop();
 ```
+
+The SDK still wants a region and credentials, and any values do, such as `AWS_REGION=us-east-1`,
+`AWS_ACCESS_KEY_ID=test`, and `AWS_SECRET_ACCESS_KEY=test` in the environment.
 
 ## In a browser
 
@@ -86,18 +83,17 @@ const { stdout } = await aws('sqs create-queue --queue-name orders');
 
 ## What works
 
+MiniStack emulates each service's behaviour, not just its API. These work as they do in MiniStack,
+and the [Services](https://pocket-region.dev/docs/services/) page has a runnable example for each:
+CloudWatch Logs, DynamoDB, EventBridge, Kinesis, KMS, S3, Secrets Manager, SNS, SQS, and SSM
+Parameter Store.
+
 | Service | Status |
 | --- | --- |
-| S3 | Tested, including bucket notifications into SQS |
-| SQS | Tested |
-| DynamoDB | Tested, including TTL expiry |
-| Lambda | Tested with Node functions, in Node and in a page |
-| SNS | Tested, fanning out to SQS |
-| EventBridge | Tested, routing matched events to SQS |
-| Secrets Manager, SSM Parameter Store, KMS, CloudWatch Logs, Kinesis | Tested |
+| Lambda | Node functions, run by Pocket Region in Node and in a page |
 | Step Functions | Doesn't work yet: executions stay `RUNNING` |
-| RDS, ElastiCache, ECS, EKS, Batch, OpenSearch, Athena | Accept calls but run nothing. Databases, caches, and clusters report ready with no endpoint behind them, tasks and jobs report running or done, and Athena returns made-up rows |
-| The rest of [MiniStack](https://ministack.org/)'s services | Untested. They may respond, but nothing here checks them |
+| RDS, ElastiCache, ECS, EKS, Batch, OpenSearch, Athena | Stubs: they answer, but nothing runs behind them |
+| The rest of [MiniStack's services](https://ministack.org/docs/services/) | Not run here yet. They may work, but nothing here checks them |
 
 ## In a real app
 

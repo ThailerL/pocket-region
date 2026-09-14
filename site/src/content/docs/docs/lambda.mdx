@@ -3,23 +3,44 @@ title: Lambda
 description: Where Pocket Region's Lambda differs from AWS, what a handler sees, event source mappings, and the observer.
 ---
 
+import Runnable from '../../../components/Runnable.astro';
+
 MiniStack stores functions and answers the Lambda API. Each invocation runs a Node handler in an
 **execution environment**: a child process in Node, or a module Web Worker in a page. Create and
 invoke functions with the ordinary SDK. What isn't covered here behaves as it does on AWS.
 
-```js
-import { LambdaClient, CreateFunctionCommand, InvokeCommand } from '@aws-sdk/client-lambda';
+<Runnable>
 
-const lambda = new LambdaClient({ /* as in Getting started */ requestHandler: requestHandler(region) });
+```js
+import { createRegion, requestHandler } from 'pocket-region/browser';
+import { LambdaClient, CreateFunctionCommand, InvokeCommand } from '@aws-sdk/client-lambda';
+import { strToU8, zipSync } from 'fflate';
+
+const region = await createRegion({ assetsBaseUrl: '/region/vendor' });
+const lambda = new LambdaClient({
+  region: 'us-east-1',
+  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
+  requestHandler: requestHandler(region),
+});
+
+const code = 'export const handler = async (event) => `hello, ${event.name}`;';
 await lambda.send(new CreateFunctionCommand({
   FunctionName: 'hello',
   Runtime: 'nodejs22.x',
   Handler: 'index.handler',
   Role: 'arn:aws:iam::000000000000:role/lambda',
-  Code: { ZipFile: zipOfYourCode },
+  Code: { ZipFile: zipSync({ 'index.mjs': strToU8(code) }) },
 }));
-const { Payload } = await lambda.send(new InvokeCommand({ FunctionName: 'hello', Payload: '{}' }));
+
+const { Payload } = await lambda.send(new InvokeCommand({ FunctionName: 'hello', Payload: '{ "name": "world" }' }));
+console.log(Payload.transformToString());
+
+await region.stop();
 ```
+
+</Runnable>
+
+The deployment package is any zip. This one is built with [fflate](https://github.com/101arrowz/fflate).
 
 ## Runtimes and packages
 

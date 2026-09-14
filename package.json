@@ -68,6 +68,7 @@
     "@aws-sdk/client-sqs": "^3.1131.0",
     "@aws-sdk/client-ssm": "^3.1131.0",
     "@types/node": "^24.13.4",
+    "fflate": "^0.8.3",
     "typescript": "^7.0.2",
     "vitest": "^5.0.0"
   }

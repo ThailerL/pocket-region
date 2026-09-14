@@ -1,0 +1,89 @@
+---
+// Wraps a code fence. Run executes the code as shown in a region booted for the page, and
+// shows what it logs underneath
+---
+
+<div class="runnable not-content" data-runnable>
+  <slot />
+  <div class="editor"></div>
+  <div class="bar">
+    <button type="button" class="run">Run</button>
+    <button type="button" class="edit">Edit</button>
+    <button type="button" class="reset">Reset</button>
+    <span class="state"></span>
+  </div>
+  <pre class="output"></pre>
+</div>
+
+<script>
+  import { connect } from '../runnable/run.ts';
+
+  for (const root of document.querySelectorAll<HTMLElement>('[data-runnable]')) connect(root);
+</script>
+
+<style>
+  .runnable :global(.expressive-code) {
+    margin-bottom: 0;
+  }
+
+  .runnable.editing :global(.expressive-code),
+  .runnable:not(.editing) :is(.editor, .reset),
+  .runnable.editing .edit,
+  .output:empty {
+    display: none;
+  }
+
+  .editor :global(.cm-editor) {
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.4rem;
+    font-size: var(--sl-text-code);
+  }
+
+  .editor :global(.cm-editor.cm-focused) {
+    outline: none;
+    border-color: var(--sl-color-gray-3);
+  }
+
+  .editor :global(.cm-scroller) {
+    padding: 0.75rem 0.5rem;
+    font-family: var(--__sl-font-mono);
+  }
+
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+  }
+
+  button {
+    font: inherit;
+    padding: 0.3rem 0.9rem;
+    border: 1px solid var(--sl-color-gray-4);
+    border-radius: 0.4rem;
+    background: transparent;
+    color: var(--sl-color-white);
+    cursor: pointer;
+  }
+
+  button:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  .state {
+    color: var(--sl-color-gray-2);
+    font-size: var(--sl-text-sm);
+  }
+
+  .output {
+    margin-top: 0.5rem;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.4rem;
+    background: var(--sl-color-gray-6);
+    font-size: var(--sl-text-code);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+</style>

@@ -3,23 +3,12 @@ import Base from '../layouts/Base.astro';
 import Concurrency from '../components/Concurrency.astro';
 import LambdaFunction from '../components/LambdaFunction.astro';
 import Terminal from '../components/Terminal.astro';
+import { importMap } from '../import-map.mjs';
 import '../styles/demo.css';
 ---
 
 <Base title="Pocket Region demo">
-  <script type="importmap" is:inline slot="head">
-    {
-      "imports": {
-        "pocket-region/browser": "/region/dist/browser.js",
-        "pyodide": "https://cdn.jsdelivr.net/npm/pyodide@314.0.6/pyodide.mjs",
-        "@aws-sdk/client-s3": "https://cdn.jsdelivr.net/npm/@aws-sdk/client-s3@3.1131.0/+esm",
-        "@aws-sdk/client-sqs": "https://cdn.jsdelivr.net/npm/@aws-sdk/client-sqs@3.1131.0/+esm",
-        "@aws-sdk/client-sns": "https://cdn.jsdelivr.net/npm/@aws-sdk/client-sns@3.1131.0/+esm",
-        "@aws-sdk/client-dynamodb": "https://cdn.jsdelivr.net/npm/@aws-sdk/client-dynamodb@3.1131.0/+esm",
-        "@aws-sdk/client-lambda": "https://cdn.jsdelivr.net/npm/@aws-sdk/client-lambda@3.1131.0/+esm"
-      }
-    }
-  </script>
+  <script type="importmap" is:inline slot="head" set:html={JSON.stringify(importMap)} />
 
   <h1>Pocket Region demo</h1>
   <p class="lede">

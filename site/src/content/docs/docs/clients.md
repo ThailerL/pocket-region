@@ -26,23 +26,18 @@ so nothing listens and nothing is dialed.
 import { requestHandler } from 'pocket-region/node';
 import { S3Client } from '@aws-sdk/client-s3';
 
-const s3 = new S3Client({
-  region: 'us-east-1',
-  endpoint: 'http://localhost:4566',
-  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
-  forcePathStyle: true,
-  requestHandler: requestHandler(region),
-});
+const s3 = new S3Client({ requestHandler: requestHandler(region) });
 ```
 
-The client still needs `region`, `credentials`, and `endpoint`:
-
-- **`region` and `credentials`** can be anything. The emulator routes a request by the
-  credential scope in its `Authorization` header and never checks the signature.
-- **`endpoint`** is never dialed, but the SDK builds the request's `host` header from it, and
-  the emulator reads that header.
-- **`forcePathStyle: true`** is needed for S3. Otherwise the bucket name moves into the host
-  name, and the emulator wouldn't see it.
+- **`region` and `credentials`** are still required, because the SDK refuses to build a request
+  without them, but any values do. The emulator routes a request by the credential scope in its
+  `Authorization` header and never checks the signature. In Node they can come from the
+  environment or `~/.aws` as usual; a page has to pass them.
+- **`endpoint`** isn't needed. Without one, the SDK addresses AWS's own host names, such as
+  `photos.s3.us-east-1.amazonaws.com`, which the emulator understands, and nothing is dialed.
+- **With an `endpoint`** such as `http://localhost:4566`, S3 also needs `forcePathStyle: true`.
+  Otherwise the bucket name moves into a host name like `photos.localhost`, which the emulator
+  rejects as an invalid bucket.
 
 Request bodies can be a string, a `Uint8Array`, a Node `Readable`, or a web `ReadableStream`.
 Streams are read to the end before the request is handed over. Response bodies come back as a

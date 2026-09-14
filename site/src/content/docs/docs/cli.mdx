@@ -3,6 +3,8 @@ title: The aws CLI
 description: awsCli runs aws commands against a region and returns their output, for tests and for an AWS console in a page.
 ---
 
+import Runnable from '../../../components/Runnable.astro';
+
 ```ts
 import { awsCli } from 'pocket-region/node';     // Node
 import { awsCli } from 'pocket-region/browser';  // a page
@@ -14,11 +16,22 @@ awsCli(region: { dispatch: Region['dispatch'] }, options?: AwsCliOptions):
 `awsCli` returns a function that runs one `aws` command. The output is returned rather than
 printed, so a test can assert on it and a page can render it.
 
+<Runnable>
+
 ```js
+import { awsCli, createRegion } from 'pocket-region/browser';
+
+const region = await createRegion({ assetsBaseUrl: '/region/vendor' });
 const aws = awsCli(region);
+
 await aws('s3 mb s3://notes');
 const { stdout } = await aws(['sqs', 'create-queue', '--queue-name', 'orders']);
+console.log(stdout);
+
+await region.stop();
 ```
+
+</Runnable>
 
 ## Commands
 

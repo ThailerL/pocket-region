@@ -1,0 +1,423 @@
+---
+title: Services
+description: Which AWS services run as they do in MiniStack, which are stubs, and what runs on a timer, with a runnable example for each one that runs.
+---
+
+import Columns from '../../../components/Columns.astro';
+import Runnable from '../../../components/Runnable.astro';
+
+[MiniStack](https://ministack.org/) emulates each service's behaviour, not just its API: S3 keeps
+the objects you put, SQS delivers and redelivers messages, and Kinesis stores records on shards.
+
+**These work as they do in MiniStack.** Pocket Region's tests have run each one here and found
+nothing that behaves differently. Each links to an example you can run below, and where Pocket
+Region runs part of a service its own way, such as MiniStack's background threads, its section
+says so.
+
+<Columns>
+
+- [CloudWatch Logs](#cloudwatch-logs)
+- [DynamoDB](#dynamodb)
+- [EventBridge](#eventbridge)
+- [Kinesis](#kinesis)
+- [KMS](#kms)
+- [S3](#s3)
+- [Secrets Manager](#secrets-manager)
+- [SNS](#sns)
+- [SQS](#sqs)
+- [SSM Parameter Store](#ssm-parameter-store)
+
+</Columns>
+
+**The rest:**
+
+| Service | Status |
+| --- | --- |
+| Lambda | Node functions, run by Pocket Region in Node and in a page. See [Lambda](/docs/lambda/) |
+| Step Functions | Doesn't work yet: executions stay `RUNNING` |
+| RDS, ElastiCache, ECS, EKS, Batch, OpenSearch, Athena | Stubs: they answer, but nothing runs behind them. Databases, caches, and clusters report ready with no endpoint, tasks and jobs report running or done, and Athena returns made-up rows |
+| The rest of [MiniStack's services](https://ministack.org/docs/services/) | Not run here yet. They may work, but nothing here checks them |
+
+## Examples
+
+Each example is a taste of one service, not a list of what it supports: that's MiniStack's page
+for it, linked from each section. Every Run boots a fresh region in this tab.
+
+### S3
+
+Uploading an object sends a notification to a queue. MiniStack sends notifications from a
+background thread, which Pocket Region runs inside the upload request instead, so the notification
+is already queued when `PutObject` returns. [MiniStack's S3 page](https://ministack.org/docs/services/s3)
+lists what it supports.
+
+<Runnable>
+
+```js
+import { createRegion, requestHandler } from 'pocket-region/browser';
+import { S3Client, CreateBucketCommand, PutBucketNotificationConfigurationCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import { SQSClient, CreateQueueCommand, GetQueueAttributesCommand, ReceiveMessageCommand } from '@aws-sdk/client-sqs';
+
+const region = await createRegion({ assetsBaseUrl: '/region/vendor' });
+const config = {
+  region: 'us-east-1',
+  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
+  requestHandler: requestHandler(region),
+};
+const s3 = new S3Client(config);
+const sqs = new SQSClient(config);
+
+const { QueueUrl } = await sqs.send(new CreateQueueCommand({ QueueName: 'uploads' }));
+const { Attributes } = await sqs.send(new GetQueueAttributesCommand({ QueueUrl, AttributeNames: ['QueueArn'] }));
+
+await s3.send(new CreateBucketCommand({ Bucket: 'photos' }));
+await s3.send(new PutBucketNotificationConfigurationCommand({
+  Bucket: 'photos',
+  NotificationConfiguration: {
+    QueueConfigurations: [{ QueueArn: Attributes.QueueArn, Events: ['s3:ObjectCreated:*'] }],
+  },
+}));
+await s3.send(new PutObjectCommand({ Bucket: 'photos', Key: 'cat.jpg', Body: 'meow' }));
+
+const { Messages = [] } = await sqs.send(new ReceiveMessageCommand({ QueueUrl, MaxNumberOfMessages: 10 }));
+for (const record of Messages.flatMap((message) => JSON.parse(message.Body).Records ?? [])) {
+  console.log(record.eventName, record.s3.bucket.name, record.s3.object.key);
+}
+
+await region.stop();
+```
+
+</Runnable>
+
+### SQS
+
+Messages sent to a queue come back from a receive. [MiniStack's SQS page](https://ministack.org/docs/services/sqs)
+lists what it supports.
+
+<Runnable>
+
+```js
+import { createRegion, requestHandler } from 'pocket-region/browser';
+import { SQSClient, CreateQueueCommand, SendMessageCommand, ReceiveMessageCommand } from '@aws-sdk/client-sqs';
+
+const region = await createRegion({ assetsBaseUrl: '/region/vendor' });
+const sqs = new SQSClient({
+  region: 'us-east-1',
+  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
+  requestHandler: requestHandler(region),
+});
+
+const { QueueUrl } = await sqs.send(new CreateQueueCommand({ QueueName: 'orders' }));
+await sqs.send(new SendMessageCommand({ QueueUrl, MessageBody: 'order 41' }));
+await sqs.send(new SendMessageCommand({ QueueUrl, MessageBody: 'order 42' }));
+
+const { Messages = [] } = await sqs.send(new ReceiveMessageCommand({ QueueUrl, MaxNumberOfMessages: 10 }));
+console.log(Messages.map((message) => message.Body));
+
+await region.stop();
+```
+
+</Runnable>
+
+### DynamoDB
+
+An item whose TTL has passed is removed within about a second. MiniStack removes expired items
+from a background thread, which Pocket Region runs from a timer instead, as
+[scheduled work](#scheduled-work) describes.
+[MiniStack's DynamoDB page](https://ministack.org/docs/services/dynamodb) lists what it supports.
+
+<Runnable>
+
+```js
+import { createRegion, requestHandler } from 'pocket-region/browser';
+import { DynamoDBClient, CreateTableCommand, UpdateTimeToLiveCommand, PutItemCommand, ScanCommand } from '@aws-sdk/client-dynamodb';
+
+const region = await createRegion({ assetsBaseUrl: '/region/vendor' });
+const dynamodb = new DynamoDBClient({
+  region: 'us-east-1',
+  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
+  requestHandler: requestHandler(region),
+});
+
+await dynamodb.send(new CreateTableCommand({
+  TableName: 'sessions',
+  KeySchema: [{ AttributeName: 'id', KeyType: 'HASH' }],
+  AttributeDefinitions: [{ AttributeName: 'id', AttributeType: 'S' }],
+  BillingMode: 'PAY_PER_REQUEST',
+}));
+await dynamodb.send(new UpdateTimeToLiveCommand({
+  TableName: 'sessions',
+  TimeToLiveSpecification: { Enabled: true, AttributeName: 'expires' },
+}));
+
+const now = Math.floor(Date.now() / 1000);
+await dynamodb.send(new PutItemCommand({ TableName: 'sessions', Item: { id: { S: 'expired' }, expires: { N: String(now - 60) } } }));
+await dynamodb.send(new PutItemCommand({ TableName: 'sessions', Item: { id: { S: 'live' }, expires: { N: String(now + 3600) } } }));
+
+const ids = async () => (await dynamodb.send(new ScanCommand({ TableName: 'sessions' }))).Items.map((item) => item.id.S);
+console.log('before:', await ids());
+for (let tries = 0; tries < 10 && (await ids()).includes('expired'); tries++) {
+  await new Promise((resolve) => setTimeout(resolve, 500));
+}
+console.log('after:', await ids());
+
+await region.stop();
+```
+
+</Runnable>
+
+### SNS
+
+A message published to a topic arrives in a subscribed queue.
+[MiniStack's SNS page](https://ministack.org/docs/services/sns) lists what it supports.
+
+<Runnable>
+
+```js
+import { createRegion, requestHandler } from 'pocket-region/browser';
+import { SNSClient, CreateTopicCommand, SubscribeCommand, PublishCommand } from '@aws-sdk/client-sns';
+import { SQSClient, CreateQueueCommand, GetQueueAttributesCommand, ReceiveMessageCommand } from '@aws-sdk/client-sqs';
+
+const region = await createRegion({ assetsBaseUrl: '/region/vendor' });
+const config = {
+  region: 'us-east-1',
+  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
+  requestHandler: requestHandler(region),
+};
+const sns = new SNSClient(config);
+const sqs = new SQSClient(config);
+
+const { QueueUrl } = await sqs.send(new CreateQueueCommand({ QueueName: 'order-emails' }));
+const { Attributes } = await sqs.send(new GetQueueAttributesCommand({ QueueUrl, AttributeNames: ['QueueArn'] }));
+
+const { TopicArn } = await sns.send(new CreateTopicCommand({ Name: 'orders' }));
+await sns.send(new SubscribeCommand({ TopicArn, Protocol: 'sqs', Endpoint: Attributes.QueueArn }));
+await sns.send(new PublishCommand({ TopicArn, Subject: 'placed', Message: 'order 42' }));
+
+const { Messages = [] } = await sqs.send(new ReceiveMessageCommand({ QueueUrl }));
+const { Subject, Message } = JSON.parse(Messages[0].Body);
+console.log(Subject, Message);
+
+await region.stop();
+```
+
+</Runnable>
+
+### EventBridge
+
+Only the event that matches the rule reaches its queue.
+[MiniStack's EventBridge page](https://ministack.org/docs/services/eventbridge) lists what it supports.
+
+<Runnable>
+
+```js
+import { createRegion, requestHandler } from 'pocket-region/browser';
+import { EventBridgeClient, PutRuleCommand, PutTargetsCommand, PutEventsCommand } from '@aws-sdk/client-eventbridge';
+import { SQSClient, CreateQueueCommand, GetQueueAttributesCommand, ReceiveMessageCommand } from '@aws-sdk/client-sqs';
+
+const region = await createRegion({ assetsBaseUrl: '/region/vendor' });
+const config = {
+  region: 'us-east-1',
+  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
+  requestHandler: requestHandler(region),
+};
+const events = new EventBridgeClient(config);
+const sqs = new SQSClient(config);
+
+const { QueueUrl } = await sqs.send(new CreateQueueCommand({ QueueName: 'large-orders' }));
+const { Attributes } = await sqs.send(new GetQueueAttributesCommand({ QueueUrl, AttributeNames: ['QueueArn'] }));
+
+await events.send(new PutRuleCommand({
+  Name: 'large-orders',
+  EventPattern: JSON.stringify({ source: ['shop'], detail: { total: [{ numeric: ['>', 100] }] } }),
+}));
+await events.send(new PutTargetsCommand({ Rule: 'large-orders', Targets: [{ Id: 'queue', Arn: Attributes.QueueArn }] }));
+await events.send(new PutEventsCommand({
+  Entries: [
+    { Source: 'shop', DetailType: 'order placed', Detail: JSON.stringify({ total: 20 }) },
+    { Source: 'shop', DetailType: 'order placed', Detail: JSON.stringify({ total: 250 }) },
+  ],
+}));
+
+const { Messages = [] } = await sqs.send(new ReceiveMessageCommand({ QueueUrl, MaxNumberOfMessages: 10 }));
+console.log(Messages.map((message) => JSON.parse(message.Body).detail));
+
+await region.stop();
+```
+
+</Runnable>
+
+### Secrets Manager
+
+A second value becomes the secret's current version.
+[MiniStack's Secrets Manager page](https://ministack.org/docs/services/secretsmanager) lists what it supports.
+
+<Runnable>
+
+```js
+import { createRegion, requestHandler } from 'pocket-region/browser';
+import { SecretsManagerClient, CreateSecretCommand, PutSecretValueCommand, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
+
+const region = await createRegion({ assetsBaseUrl: '/region/vendor' });
+const secrets = new SecretsManagerClient({
+  region: 'us-east-1',
+  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
+  requestHandler: requestHandler(region),
+});
+
+await secrets.send(new CreateSecretCommand({ Name: 'db-password', SecretString: 'first' }));
+await secrets.send(new PutSecretValueCommand({ SecretId: 'db-password', SecretString: 'second' }));
+
+const { SecretString, VersionStages } = await secrets.send(new GetSecretValueCommand({ SecretId: 'db-password' }));
+console.log(SecretString, VersionStages);
+
+await region.stop();
+```
+
+</Runnable>
+
+### SSM Parameter Store
+
+Parameters listed by path, with a SecureString decrypted.
+[MiniStack's SSM page](https://ministack.org/docs/services/ssm) lists what it supports.
+
+<Runnable>
+
+```js
+import { createRegion, requestHandler } from 'pocket-region/browser';
+import { SSMClient, PutParameterCommand, GetParametersByPathCommand } from '@aws-sdk/client-ssm';
+
+const region = await createRegion({ assetsBaseUrl: '/region/vendor' });
+const ssm = new SSMClient({
+  region: 'us-east-1',
+  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
+  requestHandler: requestHandler(region),
+});
+
+await ssm.send(new PutParameterCommand({ Name: '/app/api-key', Value: 'abc', Type: 'SecureString' }));
+await ssm.send(new PutParameterCommand({ Name: '/app/region', Value: 'us-east-1', Type: 'String' }));
+
+const { Parameters } = await ssm.send(new GetParametersByPathCommand({ Path: '/app', WithDecryption: true }));
+console.log(Parameters.map(({ Name, Value }) => `${Name} = ${Value}`));
+
+await region.stop();
+```
+
+</Runnable>
+
+### KMS
+
+Text encrypted with a new key decrypts back.
+[MiniStack's KMS page](https://ministack.org/docs/services/kms) lists what it supports.
+
+<Runnable>
+
+```js
+import { createRegion, requestHandler } from 'pocket-region/browser';
+import { KMSClient, CreateKeyCommand, EncryptCommand, DecryptCommand } from '@aws-sdk/client-kms';
+
+const region = await createRegion({ assetsBaseUrl: '/region/vendor' });
+const kms = new KMSClient({
+  region: 'us-east-1',
+  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
+  requestHandler: requestHandler(region),
+});
+
+const { KeyMetadata } = await kms.send(new CreateKeyCommand({}));
+const { CiphertextBlob } = await kms.send(new EncryptCommand({
+  KeyId: KeyMetadata.KeyId,
+  Plaintext: new TextEncoder().encode('hello'),
+}));
+const { Plaintext } = await kms.send(new DecryptCommand({ CiphertextBlob }));
+console.log(new TextDecoder().decode(Plaintext));
+
+await region.stop();
+```
+
+</Runnable>
+
+### CloudWatch Logs
+
+A filter pattern finds the matching log event.
+[MiniStack's CloudWatch Logs page](https://ministack.org/docs/services/cloudwatch-logs) lists what it supports.
+
+<Runnable>
+
+```js
+import { createRegion, requestHandler } from 'pocket-region/browser';
+import { CloudWatchLogsClient, CreateLogGroupCommand, CreateLogStreamCommand, PutLogEventsCommand, FilterLogEventsCommand } from '@aws-sdk/client-cloudwatch-logs';
+
+const region = await createRegion({ assetsBaseUrl: '/region/vendor' });
+const logs = new CloudWatchLogsClient({
+  region: 'us-east-1',
+  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
+  requestHandler: requestHandler(region),
+});
+
+await logs.send(new CreateLogGroupCommand({ logGroupName: '/app/web' }));
+await logs.send(new CreateLogStreamCommand({ logGroupName: '/app/web', logStreamName: 'instance-1' }));
+await logs.send(new PutLogEventsCommand({
+  logGroupName: '/app/web',
+  logStreamName: 'instance-1',
+  logEvents: [
+    { timestamp: Date.now(), message: 'GET / 200' },
+    { timestamp: Date.now(), message: 'GET /cart 500' },
+  ],
+}));
+
+const { events } = await logs.send(new FilterLogEventsCommand({ logGroupName: '/app/web', filterPattern: '500' }));
+console.log(events.map((event) => event.message));
+
+await region.stop();
+```
+
+</Runnable>
+
+### Kinesis
+
+A record put on a stream reads back from its shard.
+[MiniStack's Kinesis page](https://ministack.org/docs/services/kinesis) lists what it supports.
+
+<Runnable>
+
+```js
+import { createRegion, requestHandler } from 'pocket-region/browser';
+import { KinesisClient, CreateStreamCommand, PutRecordCommand, ListShardsCommand, GetShardIteratorCommand, GetRecordsCommand } from '@aws-sdk/client-kinesis';
+
+const region = await createRegion({ assetsBaseUrl: '/region/vendor' });
+const kinesis = new KinesisClient({
+  region: 'us-east-1',
+  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
+  requestHandler: requestHandler(region),
+});
+
+await kinesis.send(new CreateStreamCommand({ StreamName: 'clicks', ShardCount: 1 }));
+await kinesis.send(new PutRecordCommand({
+  StreamName: 'clicks',
+  PartitionKey: 'user-1',
+  Data: new TextEncoder().encode('click'),
+}));
+
+const { Shards } = await kinesis.send(new ListShardsCommand({ StreamName: 'clicks' }));
+const { ShardIterator } = await kinesis.send(new GetShardIteratorCommand({
+  StreamName: 'clicks',
+  ShardId: Shards[0].ShardId,
+  ShardIteratorType: 'TRIM_HORIZON',
+}));
+const { Records } = await kinesis.send(new GetRecordsCommand({ ShardIterator }));
+console.log(Records.map((record) => new TextDecoder().decode(record.Data)));
+
+await region.stop();
+```
+
+</Runnable>
+
+
+## Scheduled work
+
+MiniStack runs scheduled EventBridge rules, EventBridge Scheduler schedules, and the DynamoDB TTL
+reaper on background threads, which Pyodide doesn't have. Pocket Region runs them from a timer
+instead, checking once a second. Anything already due fires within about a second, such as a
+one-time schedule in the past or an expired TTL. `rate()` and `cron()` wait real time, so a
+`rate(1 minute)` rule first fires a minute after it's created. EventBridge rules that target
+Lambda don't reach the handler, found by reading MiniStack's source and not yet run. Schedules
+that invoke Lambda are untested.

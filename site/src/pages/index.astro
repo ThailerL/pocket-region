@@ -3,19 +3,9 @@ import { Code } from 'astro:components';
 import Base from '../layouts/Base.astro';
 
 const example = `import { createRegion, requestHandler } from 'pocket-region/node';
-import { S3Client, CreateBucketCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 
 const region = await createRegion();
-
-const s3 = new S3Client({
-  region: 'us-east-1',
-  endpoint: 'http://localhost:4566', // not used, since nothing listens here
-  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
-  forcePathStyle: true,
-  requestHandler: requestHandler(region),
-});
-
-await s3.send(new CreateBucketCommand({ Bucket: 'photos' }));
+const s3 = new S3Client({ requestHandler: requestHandler(region) });
 await s3.send(new PutObjectCommand({ Bucket: 'photos', Key: 'cat.txt', Body: 'meow' }));`;
 
 const features = [
@@ -41,7 +31,7 @@ const features = [
   },
   {
     title: 'Built on MiniStack',
-    body: 'The AWS APIs come from <a href="https://ministack.org/">MiniStack</a>, a Python AWS emulator running here under Pyodide. It answers for many more services, and <a href="/docs/services/">the docs list which ones are tested</a>.',
+    body: 'The AWS APIs come from <a href="https://ministack.org/">MiniStack</a>, a Python AWS emulator running here under Pyodide. It answers for many more services, and <a href="/docs/services/">the docs list which ones run here</a>.',
   },
 ];
 ---
@@ -56,7 +46,7 @@ const features = [
       </p>
       <div class="actions">
         <a class="button primary" href="/demo">Try it in this tab</a>
-        <a class="button" href="/docs/">Read the docs</a>
+        <a class="button" href="/docs/">Read the runnable docs</a>
       </div>
       <code class="install">npm install pocket-region</code>
     </header>

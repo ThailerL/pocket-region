@@ -1,0 +1,15 @@
+<div class="columns">
+  <slot />
+</div>
+
+<style>
+  .columns :global(ul) {
+    columns: 11rem;
+    column-gap: 2rem;
+    padding-inline-start: 1.25rem;
+  }
+
+  .columns :global(li) {
+    break-inside: avoid;
+  }
+</style>
