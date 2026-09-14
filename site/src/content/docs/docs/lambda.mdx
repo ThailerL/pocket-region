@@ -98,15 +98,26 @@ queue. As in MiniStack, stream mappings ignore it and move past the whole batch.
 
 ## Watching functions run
 
-Pass `lambda` to `createRegion`. `onOutput` gets every line a handler writes, including the
-`START`, `END`, and `REPORT` lines. The region's own `onOutput` hears the same lines, untagged.
-`onEvent` gets one of:
+Pass `lambda` to `createRegion`:
+
+```ts
+type LambdaEnvironment = { functionName: string; environment: string };
+
+type LambdaObserver = {
+  onOutput?(line: string, source: LambdaEnvironment): void;
+  onEvent?(event: LambdaEvent): void;
+};
+```
+
+`environment` names one execution environment by its log stream. `onOutput` gets every line a
+handler writes, including the `START`, `END`, and `REPORT` lines. The region's own `onOutput` hears
+the same lines, untagged. `onEvent` gets a `LambdaEvent`: the `LambdaEnvironment` fields, plus one of:
 
 | `kind` | `phase` | Fields |
 | --- | --- | --- |
-| `environment` | `started`, `stopped` | `functionName`, `environment`, and `reason` when stopped |
-| `invocation` | `started` | `functionName`, `environment`, `requestId`, `event` (JSON text), `coldStart` |
-| `invocation` | `completed` | `functionName`, `environment`, `requestId`, `durationMs`, `initMs` (first invocation only), `failed` |
+| `environment` | `started`, `stopped` | `reason` when stopped |
+| `invocation` | `started` | `requestId`, `event` (JSON text), `coldStart` |
+| `invocation` | `completed` | `requestId`, `durationMs`, `initMs` (first invocation only), `failed` |
 
 Throttles aren't reported here. MiniStack publishes them as the `AWS/Lambda` `Throttles` metric in
 CloudWatch.

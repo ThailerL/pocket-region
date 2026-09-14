@@ -11,12 +11,13 @@ A region has no endpoint of its own. There are three ways to reach it:
 | `serve(region, options?)` | Anything that needs a URL: another process, another language, the real AWS CLI. Node only |
 | `region.dispatch(request)` | Raw wire-protocol requests, and wrapping a region |
 
-All three accept any object with a `dispatch` method, not only a region.
+All three accept any object with a `dispatch` method, not only a region: a
+[`Dispatcher`](#dispatch).
 
 ## `requestHandler`
 
 ```ts
-requestHandler(region: { dispatch: Region['dispatch'] }): RegionRequestHandler
+requestHandler(region: Dispatcher): RegionRequestHandler
 ```
 
 Pass the result as `requestHandler` to any AWS SDK v3 client. Requests become function calls,
@@ -46,7 +47,7 @@ Streams are read to the end before the request is handed over. Response bodies c
 ## `serve`
 
 ```ts
-serve(region: { dispatch: Region['dispatch']; port?: number }, options?: ServeOptions): Promise<RegionServer>
+serve(region: Dispatcher & { port?: number }, options?: ServeOptions): Promise<RegionServer>
 ```
 
 ```js
@@ -90,6 +91,9 @@ type RegionResponse = {
   headers: Record<string, string>;
   body: Uint8Array;
 };
+
+type Dispatch = (request: RegionRequest) => Promise<RegionResponse>;
+type Dispatcher = { dispatch: Dispatch };
 ```
 
 ```js

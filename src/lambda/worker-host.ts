@@ -1,4 +1,4 @@
-import type { CodeEntry, LambdaExecutor } from '../core.ts';
+import type { CodeEntry, Dispatch, LambdaExecutor } from '../core.ts';
 import { createLambdaHost, type RegionHostOptions } from './host.ts';
 import type { LambdaError, SandboxFactory } from './pool.ts';
 import type { FetchRequest, FromWorker, ToWorker } from './worker-protocol.ts';
@@ -20,7 +20,7 @@ function locateHandler(setting: string, files: Package) {
 }
 
 // Each environment is a module worker, the Runtime API a message channel
-function workerSandbox(files: Package, dispatch: RegionHostOptions['dispatch']): SandboxFactory {
+function workerSandbox(files: Package, dispatch: Dispatch): SandboxFactory {
   return (env, events) => {
     let handler: ReturnType<typeof locateHandler>;
     try {

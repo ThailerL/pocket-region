@@ -9,7 +9,7 @@ import Runnable from '../../../components/Runnable.astro';
 import { awsCli } from 'pocket-region/node';     // Node
 import { awsCli } from 'pocket-region/browser';  // a page
 
-awsCli(region: { dispatch: Region['dispatch'] }, options?: AwsCliOptions):
+awsCli(region: Dispatcher, options?: AwsCliOptions):
   (command: string | string[]) => Promise<CliResult>
 ```
 

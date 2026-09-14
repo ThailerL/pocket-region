@@ -9,12 +9,16 @@ import {
 import { createWorkerHost } from './lambda/worker-host.ts';
 
 export type {
+  Dispatch,
+  Dispatcher,
+  LambdaEnvironment,
   LambdaEvent,
   LambdaObserver,
   OutputStream,
   Region,
   RegionRequest,
   RegionResponse,
+  RegionSettings,
   StateFiles,
   StateStore,
 } from './core.ts';

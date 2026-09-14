@@ -16,18 +16,19 @@ export type RegionResponse = {
   body: Uint8Array;
 };
 
-export type Region = {
+export type Dispatch = (request: RegionRequest) => Promise<RegionResponse>;
+
+// What anything built over a region needs: a page's region fits, and so does a stub
+export type Dispatcher = { dispatch: Dispatch };
+
+export type Region = Dispatcher & {
   // The port its queue URLs name, which an HTTP server over it has to answer on
   port: number;
-  dispatch(request: RegionRequest): Promise<RegionResponse>;
   // Back to empty in milliseconds; a region with a store keeps its saved state until the next save
   reset(): Promise<void>;
   save(): Promise<void>;
   stop(): Promise<void>;
 };
-
-// What anything built over a region needs: a page's region fits, and so does a stub
-export type Dispatcher = Pick<Region, 'dispatch'>;
 
 // Where each asset is, already resolved: file paths from Node, URLs from a page. Pyodide
 // takes either, so nothing below knows which host it is running on
@@ -115,36 +116,23 @@ export type LambdaExecutor = {
   stop(): Promise<void>;
 };
 
-// What the host saw of a function's environments, named by the environment's log stream
-export type LambdaEvent =
-  | { kind: 'environment'; functionName: string; environment: string; phase: 'started' | 'stopped'; reason?: string }
-  | {
-      kind: 'invocation';
-      functionName: string;
-      environment: string;
-      requestId: string;
-      phase: 'started';
-      event: string;
-      coldStart: boolean;
-    }
-  | {
-      kind: 'invocation';
-      functionName: string;
-      environment: string;
-      requestId: string;
-      phase: 'completed';
-      durationMs: number;
-      initMs?: number;
-      failed: boolean;
-    };
+// An environment is named by its log stream
+export type LambdaEnvironment = { functionName: string; environment: string };
+
+export type LambdaEvent = LambdaEnvironment &
+  (
+    | { kind: 'environment'; phase: 'started' | 'stopped'; reason?: string }
+    | { kind: 'invocation'; requestId: string; phase: 'started'; event: string; coldStart: boolean }
+    | { kind: 'invocation'; requestId: string; phase: 'completed'; durationMs: number; initMs?: number; failed: boolean }
+  );
 
 export type LambdaObserver = {
-  onOutput?(line: string, source: { functionName: string; environment: string }): void;
+  onOutput?(line: string, source: LambdaEnvironment): void;
   onEvent?(event: LambdaEvent): void;
 };
 
 // Built during boot, around the dispatch a handler's own calls come back through
-export type LambdaHostFactory = (region: Pick<Region, 'port' | 'dispatch'>) => LambdaExecutor;
+export type LambdaHostFactory = (region: Dispatcher & { port: number }) => LambdaExecutor;
 
 // What scripts/vendor.mjs writes beside the wheels
 export type VendorManifest = { wheels: string[]; stdlib: string; pyodideVersion: string };
@@ -213,7 +201,7 @@ export async function bootRegion(
   const port = settings.port ?? DEFAULT_PORT;
   // Bound once the sources have run; nothing dispatches before boot resolves
   let dispatchPython: PythonDispatch;
-  const dispatch: Region['dispatch'] = ({ method, path, headers, body = new Uint8Array() }) =>
+  const dispatch: Dispatch = ({ method, path, headers, body = new Uint8Array() }) =>
     dispatchPython(
       method,
       path,

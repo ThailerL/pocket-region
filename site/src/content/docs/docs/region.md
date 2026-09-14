@@ -29,6 +29,9 @@ Browser boot time hasn't been measured.
 | `indexURL` | `string` | both | see text | Where Pyodide's own runtime loads from. A page defaults to jsDelivr, at the Pyodide version the package was built with. In Node, set it only where Pyodide can't find itself from `import.meta.url`. |
 | `packageCacheDir` | `string` | Node | the package's `vendor/` | The directory holding the wheels and `meta.json`. |
 
+`port`, `store`, `onOutput`, and `lambda` are exported from both entries as `RegionSettings`, for
+code that builds options for either.
+
 A page that can't fetch `meta.json` rejects with
 `no region assets at <url> (meta.json answered <status>)`.
 

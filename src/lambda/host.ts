@@ -2,9 +2,8 @@ import type { CodeEntry, Dispatcher, LambdaExecutor, LambdaObserver } from '../c
 import { failure, FunctionPool, type SandboxFactory } from './pool.ts';
 
 // What either host takes: the region it runs beside, and where its handlers' output goes
-export type RegionHostOptions = {
+export type RegionHostOptions = Dispatcher & {
   port: number;
-  dispatch: Dispatcher['dispatch'];
   lambda: LambdaObserver;
 };
 

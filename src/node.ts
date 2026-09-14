@@ -12,12 +12,16 @@ import {
 import { createProcessHost } from './lambda/process-host.ts';
 
 export type {
+  Dispatch,
+  Dispatcher,
+  LambdaEnvironment,
   LambdaEvent,
   LambdaObserver,
   OutputStream,
   Region,
   RegionRequest,
   RegionResponse,
+  RegionSettings,
   StateFiles,
   StateStore,
 } from './core.ts';
