@@ -118,6 +118,9 @@ type StateStore = {
 };
 ```
 
+Only the region calls a store's methods. Pass a store to `createRegion` and leave `load` and
+`replace` to it, the built-in stores included, since how a region uses its store may change.
+
 Each entry ships a store:
 
 | Store | Entry | |
