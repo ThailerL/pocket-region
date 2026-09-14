@@ -321,6 +321,22 @@ describe.each(HOSTS)('Lambda %s', (_, boot) => {
     expect(completedOf('once')).toHaveLength(1);
   }, 30_000);
 
+  it('applies an event invoke config put for $LATEST to an unqualified invocation', async () => {
+    const { QueueUrl, QueueArn } = await createQueue('latest-failures');
+    await createFunction('latest');
+    await lambda.send(
+      new PutFunctionEventInvokeConfigCommand({
+        FunctionName: 'latest',
+        Qualifier: '$LATEST',
+        MaximumRetryAttempts: 0,
+        DestinationConfig: { OnFailure: { Destination: QueueArn } },
+      }),
+    );
+    await invoke('latest', { throw: true }, { InvocationType: 'Event' });
+    expect(await nextMessage(QueueUrl)).toMatchObject({ requestPayload: { throw: true } });
+    expect(completedOf('latest')).toHaveLength(1);
+  }, 30_000);
+
   it('stops retrying an Event invocation once an attempt succeeds', async () => {
     const { QueueUrl, QueueArn } = await createQueue('never-used');
     const code = `

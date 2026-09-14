@@ -99,7 +99,7 @@ async def _invoke_async(lambda_svc, func, event, attempt, started):
         result = await _execute(lambda_svc, func, event)
         if not result.get("error"):
             return
-        eic = lambda_svc._event_invoke_config(func, None) or {}
+        eic = lambda_svc._event_invoke_config(func, None) or lambda_svc._event_invoke_config(func, "$LATEST") or {}
         max_retries = eic.get("MaximumRetryAttempts")
         if attempt < (2 if max_retries is None else int(max_retries)):
             delay = min(
