@@ -33,6 +33,7 @@ jobs:
       # Needs the network: the wheels come from PyPI and Pyodide's distribution
       - run: npm run vendor
       - run: npm run build
+      - run: npx playwright install --with-deps chromium firefox
       - run: npm test
       - run: npm ci --prefix site
       - run: npm run check --prefix site

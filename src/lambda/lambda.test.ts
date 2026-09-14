@@ -23,7 +23,8 @@ import { createRegion as createPageRegion, type Region } from '../browser.ts';
 import { createRegion, type LambdaEvent, type LambdaObserver } from '../node.ts';
 import { requestHandler } from '../request-handler.ts';
 import { serve } from '../server.ts';
-import { authorization, bodies, clientConfig, createQueue, freePort, installWorkerShim, serveVendor } from '../test-support.ts';
+import { authorization, bodies, clientConfig, createQueue } from '../test-clients.ts';
+import { freePort, installWorkerShim, serveVendor } from '../test-support.ts';
 
 const decoder = new TextDecoder();
 

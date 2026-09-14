@@ -31,6 +31,7 @@ jobs:
             echo "release $tagged does not match package.json ($manifest)"
             exit 1
           }
+      - run: npx playwright install --with-deps chromium firefox
       - run: npm test
       # prepack rebuilds vendor/ and dist/, so the tarball is built here rather than uploaded
       - run: npm publish

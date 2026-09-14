@@ -32,16 +32,17 @@ import { CreateTopicCommand, PublishCommand, SNSClient, SubscribeCommand } from 
 import { SQSClient } from '@aws-sdk/client-sqs';
 import { GetParameterCommand, GetParametersByPathCommand, PutParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createRegion, type Region } from './node.ts';
+import type { Region } from './core.ts';
 import { requestHandler } from './request-handler.ts';
-import { authorization, bodies, clientConfig, createQueue } from './test-support.ts';
+import { authorization, bodies, clientConfig, createQueue } from './test-clients.ts';
+import { createTestRegion } from './test-region.ts';
 
 let region: Region;
 let config: ReturnType<typeof clientConfig>;
 let sqs: SQSClient;
 
 beforeAll(async () => {
-  region = await createRegion();
+  region = await createTestRegion();
   config = clientConfig({ requestHandler: requestHandler(region) });
   sqs = new SQSClient(config);
 }, 30_000);
@@ -106,7 +107,7 @@ describe('services through the SDK', () => {
     const { KeyMetadata } = await kms.send(new CreateKeyCommand({}));
     const plaintext = new TextEncoder().encode('card number');
     const { CiphertextBlob } = await kms.send(new EncryptCommand({ KeyId: KeyMetadata!.KeyId, Plaintext: plaintext }));
-    expect(Buffer.from(CiphertextBlob!).equals(Buffer.from(plaintext))).toBe(false);
+    expect(CiphertextBlob).not.toEqual(plaintext);
     const { Plaintext, KeyId } = await kms.send(new DecryptCommand({ CiphertextBlob }));
     expect(new TextDecoder().decode(Plaintext)).toBe('card number');
     expect(KeyId).toBe(KeyMetadata!.Arn);

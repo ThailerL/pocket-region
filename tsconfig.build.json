@@ -8,7 +8,7 @@
   },
   "exclude": [
     "src/**/*.test.ts",
-    "src/test-support.ts",
+    "src/test-*.ts",
     "src/lambda/process-runtime.ts",
     "src/lambda/worker-runtime.ts"
   ]

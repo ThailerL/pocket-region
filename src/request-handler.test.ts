@@ -19,9 +19,10 @@ import {
   PutItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createRegion, type Region } from './node.ts';
+import type { Region } from './core.ts';
 import { requestHandler } from './request-handler.ts';
-import { clientConfig } from './test-support.ts';
+import { clientConfig } from './test-clients.ts';
+import { createTestRegion } from './test-region.ts';
 
 let region: Region;
 let s3: S3Client;
@@ -29,7 +30,7 @@ let sqs: SQSClient;
 let dynamodb: DynamoDBClient;
 
 beforeAll(async () => {
-  region = await createRegion();
+  region = await createTestRegion();
   const config = clientConfig({ requestHandler: requestHandler(region) });
   s3 = new S3Client({ ...config, forcePathStyle: true });
   sqs = new SQSClient(config);
