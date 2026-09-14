@@ -11,7 +11,7 @@ import { createRegion } from 'pocket-region/node';     // Node
 createRegion(options?: NodeRegionOptions): Promise<Region>
 
 import { createRegion } from 'pocket-region/browser';  // a page
-createRegion(options: BrowserRegionOptions): Promise<PageRegion>
+createRegion(options: BrowserRegionOptions): Promise<Region>
 ```
 
 In Node, a region boots in about 500 ms, and later ones in the same process in about 350 ms.
@@ -22,7 +22,7 @@ Browser boot time hasn't been measured.
 | Option | Type | Entry | Default | |
 | --- | --- | --- | --- | --- |
 | `port` | `number` | both | `4566` | The port the region writes into the URLs it hands out, such as SQS queue URLs. `serve` listens here by default. In Node, the region also serves itself on `127.0.0.1` at this port once a function's code is first deployed, so handlers in child processes can reach it. If the port is taken by your own `serve`, that server is used instead. |
-| `stateDir` | `string` | Node | none | A directory to restore state from at boot, and to write to on `save` and `stop`. Without it, state lives in memory only. |
+| `store` | `StateStore` | both | none | Where state is restored from at boot, and written to on `save` and `stop`. See [Stores](#stores). Without it, state lives in memory only. |
 | `onOutput` | `(line: string, stream: 'stdout' \| 'stderr') => void` | both | none | Every line the emulator prints while loading and running, and every line a Lambda handler writes, as `stdout`. |
 | `lambda` | `LambdaObserver` | both | none | Hooks for watching functions run. See [Lambda](/docs/lambda/#watching-functions-run). |
 | `assetsBaseUrl` | `string` | browser | required | The URL `vendor/` is served from: `meta.json`, the wheels, and the Python standard library. A relative URL resolves against the page. |
@@ -42,8 +42,6 @@ type Region = {
   save(): Promise<void>;
   stop(): Promise<void>;
 };
-
-type PageRegion = Omit<Region, 'save'>;
 ```
 
 ### `port`
@@ -66,8 +64,8 @@ An invocation still running fails with `Runtime.HandlerError`. Background work k
 through a reset, as it does in MiniStack: an asynchronous invocation waiting to retry still
 retries, with the function it was invoked with, so its handler can write into the emptied region.
 
-With a `stateDir`, a reset doesn't touch the disk. The files stay until the next `save` or
-`stop`, which overwrites them with the empty state.
+With a `store`, a reset doesn't touch the saved state. It stays until the next
+`save` or `stop`, which overwrites it with the empty state.
 
 To start every test empty, boot one region per test file and reset it before each test. A retry
 one test leaves waiting can still run during the next:
@@ -81,18 +79,19 @@ afterAll(() => region.stop());
 
 ### `save()`
 
-Writes every service's state, then mirrors it into `stateDir`, deleting files for state that no
-longer exists. It does nothing without a `stateDir`, and nothing saves on its own. A page has no
-`save`, since there is nowhere for it to write.
+Writes every service's state and hands all of it to the `store`, which replaces what it held
+before. It does nothing without a `store`, and nothing saves on its own.
 
 ```js
-const region = await createRegion({ stateDir: './.region' });
+import { createRegion, directoryStore } from 'pocket-region/node';
+
+const region = await createRegion({ store: directoryStore('./.region') });
 // ... requests ...
 await region.save();   // writes the state to ./.region
 await region.stop();   // saves too, then shuts down
 ```
 
-The next region created with the same `stateDir` starts from that state. The files are MiniStack's
+The next region created with the same store starts from that state. The files are MiniStack's
 own per-service format. If a service can't read its file at boot, the file is renamed
 `<service>.json.refused` and the service starts empty, rather than being saved over. A Pocket
 Region release that updates MiniStack can also start a service empty, because MiniStack stamps a
@@ -101,6 +100,48 @@ format version on each file.
 ### `stop()`
 
 Ends MiniStack's background work, including [scheduled work](/docs/services/#scheduled-work) and
-asynchronous invocations waiting to retry. Then it shuts the emulator down, mirrors state into
-`stateDir` if there is one, and stops every Lambda environment. Once it resolves, nothing the
-region started keeps Node running.
+asynchronous invocations waiting to retry. Then it shuts the emulator down, saves to the `store` if
+there is one, and stops every Lambda environment. Once it resolves, nothing the region started
+keeps Node running.
+
+## Stores
+
+```ts
+type StateFiles = Map<string, Uint8Array>;
+
+type StateStore = {
+  load(): Promise<StateFiles>;
+  replace(files: StateFiles): Promise<void>;
+};
+```
+
+Each entry ships a store:
+
+| Store | Entry | |
+| --- | --- | --- |
+| `directoryStore(dir)` | Node | Files in a directory, created if missing. A save writes each file and deletes the ones state no longer has, one file at a time. |
+| `indexedDbStore(name)` | browser | An IndexedDB database of that name. A save replaces the previous one in a single transaction, so a tab closed partway through keeps the previous save. |
+
+```js
+import { createRegion, indexedDbStore } from 'pocket-region/browser';
+
+const region = await createRegion({ assetsBaseUrl: '/region/vendor', store: indexedDbStore('my-app') });
+await region.save();   // writes the state to the my-app database
+```
+
+A page can't wait for a save while it closes, so save after the changes you want to keep. Two tabs
+sharing a database don't coordinate: the last one to save wins.
+
+To keep state anywhere else, such as OPFS or a server, write your own store. `load` resolves with
+everything the last `replace` was given, or an empty map before the first save. `replace` gets
+every file, keyed by paths like `state/sqs.json`; any key it no longer receives was deleted and
+has to go, or deleted resources come back at the next boot. Treat the keys as opaque, since a
+release can change them. How safe a save interrupted partway is depends on the store.
+
+```js
+let saved = new Map();
+const store = {
+  load: async () => new Map(saved),
+  replace: async (files) => { saved = new Map(files); },
+};
+```

@@ -1,11 +1,11 @@
 import { CreateBucketCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createRegion, type PageRegion } from './browser.ts';
+import { createRegion, type Region } from './browser.ts';
 import { requestHandler } from './request-handler.ts';
 import { clientConfig, serveVendor } from './test-support.ts';
 
 let vendor: Awaited<ReturnType<typeof serveVendor>>;
-let region: PageRegion;
+let region: Region;
 
 beforeAll(async () => {
   vendor = await serveVendor();

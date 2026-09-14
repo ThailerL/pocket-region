@@ -19,7 +19,7 @@ import { CreateStreamCommand, DescribeStreamCommand, KinesisClient, PutRecordCom
 import { HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
 import { GetQueueAttributesCommand, SendMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createRegion as createPageRegion, type PageRegion } from '../browser.ts';
+import { createRegion as createPageRegion, type Region } from '../browser.ts';
 import { createRegion, type LambdaEvent, type LambdaObserver } from '../node.ts';
 import { requestHandler } from '../request-handler.ts';
 import { serve } from '../server.ts';
@@ -83,7 +83,7 @@ export const handler = async (event) => {
 };
 `;
 
-let region: PageRegion;
+let region: Region;
 let vendor: Awaited<ReturnType<typeof serveVendor>> | undefined;
 let lambda: LambdaClient;
 let s3: S3Client;
@@ -98,7 +98,7 @@ const observer: LambdaObserver = {
 const eventsOf = (functionName: string) => observed.filter((event) => event.functionName === functionName);
 
 // The same handler, unbundled, runs on both hosts: fetch and process.env are all it needs
-const HOSTS: [string, () => Promise<PageRegion>][] = [
+const HOSTS: [string, () => Promise<Region>][] = [
   ['in Node', async () => createRegion({ port: await freePort(), lambda: observer })],
   [
     'in a page',

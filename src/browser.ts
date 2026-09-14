@@ -3,16 +3,23 @@ import {
   hostObserver,
   type Region,
   type RegionSettings,
+  type StateStore,
   type VendorManifest,
 } from './core.ts';
 import { createWorkerHost } from './lambda/worker-host.ts';
 
-export type { LambdaEvent, LambdaObserver, OutputStream, Region, RegionRequest, RegionResponse } from './core.ts';
+export type {
+  LambdaEvent,
+  LambdaObserver,
+  OutputStream,
+  Region,
+  RegionRequest,
+  RegionResponse,
+  StateFiles,
+  StateStore,
+} from './core.ts';
 export * from './cli/index.ts';
 export * from './request-handler.ts';
-
-// A page has nowhere to save to, so it is not offered: IndexedDB is its own decision
-export type PageRegion = Omit<Region, 'save'>;
 
 export type BrowserRegionOptions = RegionSettings & {
   // Where the vendored tree is served from: meta.json, the wheels and the stdlib beside it
@@ -21,7 +28,53 @@ export type BrowserRegionOptions = RegionSettings & {
   indexURL?: string;
 };
 
-export async function createRegion(options: BrowserRegionOptions): Promise<PageRegion> {
+const OBJECT_STORE = 'files';
+
+function settle<T>(request: IDBRequest<T>) {
+  return new Promise<T>((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function openStateDb(name: string) {
+  const request = indexedDB.open(name, 1);
+  request.onupgradeneeded = () => request.result.createObjectStore(OBJECT_STORE);
+  return settle(request);
+}
+
+export function indexedDbStore(name: string): StateStore {
+  return {
+    async load() {
+      const db = await openStateDb(name);
+      try {
+        const store = db.transaction(OBJECT_STORE).objectStore(OBJECT_STORE);
+        const [keys, contents] = await Promise.all([settle(store.getAllKeys()), settle(store.getAll())]);
+        return new Map(keys.map((key, index) => [String(key), contents[index]]));
+      } finally {
+        db.close();
+      }
+    },
+    // One transaction: a tab closed partway through keeps the previous save whole
+    async replace(files) {
+      const db = await openStateDb(name);
+      try {
+        const transaction = db.transaction(OBJECT_STORE, 'readwrite');
+        const store = transaction.objectStore(OBJECT_STORE);
+        store.clear();
+        for (const [key, contents] of files) store.put(contents, key);
+        await new Promise<void>((resolve, reject) => {
+          transaction.oncomplete = () => resolve();
+          transaction.onerror = transaction.onabort = () => reject(transaction.error);
+        });
+      } finally {
+        db.close();
+      }
+    },
+  };
+}
+
+export async function createRegion(options: BrowserRegionOptions): Promise<Region> {
   const base = new URL(
     options.assetsBaseUrl.endsWith('/') ? options.assetsBaseUrl : `${options.assetsBaseUrl}/`,
     globalThis.location?.href,
@@ -40,7 +93,6 @@ export async function createRegion(options: BrowserRegionOptions): Promise<PageR
       wheels: manifest.wheels.map((file) => new URL(file, base).href),
     },
     options,
-    undefined,
     (region) => createWorkerHost({ ...region, lambda: hostObserver(options) }),
   );
 }

@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createRegion, type Region } from './node.ts';
+import { createRegion, directoryStore, type Region } from './node.ts';
 import { authorization } from './test-support.ts';
 
 const encoder = new TextEncoder();
@@ -190,19 +190,20 @@ describe('createRegion', () => {
 
   it('leaves saved state on disk until the next save', async () => {
     const stateDir = await mkdtemp(path.join(tmpdir(), 'pocket-region-reset-'));
-    const first = await createRegion({ stateDir });
+    const store = directoryStore(stateDir);
+    const first = await createRegion({ store });
     await s3('PUT', '/saved', undefined, first);
     await s3('PUT', '/saved/keep.txt', 'kept', first);
     await first.save();
     await first.reset();
 
-    const unsaved = await createRegion({ stateDir });
+    const unsaved = await createRegion({ store });
     expect((await s3('GET', '/saved/keep.txt', undefined, unsaved)).status).toBe(200);
     await unsaved.stop();
 
     // Stopping saves, so the reset reaches disk here
     await first.stop();
-    const saved = await createRegion({ stateDir });
+    const saved = await createRegion({ store });
     expect((await s3('GET', '/saved/keep.txt', undefined, saved)).status).toBe(404);
     expect((await s3('GET', '/saved', undefined, saved)).status).toBe(404);
     await saved.stop();
@@ -211,7 +212,8 @@ describe('createRegion', () => {
 
   it('saves state that a later region reads back', async () => {
     const stateDir = await mkdtemp(path.join(tmpdir(), 'pocket-region-state-'));
-    const first = await createRegion({ stateDir });
+    const store = directoryStore(stateDir);
+    const first = await createRegion({ store });
     await s3('PUT', '/saved', undefined, first);
     await s3('PUT', '/saved/keep.txt', 'kept', first);
     await s3('PUT', '/saved/gone.txt', 'deleted after the first save', first);
@@ -220,7 +222,7 @@ describe('createRegion', () => {
     await s3('DELETE', '/saved/gone.txt', undefined, first);
     await first.stop();
 
-    const second = await createRegion({ stateDir });
+    const second = await createRegion({ store });
     const kept = await s3('GET', '/saved/keep.txt', undefined, second);
     expect(kept.status).toBe(200);
     expect(decoder.decode(kept.body)).toBe('kept');
@@ -240,7 +242,7 @@ describe('createRegion', () => {
     );
 
     const output: string[] = [];
-    const second = await createRegion({ stateDir, onOutput: (line) => output.push(line) });
+    const second = await createRegion({ store: directoryStore(stateDir), onOutput: (line) => output.push(line) });
     expect(output.join('\n')).toContain('sqs.json was not loaded');
     const lookup = await jsonApi(
       'sqs',

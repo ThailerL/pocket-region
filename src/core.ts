@@ -20,7 +20,7 @@ export type Region = {
   // The port its queue URLs name, which an HTTP server over it has to answer on
   port: number;
   dispatch(request: RegionRequest): Promise<RegionResponse>;
-  // Back to empty in milliseconds; a region with a stateDir keeps its disk until the next save
+  // Back to empty in milliseconds; a region with a store keeps its saved state until the next save
   reset(): Promise<void>;
   save(): Promise<void>;
   stop(): Promise<void>;
@@ -38,13 +38,35 @@ export type RegionAssets = {
   wheels: string[];
 };
 
-// Supplied only by a host that can persist. restore runs before the emulator imports, since
-// each service reads its own state file then; mirror runs after a save or shutdown wrote them.
-// Both may be async: a page's IndexedDB is, where Node's fs is not
-export type RegionPersistence = {
-  restore(py: PyodideAPI, stateRoot: string): Promise<void> | void;
-  mirror(py: PyodideAPI, stateRoot: string): Promise<void> | void;
+// Every saved file, keyed by its path under the state root, such as state/sqs.json
+export type StateFiles = Map<string, Uint8Array>;
+
+export type StateStore = {
+  load(): Promise<StateFiles>;
+  // Everything absent from files was deleted since the last save
+  replace(files: StateFiles): Promise<void>;
 };
+
+// Python file IO stays in MEMFS: under Vivari, writes through a node mount are corrupt
+function writeStateFiles(py: PyodideAPI, files: StateFiles) {
+  for (const [key, contents] of files) {
+    const mem = `${STATE_ROOT}/${key}`;
+    py.FS.mkdirTree(mem.slice(0, mem.lastIndexOf('/')));
+    py.FS.writeFile(mem, contents);
+  }
+}
+
+// Synchronous, so no request lands between the emulator writing its state and this snapshot
+function readStateFiles(py: PyodideAPI, prefix = '', files: StateFiles = new Map()): StateFiles {
+  for (const name of py.FS.readdir(`${STATE_ROOT}/${prefix}`)) {
+    if (name === '.' || name === '..') continue;
+    const key = `${prefix}${name}`;
+    const mem = `${STATE_ROOT}/${key}`;
+    if (py.FS.isDir(py.FS.stat(mem).mode)) readStateFiles(py, `${key}/`, files);
+    else files.set(key, py.FS.readFile(mem));
+  }
+  return files;
+}
 
 // One file of a function's deployment package, as the emulator read it out of the zip
 export type CodeEntry = [path: string, contents: Uint8Array, mode: number];
@@ -132,6 +154,8 @@ export type RegionSettings = {
   port?: number;
   onOutput?: (line: string, stream: OutputStream) => void;
   lambda?: LambdaObserver;
+  // In memory only when absent
+  store?: StateStore;
 };
 
 type PythonDispatch = (
@@ -162,7 +186,6 @@ export const unref = (timer: ReturnType<typeof setTimeout>) => {
 export async function bootRegion(
   assets: RegionAssets,
   settings: RegionSettings,
-  persistence?: RegionPersistence,
   lambda?: LambdaHostFactory,
 ): Promise<Region> {
   if (!('Suspending' in WebAssembly)) {
@@ -170,6 +193,7 @@ export async function bootRegion(
       'Pocket Region needs WebAssembly JSPI (WebAssembly.Suspending), which Node has from 24.20 and some browsers lack',
     );
   }
+  const { store } = settings;
   const onOutput = settings.onOutput ?? (() => {});
 
   const py = await loadPyodide({
@@ -217,7 +241,8 @@ export async function bootRegion(
       wakes.add(wake);
     }),
   );
-  await persistence?.restore(py, STATE_ROOT);
+  // Before the emulator imports, since each service reads its own state file then
+  if (store !== undefined) writeStateFiles(py, await store.load());
   // One shared namespace, in the generated order
   for (const source of PYTHON_SOURCES) {
     await py.runPythonAsync(source);
@@ -244,17 +269,17 @@ export async function bootRegion(
       }
     },
     async save() {
-      if (persistence === undefined) return;
+      if (store === undefined) return;
       savePython();
-      await persistence.mirror(py, STATE_ROOT);
+      await store.replace(readStateFiles(py));
     },
     async stop() {
       endWorkers();
       stopped = true;
       for (const wake of [...wakes]) wake();
-      // Lifespan shutdown writes the state files; the mirror follows
+      // Lifespan shutdown writes the state files; the store gets them after
       await lifespan('shutdown');
-      await persistence?.mirror(py, STATE_ROOT);
+      await store?.replace(readStateFiles(py));
       await executor?.stop();
     },
   };
