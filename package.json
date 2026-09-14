@@ -68,11 +68,17 @@
     "pyodide": "314.0.6"
   },
   "devDependencies": {
+    "@aws-sdk/client-cloudwatch-logs": "^3.1131.0",
     "@aws-sdk/client-dynamodb": "^3.1131.0",
+    "@aws-sdk/client-eventbridge": "^3.1131.0",
+    "@aws-sdk/client-kinesis": "^3.1131.0",
+    "@aws-sdk/client-kms": "^3.1131.0",
     "@aws-sdk/client-lambda": "^3.1131.0",
     "@aws-sdk/client-s3": "^3.1131.0",
+    "@aws-sdk/client-secrets-manager": "^3.1131.0",
     "@aws-sdk/client-sns": "^3.1131.0",
     "@aws-sdk/client-sqs": "^3.1131.0",
+    "@aws-sdk/client-ssm": "^3.1131.0",
     "@types/node": "^24.13.4",
     "typescript": "^7.0.2",
     "vitest": "^5.0.0"

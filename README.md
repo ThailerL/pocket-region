@@ -87,7 +87,8 @@ A failed asynchronous invocation is retried as Lambda does, honouring `MaximumRe
 
 SQS event source mappings work everywhere. They hand a function batches from a queue, as many at
 once as its reserved concurrency allows (10 without one). A batch is deleted once the function
-succeeds, and a failed batch stays on the queue. Where JSPI, WebAssembly's promise integration,
+succeeds, and a failed batch stays on the queue. Kinesis and DynamoDB Streams mappings are
+accepted but don't poll yet. Where JSPI, WebAssembly's promise integration,
 is present (Node 24.20 or later, earlier Node 24 releases started with
 `--experimental-wasm-jspi`, and browsers that have it), it also serves MiniStack's remaining
 synchronous paths to Lambda, which are untested.
@@ -202,11 +203,17 @@ the Node entry.
 | S3 | Tested, including bucket notifications into SQS |
 | SQS | Tested |
 | DynamoDB | Tested, including TTL expiry |
-| Lambda | Tested with Node functions, synchronous and `Event` invokes, and SQS event source mappings, in Node and in a page |
+| Lambda | Tested with Node functions, in Node and in a page |
+| SNS | Tested, fanning out to SQS |
+| EventBridge | Tested, routing matched events to SQS |
+| Secrets Manager, SSM Parameter Store, KMS, CloudWatch Logs, Kinesis | Tested |
+| Step Functions | Doesn't work yet: executions stay `RUNNING` |
+| RDS, ElastiCache, ECS, EKS, Batch, OpenSearch, Athena | Accept calls but run nothing. Databases, caches, and clusters report ready with no endpoint behind them, tasks and jobs report running or done, and Athena returns made-up rows |
 | The rest of [MiniStack](https://ministack.org/)'s services | Untested. They may respond, but nothing here checks them |
 
-Pyodide has no threads, so the region itself runs scheduled EventBridge rules, EventBridge
-Scheduler schedules, and the DynamoDB TTL reaper, checking once a second. Anything already due
+MiniStack runs scheduled EventBridge rules, EventBridge Scheduler schedules, and the DynamoDB TTL
+reaper on background threads, which Pyodide doesn't have. Pocket Region runs them from a timer
+instead, checking once a second. Anything already due
 fires within about a second, such as a one-time schedule in the past or an expired TTL. `rate()`
 and `cron()` wait real time, so a `rate(1 minute)` rule first fires a minute after it's created.
 Rules and schedules that invoke Lambda are untested.
