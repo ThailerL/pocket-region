@@ -35,7 +35,7 @@ async function run(code: string, state: HTMLElement, output: HTMLElement) {
   const write = (...args: unknown[]) => output.append(`${args.map(format).join(' ')}\n`);
 
   try {
-    state.textContent = 'Running… a first run downloads about 12 MB';
+    state.textContent = 'Running… a first run downloads about 15 MB';
     const started = performance.now();
     const url = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
     const original = { log: console.log, error: console.error };

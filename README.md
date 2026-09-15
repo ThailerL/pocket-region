@@ -40,7 +40,7 @@ The browser entry loads the emulator from jsDelivr's copy of the package's `vend
 so there are no files to copy. To serve `vendor/` from your own site instead, map
 `pocket-region/vendor/` to it in the page's import map, or pass `assetsBaseUrl`.
 Pyodide itself loads from jsDelivr, at the version the package was built with, unless you pass
-`indexURL`. A first visit downloads about 12 MB: 8 MB of wheels and Python standard library, which
+`indexURL`. A first visit downloads about 15 MB: 11 MB of wheels and Python standard library, which
 are already compressed, and 3.7 MB of Pyodide. After that, a region boots in about half a second.
 
 ```js

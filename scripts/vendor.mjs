@@ -74,8 +74,9 @@ if (installedVersion !== PYODIDE_VERSION) {
 
 // Pyodide compiles every module it imports from source on each boot and never caches the
 // bytecode, so an unchecked-hash pyc beside each source it touched takes that off the boot.
-// Only what the boot imports, to keep the payload down; a service's lazy imports compile
-// once on its first request. The pycs are tied to the pinned CPython, and the installer
+// Only what the boot, a first request and a first reset import, to keep the payload down; a
+// service's other lazy imports compile once on its first request. The pycs are tied to the
+// pinned CPython, and the installer
 // keeping them is measured, not documented: after a Pyodide bump, a boot over 0.6 s means
 // they are ignored
 const PRECOMPILE = `
@@ -123,6 +124,12 @@ async function precompile(wheels) {
 		await py.runPythonAsync(fs.readFileSync(path.join(ROOT, 'python', file), 'utf8'));
 	}
 	await py.runPythonAsync('await lifespan("startup")');
+	// ministack imports CloudFormation on every service's first request and GraphQL on the first
+	// reset: from source, that took 1.4 s on a desktop and timed tests out in CI
+	await py.runPythonAsync(`
+await asgi_request("PUT", "/precompile", {"host": "localhost:4566", "authorization": "AWS4-HMAC-SHA256 Credential=test/20260101/us-east-1/s3/aws4_request, SignedHeaders=host, Signature=test"}, b"")
+await asgi_request("POST", "/_ministack/reset", {"host": "localhost:4566"}, b"")
+`);
 
 	py.FS.mkdirTree('/in/wheels');
 	py.FS.mkdirTree('/out/wheels');

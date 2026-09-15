@@ -15,7 +15,7 @@ createRegion(options?: BrowserRegionOptions): Promise<Region>
 ```
 
 In Node, a region boots in about 500 ms, and later ones in the same process in about 350 ms.
-In a browser, a first visit downloads about 12 MB, and after that a region boots in about half a
+In a browser, a first visit downloads about 15 MB, and after that a region boots in about half a
 second.
 
 ## Options
