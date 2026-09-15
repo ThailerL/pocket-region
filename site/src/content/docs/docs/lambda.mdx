@@ -16,7 +16,7 @@ import { createRegion, requestHandler } from 'pocket-region/browser';
 import { LambdaClient, CreateFunctionCommand, InvokeCommand } from '@aws-sdk/client-lambda';
 import { strToU8, zipSync } from 'fflate';
 
-const region = await createRegion({ assetsBaseUrl: '/region/vendor' });
+const region = await createRegion();
 const lambda = new LambdaClient({
   region: 'us-east-1',
   credentials: { accessKeyId: 'test', secretAccessKey: 'test' },

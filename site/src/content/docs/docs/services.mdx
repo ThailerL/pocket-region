@@ -57,7 +57,7 @@ import { createRegion, requestHandler } from 'pocket-region/browser';
 import { S3Client, CreateBucketCommand, PutBucketNotificationConfigurationCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { SQSClient, CreateQueueCommand, GetQueueAttributesCommand, ReceiveMessageCommand } from '@aws-sdk/client-sqs';
 
-const region = await createRegion({ assetsBaseUrl: '/region/vendor' });
+const region = await createRegion();
 const config = {
   region: 'us-east-1',
   credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
@@ -99,7 +99,7 @@ lists what it supports.
 import { createRegion, requestHandler } from 'pocket-region/browser';
 import { SQSClient, CreateQueueCommand, SendMessageCommand, ReceiveMessageCommand } from '@aws-sdk/client-sqs';
 
-const region = await createRegion({ assetsBaseUrl: '/region/vendor' });
+const region = await createRegion();
 const sqs = new SQSClient({
   region: 'us-east-1',
   credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
@@ -130,7 +130,7 @@ as [scheduled work](#scheduled-work) describes.
 import { createRegion, requestHandler } from 'pocket-region/browser';
 import { DynamoDBClient, CreateTableCommand, PutItemCommand, ScanCommand } from '@aws-sdk/client-dynamodb';
 
-const region = await createRegion({ assetsBaseUrl: '/region/vendor' });
+const region = await createRegion();
 const dynamodb = new DynamoDBClient({
   region: 'us-east-1',
   credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
@@ -167,7 +167,7 @@ import { createRegion, requestHandler } from 'pocket-region/browser';
 import { SNSClient, CreateTopicCommand, SubscribeCommand, PublishCommand } from '@aws-sdk/client-sns';
 import { SQSClient, CreateQueueCommand, GetQueueAttributesCommand, ReceiveMessageCommand } from '@aws-sdk/client-sqs';
 
-const region = await createRegion({ assetsBaseUrl: '/region/vendor' });
+const region = await createRegion();
 const config = {
   region: 'us-east-1',
   credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
@@ -204,7 +204,7 @@ import { createRegion, requestHandler } from 'pocket-region/browser';
 import { EventBridgeClient, PutRuleCommand, PutTargetsCommand, PutEventsCommand } from '@aws-sdk/client-eventbridge';
 import { SQSClient, CreateQueueCommand, GetQueueAttributesCommand, ReceiveMessageCommand } from '@aws-sdk/client-sqs';
 
-const region = await createRegion({ assetsBaseUrl: '/region/vendor' });
+const region = await createRegion();
 const config = {
   region: 'us-east-1',
   credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
@@ -247,7 +247,7 @@ A second value becomes the secret's current version.
 import { createRegion, requestHandler } from 'pocket-region/browser';
 import { SecretsManagerClient, CreateSecretCommand, PutSecretValueCommand, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
 
-const region = await createRegion({ assetsBaseUrl: '/region/vendor' });
+const region = await createRegion();
 const secrets = new SecretsManagerClient({
   region: 'us-east-1',
   credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
@@ -276,7 +276,7 @@ Parameters listed by path, with a SecureString decrypted.
 import { createRegion, requestHandler } from 'pocket-region/browser';
 import { SSMClient, PutParameterCommand, GetParametersByPathCommand } from '@aws-sdk/client-ssm';
 
-const region = await createRegion({ assetsBaseUrl: '/region/vendor' });
+const region = await createRegion();
 const ssm = new SSMClient({
   region: 'us-east-1',
   credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
@@ -305,7 +305,7 @@ Text encrypted with a new key decrypts back.
 import { createRegion, requestHandler } from 'pocket-region/browser';
 import { KMSClient, CreateKeyCommand, EncryptCommand, DecryptCommand } from '@aws-sdk/client-kms';
 
-const region = await createRegion({ assetsBaseUrl: '/region/vendor' });
+const region = await createRegion();
 const kms = new KMSClient({
   region: 'us-east-1',
   credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
@@ -336,7 +336,7 @@ A filter pattern finds the matching log event.
 import { createRegion, requestHandler } from 'pocket-region/browser';
 import { CloudWatchLogsClient, CreateLogGroupCommand, CreateLogStreamCommand, PutLogEventsCommand, FilterLogEventsCommand } from '@aws-sdk/client-cloudwatch-logs';
 
-const region = await createRegion({ assetsBaseUrl: '/region/vendor' });
+const region = await createRegion();
 const logs = new CloudWatchLogsClient({
   region: 'us-east-1',
   credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
@@ -373,7 +373,7 @@ A record put on a stream reads back from its shard.
 import { createRegion, requestHandler } from 'pocket-region/browser';
 import { KinesisClient, CreateStreamCommand, PutRecordCommand, ListShardsCommand, GetShardIteratorCommand, GetRecordsCommand } from '@aws-sdk/client-kinesis';
 
-const region = await createRegion({ assetsBaseUrl: '/region/vendor' });
+const region = await createRegion();
 const kinesis = new KinesisClient({
   region: 'us-east-1',
   credentials: { accessKeyId: 'test', secretAccessKey: 'test' },

@@ -21,7 +21,7 @@ printed, so a test can assert on it and a page can render it.
 ```js
 import { awsCli, createRegion } from 'pocket-region/browser';
 
-const region = await createRegion({ assetsBaseUrl: '/region/vendor' });
+const region = await createRegion();
 const aws = awsCli(region);
 
 await aws('s3 mb s3://notes');

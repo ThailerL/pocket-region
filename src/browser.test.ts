@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createRegion, indexedDbStore } from './browser.ts';
 import { s3 } from './test-clients.ts';
 import { assetsBaseUrl, createTestRegion } from './test-region.browser.ts';
@@ -11,6 +11,18 @@ describe('createRegion in a page', () => {
     await expect(createRegion({ assetsBaseUrl: `${assetsBaseUrl}/absent` })).rejects.toThrow(
       /no region assets at/,
     );
+  });
+
+  it("loads this release's assets from jsDelivr when no assetsBaseUrl is given", async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 404 }));
+    try {
+      await expect(createRegion()).rejects.toThrow(/no region assets at/);
+      expect(String(fetch.mock.calls[0]![0])).toMatch(
+        /^https:\/\/cdn\.jsdelivr\.net\/npm\/pocket-region@\d+\.\d+\.\d+[^/]*\/vendor\/meta\.json$/,
+      );
+    } finally {
+      fetch.mockRestore();
+    }
   });
 });
 

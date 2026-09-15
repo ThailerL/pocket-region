@@ -11,11 +11,12 @@ import { createRegion } from 'pocket-region/node';     // Node
 createRegion(options?: NodeRegionOptions): Promise<Region>
 
 import { createRegion } from 'pocket-region/browser';  // a page
-createRegion(options: BrowserRegionOptions): Promise<Region>
+createRegion(options?: BrowserRegionOptions): Promise<Region>
 ```
 
 In Node, a region boots in about 500 ms, and later ones in the same process in about 350 ms.
-Browser boot time hasn't been measured.
+In a browser, a first visit downloads about 12 MB, and after that a region boots in about half a
+second.
 
 ## Options
 
@@ -25,7 +26,7 @@ Browser boot time hasn't been measured.
 | `store` | `StateStore` | both | none | Where state is restored from at boot, and written to on `save` and `stop`. See [Stores](#stores). Without it, state lives in memory only. |
 | `onOutput` | `(line: string, stream: 'stdout' \| 'stderr') => void` | both | none | Every line the emulator prints while loading and running, and every line a Lambda handler writes, as `stdout`. |
 | `lambda` | `LambdaObserver` | both | none | Hooks for watching functions run. See [Lambda](/docs/lambda/#watching-functions-run). |
-| `assetsBaseUrl` | `string` | browser | required | The URL `vendor/` is served from: `meta.json`, the wheels, and the Python standard library. A relative URL resolves against the page. |
+| `assetsBaseUrl` | `string` | browser | jsDelivr | The URL `vendor/` is served from: `meta.json`, the wheels, and the Python standard library. By default, what the page's import map maps `pocket-region/vendor/` to, and without a mapping, jsDelivr's copy of the installed release. Set either to serve `vendor/` from your own site, for example under a Content Security Policy. A relative URL resolves against the page. |
 | `indexURL` | `string` | both | see text | Where Pyodide's own runtime loads from. A page defaults to jsDelivr, at the Pyodide version the package was built with. In Node, set it only where Pyodide can't find itself from `import.meta.url`. |
 | `packageCacheDir` | `string` | Node | the package's `vendor/` | The directory holding the wheels and `meta.json`. |
 
@@ -137,7 +138,7 @@ Each entry ships a store:
 ```js
 import { createRegion, indexedDbStore } from 'pocket-region/browser';
 
-const region = await createRegion({ assetsBaseUrl: '/region/vendor', store: indexedDbStore('my-app') });
+const region = await createRegion({ store: indexedDbStore('my-app') });
 await region.save();   // writes the state to the my-app database
 ```
 

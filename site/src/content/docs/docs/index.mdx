@@ -41,10 +41,10 @@ nothing is dialed. In Node they can instead come from the environment or `~/.aws
 
 ## In a page
 
-A page loads the emulator over HTTP, so serve the package's `vendor/` directory from your site
-and tell `createRegion` where it is. A page has no environment, so pass the client its region and
-credentials. This site serves `vendor/` at `/region/vendor`, and examples with a Run button run as
-shown, in this tab.
+A page loads the emulator over HTTP, from jsDelivr by default. To serve the package's `vendor/`
+directory from your own site instead, map `pocket-region/vendor/` to it in the page's import map,
+or pass `assetsBaseUrl`. A page has no environment, so pass the client its region and credentials.
+This site maps its own `vendor/`, and examples with a Run button run as shown, in this tab.
 
 <Runnable>
 
@@ -52,7 +52,7 @@ shown, in this tab.
 import { createRegion, requestHandler } from 'pocket-region/browser';
 import { S3Client, CreateBucketCommand, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 
-const region = await createRegion({ assetsBaseUrl: '/region/vendor' });
+const region = await createRegion();
 
 const s3 = new S3Client({
   region: 'us-east-1',
@@ -70,7 +70,7 @@ await region.stop();
 
 </Runnable>
 
-A first visit downloads about 12 MB: 8 MB of wheels and the Python standard library from your
-site, already compressed, and 3.7 MB of Pyodide from jsDelivr, unless you pass `indexURL`.
+A first visit downloads about 12 MB: 8 MB of wheels and the Python standard library, already
+compressed, and 3.7 MB of Pyodide from jsDelivr, unless you pass `indexURL`.
 Everything else works as it does in Node, except that Lambda handlers run in Web Workers and
 there is no `save` or `serve`.

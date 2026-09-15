@@ -36,16 +36,17 @@ await region.stop();
 
 ## In a browser
 
-The browser entry loads the emulator from the package's `vendor/` directory, served from your
-site at the address you give it. Pyodide itself loads from jsDelivr, at the version the package was built with, unless
-you pass `indexURL`. A first visit downloads about 12 MB: 8 MB of wheels and Python standard
-library from your site, which are already compressed, and 3.7 MB of Pyodide from jsDelivr. After
-that, a region boots in about half a second.
+The browser entry loads the emulator from jsDelivr's copy of the package's `vendor/` directory,
+so there are no files to copy. To serve `vendor/` from your own site instead, map
+`pocket-region/vendor/` to it in the page's import map, or pass `assetsBaseUrl`.
+Pyodide itself loads from jsDelivr, at the version the package was built with, unless you pass
+`indexURL`. A first visit downloads about 12 MB: 8 MB of wheels and Python standard library, which
+are already compressed, and 3.7 MB of Pyodide. After that, a region boots in about half a second.
 
 ```js
-import { createRegion, requestHandler } from 'pocket-region/browser';
+import { createRegion } from 'pocket-region/browser';
 
-const region = await createRegion({ assetsBaseUrl: '/vendor' });
+const region = await createRegion();
 ```
 
 Everything below works the same in a page, Lambda included, where functions run in Web

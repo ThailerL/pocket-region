@@ -13,7 +13,7 @@ async function boot() {
   try {
     const started = performance.now();
     const [browser, lambdaSdk] = await loadModules();
-    const region = await browser.createRegion({ assetsBaseUrl: '/region/vendor' });
+    const region = await browser.createRegion();
     const lambda = {
       sdk: lambdaSdk,
       client: new lambdaSdk.LambdaClient({

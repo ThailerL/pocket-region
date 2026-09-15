@@ -8,6 +8,7 @@ import {
   type VendorManifest,
 } from './core.ts';
 import { createWorkerHost } from './lambda/worker-host.ts';
+import { PACKAGE_VERSION } from './version.generated.ts';
 
 export type {
   Dispatch,
@@ -27,8 +28,8 @@ export * from './cli/index.ts';
 export * from './request-handler.ts';
 
 export type BrowserRegionOptions = RegionSettings & {
-  // Where the vendored tree is served from: meta.json, the wheels and the stdlib beside it
-  assetsBaseUrl: string;
+  // Where the vendored tree is served from; by default the import map's pocket-region/vendor/, else jsDelivr
+  assetsBaseUrl?: string;
   // Pyodide's own runtime; by default jsDelivr at the version the tree was built against
   indexURL?: string;
 };
@@ -104,11 +105,18 @@ export function indexedDbStore(name: string): StateStore {
   };
 }
 
-export async function createRegion(options: BrowserRegionOptions): Promise<Region> {
-  const base = new URL(
-    options.assetsBaseUrl.endsWith('/') ? options.assetsBaseUrl : `${options.assetsBaseUrl}/`,
-    globalThis.location?.href,
-  );
+// import.meta.resolve throws when the page's import map doesn't map the specifier
+function defaultAssetsBaseUrl() {
+  try {
+    return import.meta.resolve('pocket-region/vendor/');
+  } catch {
+    return `https://cdn.jsdelivr.net/npm/pocket-region@${PACKAGE_VERSION}/vendor/`;
+  }
+}
+
+export async function createRegion(options: BrowserRegionOptions = {}): Promise<Region> {
+  const assetsBaseUrl = options.assetsBaseUrl ?? defaultAssetsBaseUrl();
+  const base = new URL(assetsBaseUrl.endsWith('/') ? assetsBaseUrl : `${assetsBaseUrl}/`, globalThis.location?.href);
   const response = await fetch(new URL('meta.json', base));
   if (!response.ok) {
     throw new Error(`no region assets at ${base.href} (meta.json answered ${response.status})`);
