@@ -21,7 +21,7 @@ import { loadPyodide } from 'pyodide';
 const require = createRequire(import.meta.url);
 const PYODIDE_VERSION = require('../package.json').dependencies.pyodide;
 const PYODIDE_DIRECTORY = path.dirname(require.resolve('pyodide/package.json'));
-const EMULATOR_SPEC = 'ministack==1.5.5';
+const EMULATOR_SPEC = 'ministack==1.5.12';
 const EMULATOR_NAME = EMULATOR_SPEC.split('==')[0];
 
 // Resolved as the emulator's dependency but left out of the tree. botocore is half the

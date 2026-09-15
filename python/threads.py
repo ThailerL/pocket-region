@@ -3,11 +3,22 @@
 # REGION_SLEEP is set by bootRegion
 import asyncio
 import contextvars
+import gc
 import sys
 import threading
 import time
 
 from pyodide.ffi import run_sync
+
+# Automatic collection crashes Pyodide once ministack 1.5.11+ is loaded; collectGarbage runs it on demand
+gc.disable()
+
+
+# How many tracked objects a full collection freed, which automatic collection would have
+def collect_garbage():
+    before = len(gc.get_objects())
+    gc.collect()
+    return before - len(gc.get_objects())
 
 
 class _Ended(BaseException):

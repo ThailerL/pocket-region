@@ -179,6 +179,10 @@ type PythonDispatch = (
 const STATE_ROOT = '/state';
 export const DEFAULT_PORT = 4566;
 
+// Internal, for the garbage test: every region bootRegion returns has one
+const garbageCollectors = new WeakMap<Region, () => number>();
+export const collectGarbage = (region: Region) => garbageCollectors.get(region)!();
+
 // A host reports to the observer alone; the region's untagged onOutput hears each line too
 export const hostObserver = ({ onOutput, lambda }: RegionSettings): LambdaObserver => ({
   onEvent: (event) => lambda?.onEvent?.(event),
@@ -214,7 +218,7 @@ export async function bootRegion(
     await store?.close?.();
     throw error;
   }
-  return {
+  const stored: Region = {
     ...region,
     async stop() {
       try {
@@ -224,6 +228,8 @@ export async function bootRegion(
       }
     },
   };
+  garbageCollectors.set(stored, garbageCollectors.get(region)!);
+  return stored;
 }
 
 async function startRegion(
@@ -292,7 +298,7 @@ async function startRegion(
   const savePython: () => void = py.globals.get('region_save');
   const endWorkers: () => void = py.globals.get('end_workers');
 
-  return {
+  const region: Region = {
     port,
     dispatch,
     async reset() {
@@ -322,4 +328,6 @@ async function startRegion(
       await executor?.stop();
     },
   };
+  garbageCollectors.set(region, py.globals.get('collect_garbage'));
+  return region;
 }
