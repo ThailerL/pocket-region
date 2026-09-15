@@ -1,5 +1,9 @@
 import { readdirSync, readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
+import type { Region } from './core.ts';
+import { createRegion } from './node.ts';
+import { AsyncFunction, IMPORT, rewriteImports } from './runner/imports.ts';
+import { withRegion } from './with-region.ts';
 
 const DOCS = new URL('../site/src/content/docs/docs/', import.meta.url);
 
@@ -20,8 +24,6 @@ const modules: Record<string, () => Promise<unknown>> = {
   '@aws-sdk/client-ssm': () => import('@aws-sdk/client-ssm'),
 };
 
-const AsyncFunction = (async () => {}).constructor as new (...args: string[]) => (...args: unknown[]) => Promise<void>;
-
 const examples = readdirSync(DOCS)
   .filter((file) => file.endsWith('.mdx'))
   .flatMap((file) =>
@@ -31,15 +33,22 @@ const examples = readdirSync(DOCS)
     })),
   );
 
+// For examples written for AWS, as the runner has; without it their clients would reach AWS
+let shared: Promise<Region> | undefined;
+afterAll(async () => (await shared)?.stop());
+
 async function run(code: string) {
   const lines: string[] = [];
   const console = { log: (...args: unknown[]) => lines.push(args.map((arg) => (typeof arg === 'string' ? arg : JSON.stringify(arg))).join(' ')) };
-  const body = code.replace(/^import\s*(\{[\s\S]*?\})\s*from\s*'([^']+)';/gm, "const $1 = await load('$2');");
-  const load = (specifier: string) => {
+  const { code: body, specifiers } = rewriteImports(code);
+  const region = specifiers.some((specifier) => specifier.startsWith('pocket-region')) ? undefined : await (shared ??= createRegion());
+  await region?.reset();
+  const load = async (specifier: string) => {
     if (!(specifier in modules)) throw new Error(`the docs import ${specifier}: add it to this test and the site's import map`);
-    return modules[specifier]!();
+    const module = (await modules[specifier]!()) as object;
+    return region ? withRegion(module, region) : module;
   };
-  await new AsyncFunction('load', 'console', body)(load, console);
+  await new AsyncFunction(IMPORT, 'console', body)(load, console);
   return lines;
 }
 

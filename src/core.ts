@@ -198,12 +198,14 @@ export const unref = (timer: ReturnType<typeof setTimeout>) => {
   return timer;
 };
 
+export const jspiSupported = () => 'Suspending' in WebAssembly;
+
 export async function bootRegion(
   assets: RegionAssets,
   settings: RegionSettings,
   lambda?: LambdaHostFactory,
 ): Promise<Region> {
-  if (!('Suspending' in WebAssembly)) {
+  if (!jspiSupported()) {
     throw new Error(
       'Pocket Region needs WebAssembly JSPI (WebAssembly.Suspending), which Node has from 24.20 and some browsers lack',
     );

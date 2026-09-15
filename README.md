@@ -5,18 +5,6 @@ browser tab, and you call them with the ordinary AWS SDK. Your SDK calls reach t
 function calls, without a socket, so there's no container to start and no server to reach.
 Lambda handlers run in child processes or Web Workers.
 
-In Node, the first region is ready in half a second, and each one after it in the same process
-takes about 350 ms. Resetting a region to empty takes under a millisecond for a typical test, so
-every test can start clean without booting a new one.
-
-The AWS APIs come from [MiniStack](https://ministack.org/), a Python AWS emulator that runs
-here under [Pyodide](https://github.com/pyodide/pyodide).
-
-Read the docs at [pocket-region.dev/docs](https://pocket-region.dev/docs/), where you can edit
-and run the examples in your browser tab.
-
-It needs WebAssembly JSPI: Node 24.20 or later, or a browser that supports it.
-
 ```js
 import { createRegion, requestHandler } from 'pocket-region/node';
 import { S3Client, CreateBucketCommand, PutObjectCommand } from '@aws-sdk/client-s3';
@@ -34,76 +22,37 @@ await s3.send(new PutObjectCommand({ Bucket: 'photos', Key: 'cat.txt', Body: 'me
 await region.stop();
 ```
 
-## In a browser
+It needs WebAssembly JSPI: Node 24.20 or later, or a browser that supports it.
 
-The browser entry loads the emulator from jsDelivr's copy of the package's `vendor/` directory,
-so there are no files to copy. To serve `vendor/` from your own site instead, map
-`pocket-region/vendor/` to it in the page's import map, or pass `assetsBaseUrl`.
-Pyodide itself loads from jsDelivr, at the version the package was built with, unless you pass
-`indexURL`. A first visit downloads about 15 MB: 11 MB of wheels and Python standard library, which
-are already compressed, and 3.7 MB of Pyodide. After that, a region boots in about half a second.
+The AWS APIs come from [MiniStack](https://ministack.org/), a Python AWS emulator that runs
+here under [Pyodide](https://github.com/pyodide/pyodide).
 
-```js
-import { createRegion } from 'pocket-region/browser';
+In Node, the first region is ready in half a second, and each one after it in the same process
+takes about 350 ms. Resetting a region to empty takes under a millisecond for a typical test, so
+every test can start clean without booting a new one.
 
-const region = await createRegion();
-```
+Read the docs at [pocket-region.dev/docs](https://pocket-region.dev/docs/), where you can edit
+and run the examples in your browser tab, or try the [demo](https://pocket-region.dev/demo).
 
-Everything below works the same in a page, Lambda included, where functions run in Web
-Workers instead of child processes.
+## Features
 
-Try it at [pocket-region.dev/demo](https://pocket-region.dev/demo).
-
-## Lambda
-
-Functions are created from a zipped deployment package and invoked with `InvokeCommand`.
-Handlers run in Node child processes, or in Web Workers in a browser.
-
-```js
-import { createRegion, requestHandler } from 'pocket-region/node';
-import { LambdaClient, CreateFunctionCommand, InvokeCommand } from '@aws-sdk/client-lambda';
-
-const region = await createRegion();
-const lambda = new LambdaClient({
-  region: 'us-east-1',
-  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
-  requestHandler: requestHandler(region),
-});
-await lambda.send(new CreateFunctionCommand({
-  FunctionName: 'hello',
-  Runtime: 'nodejs22.x',
-  Handler: 'index.handler',
-  Role: 'arn:aws:iam::000000000000:role/lambda',
-  Code: { ZipFile: zipOfYourCode },
-}));
-const { Payload } = await lambda.send(new InvokeCommand({ FunctionName: 'hello', Payload: '{}' }));
-```
-
-## The `aws` CLI
-
-`awsCli` runs `aws` commands, so you can put an AWS console in your own page. It returns the output instead of printing it, so you decide where it shows.
-
-```js
-import { awsCli } from 'pocket-region/browser';
-
-const aws = awsCli(region);
-await aws('s3api create-bucket --bucket notes');
-const { stdout } = await aws('sqs create-queue --queue-name orders');
-```
-
-## What works
-
-MiniStack emulates each service's behaviour, not just its API. In Pocket Region, these services
-behave the same as they do in MiniStack itself: CloudWatch Logs, DynamoDB, EventBridge, Kinesis,
-KMS, S3, Secrets Manager, SNS, SQS, and SSM Parameter Store. The
-[Services](https://pocket-region.dev/docs/services/) page has a runnable example for each.
-
-| Service | Status |
-| --- | --- |
-| Lambda | Node functions, run by Pocket Region in Node and in a page |
-| Step Functions | A `Pass` state machine is tested. The rest works as it does in MiniStack, untested here |
-| RDS, ElastiCache, ECS, EKS, Batch, OpenSearch, Athena | Stubs: they answer, but nothing runs behind them |
-| The rest of [MiniStack's services](https://ministack.org/docs/services/) | Not run here yet. They may work, but nothing here checks them |
+- **[Node and the browser](https://pocket-region.dev/docs/):** the same region runs in a Node
+  process or a page, which loads the emulator from jsDelivr with no files to copy.
+- **[Services](https://pocket-region.dev/docs/services/):** CloudWatch Logs, DynamoDB,
+  EventBridge, Kinesis, KMS, S3, Secrets Manager, SNS, SQS, and SSM Parameter Store behave as
+  they do in MiniStack, with a runnable example for each. Others, such as RDS and ECS, answer as
+  stubs with nothing running behind them, or are untested here.
+- **[Lambda](https://pocket-region.dev/docs/lambda/):** Node functions run from a zipped
+  deployment package, in child processes or Web Workers, with event source mappings.
+- **[Resets and saves](https://pocket-region.dev/docs/region/):** empty a region between tests,
+  or save its state to a store and boot from it later.
+- **[Clients](https://pocket-region.dev/docs/clients/):** `requestHandler` for AWS SDK clients,
+  and `serve` for anything that needs an endpoint.
+- **[The `aws` CLI](https://pocket-region.dev/docs/cli/):** `awsCli` runs `aws` commands and
+  returns their output, for tests or an AWS console in your own page.
+- **[Examples in your docs](https://pocket-region.dev/docs/runner/):** add a Run button to
+  code examples written for real AWS. `createRunner` runs them in the reader's tab without any
+  Pocket Region setup in the example.
 
 ## In a real app
 

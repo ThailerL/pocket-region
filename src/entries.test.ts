@@ -15,6 +15,6 @@ describe('entry points', () => {
 
   it('gives a page everything from one import', async () => {
     const page = await import('./browser.ts');
-    expect(Object.keys(page).sort()).toEqual(['CliError', 'awsCli', 'createRegion', 'indexedDbStore', 'requestHandler']);
+    expect(Object.keys(page).sort()).toEqual(['CliError', 'awsCli', 'createRegion', 'createRunner', 'indexedDbStore', 'requestHandler']);
   });
 });

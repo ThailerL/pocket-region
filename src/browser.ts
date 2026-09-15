@@ -26,6 +26,7 @@ export type {
 } from './core.ts';
 export * from './cli/index.ts';
 export * from './request-handler.ts';
+export * from './runner.ts';
 
 export type BrowserRegionOptions = RegionSettings & {
   // Where the vendored tree is served from; by default the import map's pocket-region/vendor/, else jsDelivr

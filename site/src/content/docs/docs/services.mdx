@@ -40,8 +40,24 @@ says so.
 
 ## Examples
 
-Each example is a taste of one service, not a list of what it supports: that's MiniStack's page
-for it, linked from each section. Every Run boots a fresh region in this tab.
+The examples are written as they would be for AWS, with clients built from `{}`. Clicking Run
+executes an example here in your browser tab, against a region that's emptied before each run, as
+[Examples in your docs](/docs/runner/) describes. To run one in your own code, give its clients a region first:
+
+```js
+import { createRegion, requestHandler } from 'pocket-region/browser';
+
+const region = await createRegion();
+const config = {
+  region: 'us-east-1',
+  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
+  requestHandler: requestHandler(region),
+};
+// then new S3Client(config) wherever an example has new S3Client({})
+```
+
+Without that, a client built from `{}` outside this page reaches AWS with whatever credentials
+your environment has.
 
 ### S3
 
@@ -53,18 +69,11 @@ lists what it supports.
 <Runnable>
 
 ```js
-import { createRegion, requestHandler } from 'pocket-region/browser';
 import { S3Client, CreateBucketCommand, PutBucketNotificationConfigurationCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { SQSClient, CreateQueueCommand, GetQueueAttributesCommand, ReceiveMessageCommand } from '@aws-sdk/client-sqs';
 
-const region = await createRegion();
-const config = {
-  region: 'us-east-1',
-  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
-  requestHandler: requestHandler(region),
-};
-const s3 = new S3Client(config);
-const sqs = new SQSClient(config);
+const s3 = new S3Client({});
+const sqs = new SQSClient({});
 
 const { QueueUrl } = await sqs.send(new CreateQueueCommand({ QueueName: 'uploads' }));
 const { Attributes } = await sqs.send(new GetQueueAttributesCommand({ QueueUrl, AttributeNames: ['QueueArn'] }));
@@ -82,8 +91,6 @@ const { Messages = [] } = await sqs.send(new ReceiveMessageCommand({ QueueUrl, M
 for (const record of Messages.flatMap((message) => JSON.parse(message.Body).Records ?? [])) {
   console.log(record.eventName, record.s3.bucket.name, record.s3.object.key);
 }
-
-await region.stop();
 ```
 
 </Runnable>
@@ -96,15 +103,9 @@ lists what it supports.
 <Runnable>
 
 ```js
-import { createRegion, requestHandler } from 'pocket-region/browser';
 import { SQSClient, CreateQueueCommand, SendMessageCommand, ReceiveMessageCommand } from '@aws-sdk/client-sqs';
 
-const region = await createRegion();
-const sqs = new SQSClient({
-  region: 'us-east-1',
-  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
-  requestHandler: requestHandler(region),
-});
+const sqs = new SQSClient({});
 
 const { QueueUrl } = await sqs.send(new CreateQueueCommand({ QueueName: 'orders' }));
 await sqs.send(new SendMessageCommand({ QueueUrl, MessageBody: 'order 41' }));
@@ -112,8 +113,6 @@ await sqs.send(new SendMessageCommand({ QueueUrl, MessageBody: 'order 42' }));
 
 const { Messages = [] } = await sqs.send(new ReceiveMessageCommand({ QueueUrl, MaxNumberOfMessages: 10 }));
 console.log(Messages.map((message) => message.Body));
-
-await region.stop();
 ```
 
 </Runnable>
@@ -127,15 +126,9 @@ as [scheduled work](#scheduled-work) describes.
 <Runnable>
 
 ```js
-import { createRegion, requestHandler } from 'pocket-region/browser';
 import { DynamoDBClient, CreateTableCommand, PutItemCommand, ScanCommand } from '@aws-sdk/client-dynamodb';
 
-const region = await createRegion();
-const dynamodb = new DynamoDBClient({
-  region: 'us-east-1',
-  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
-  requestHandler: requestHandler(region),
-});
+const dynamodb = new DynamoDBClient({});
 
 await dynamodb.send(new CreateTableCommand({
   TableName: 'sessions',
@@ -149,8 +142,6 @@ await dynamodb.send(new PutItemCommand({ TableName: 'sessions', Item: { id: { S:
 
 const { Items } = await dynamodb.send(new ScanCommand({ TableName: 'sessions' }));
 console.log('sessions:', Items.map((item) => item.id.S).sort());
-
-await region.stop();
 ```
 
 </Runnable>
@@ -163,18 +154,11 @@ A message published to a topic arrives in a subscribed queue.
 <Runnable>
 
 ```js
-import { createRegion, requestHandler } from 'pocket-region/browser';
 import { SNSClient, CreateTopicCommand, SubscribeCommand, PublishCommand } from '@aws-sdk/client-sns';
 import { SQSClient, CreateQueueCommand, GetQueueAttributesCommand, ReceiveMessageCommand } from '@aws-sdk/client-sqs';
 
-const region = await createRegion();
-const config = {
-  region: 'us-east-1',
-  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
-  requestHandler: requestHandler(region),
-};
-const sns = new SNSClient(config);
-const sqs = new SQSClient(config);
+const sns = new SNSClient({});
+const sqs = new SQSClient({});
 
 const { QueueUrl } = await sqs.send(new CreateQueueCommand({ QueueName: 'order-emails' }));
 const { Attributes } = await sqs.send(new GetQueueAttributesCommand({ QueueUrl, AttributeNames: ['QueueArn'] }));
@@ -186,8 +170,6 @@ await sns.send(new PublishCommand({ TopicArn, Subject: 'placed', Message: 'order
 const { Messages = [] } = await sqs.send(new ReceiveMessageCommand({ QueueUrl }));
 const { Subject, Message } = JSON.parse(Messages[0].Body);
 console.log(Subject, Message);
-
-await region.stop();
 ```
 
 </Runnable>
@@ -200,18 +182,11 @@ Only the event that matches the rule reaches its queue.
 <Runnable>
 
 ```js
-import { createRegion, requestHandler } from 'pocket-region/browser';
 import { EventBridgeClient, PutRuleCommand, PutTargetsCommand, PutEventsCommand } from '@aws-sdk/client-eventbridge';
 import { SQSClient, CreateQueueCommand, GetQueueAttributesCommand, ReceiveMessageCommand } from '@aws-sdk/client-sqs';
 
-const region = await createRegion();
-const config = {
-  region: 'us-east-1',
-  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
-  requestHandler: requestHandler(region),
-};
-const events = new EventBridgeClient(config);
-const sqs = new SQSClient(config);
+const events = new EventBridgeClient({});
+const sqs = new SQSClient({});
 
 const { QueueUrl } = await sqs.send(new CreateQueueCommand({ QueueName: 'large-orders' }));
 const { Attributes } = await sqs.send(new GetQueueAttributesCommand({ QueueUrl, AttributeNames: ['QueueArn'] }));
@@ -230,8 +205,6 @@ await events.send(new PutEventsCommand({
 
 const { Messages = [] } = await sqs.send(new ReceiveMessageCommand({ QueueUrl, MaxNumberOfMessages: 10 }));
 console.log(Messages.map((message) => JSON.parse(message.Body).detail));
-
-await region.stop();
 ```
 
 </Runnable>
@@ -244,23 +217,15 @@ A second value becomes the secret's current version.
 <Runnable>
 
 ```js
-import { createRegion, requestHandler } from 'pocket-region/browser';
 import { SecretsManagerClient, CreateSecretCommand, PutSecretValueCommand, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
 
-const region = await createRegion();
-const secrets = new SecretsManagerClient({
-  region: 'us-east-1',
-  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
-  requestHandler: requestHandler(region),
-});
+const secrets = new SecretsManagerClient({});
 
 await secrets.send(new CreateSecretCommand({ Name: 'db-password', SecretString: 'first' }));
 await secrets.send(new PutSecretValueCommand({ SecretId: 'db-password', SecretString: 'second' }));
 
 const { SecretString, VersionStages } = await secrets.send(new GetSecretValueCommand({ SecretId: 'db-password' }));
 console.log(SecretString, VersionStages);
-
-await region.stop();
 ```
 
 </Runnable>
@@ -273,23 +238,15 @@ Parameters listed by path, with a SecureString decrypted.
 <Runnable>
 
 ```js
-import { createRegion, requestHandler } from 'pocket-region/browser';
 import { SSMClient, PutParameterCommand, GetParametersByPathCommand } from '@aws-sdk/client-ssm';
 
-const region = await createRegion();
-const ssm = new SSMClient({
-  region: 'us-east-1',
-  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
-  requestHandler: requestHandler(region),
-});
+const ssm = new SSMClient({});
 
 await ssm.send(new PutParameterCommand({ Name: '/app/api-key', Value: 'abc', Type: 'SecureString' }));
 await ssm.send(new PutParameterCommand({ Name: '/app/region', Value: 'us-east-1', Type: 'String' }));
 
 const { Parameters } = await ssm.send(new GetParametersByPathCommand({ Path: '/app', WithDecryption: true }));
 console.log(Parameters.map(({ Name, Value }) => `${Name} = ${Value}`));
-
-await region.stop();
 ```
 
 </Runnable>
@@ -302,15 +259,9 @@ Text encrypted with a new key decrypts back.
 <Runnable>
 
 ```js
-import { createRegion, requestHandler } from 'pocket-region/browser';
 import { KMSClient, CreateKeyCommand, EncryptCommand, DecryptCommand } from '@aws-sdk/client-kms';
 
-const region = await createRegion();
-const kms = new KMSClient({
-  region: 'us-east-1',
-  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
-  requestHandler: requestHandler(region),
-});
+const kms = new KMSClient({});
 
 const { KeyMetadata } = await kms.send(new CreateKeyCommand({}));
 const { CiphertextBlob } = await kms.send(new EncryptCommand({
@@ -319,8 +270,6 @@ const { CiphertextBlob } = await kms.send(new EncryptCommand({
 }));
 const { Plaintext } = await kms.send(new DecryptCommand({ CiphertextBlob }));
 console.log(new TextDecoder().decode(Plaintext));
-
-await region.stop();
 ```
 
 </Runnable>
@@ -333,15 +282,9 @@ A filter pattern finds the matching log event.
 <Runnable>
 
 ```js
-import { createRegion, requestHandler } from 'pocket-region/browser';
 import { CloudWatchLogsClient, CreateLogGroupCommand, CreateLogStreamCommand, PutLogEventsCommand, FilterLogEventsCommand } from '@aws-sdk/client-cloudwatch-logs';
 
-const region = await createRegion();
-const logs = new CloudWatchLogsClient({
-  region: 'us-east-1',
-  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
-  requestHandler: requestHandler(region),
-});
+const logs = new CloudWatchLogsClient({});
 
 await logs.send(new CreateLogGroupCommand({ logGroupName: '/app/web' }));
 await logs.send(new CreateLogStreamCommand({ logGroupName: '/app/web', logStreamName: 'instance-1' }));
@@ -356,8 +299,6 @@ await logs.send(new PutLogEventsCommand({
 
 const { events } = await logs.send(new FilterLogEventsCommand({ logGroupName: '/app/web', filterPattern: '500' }));
 console.log(events.map((event) => event.message));
-
-await region.stop();
 ```
 
 </Runnable>
@@ -370,15 +311,9 @@ A record put on a stream reads back from its shard.
 <Runnable>
 
 ```js
-import { createRegion, requestHandler } from 'pocket-region/browser';
 import { KinesisClient, CreateStreamCommand, PutRecordCommand, ListShardsCommand, GetShardIteratorCommand, GetRecordsCommand } from '@aws-sdk/client-kinesis';
 
-const region = await createRegion();
-const kinesis = new KinesisClient({
-  region: 'us-east-1',
-  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
-  requestHandler: requestHandler(region),
-});
+const kinesis = new KinesisClient({});
 
 await kinesis.send(new CreateStreamCommand({ StreamName: 'clicks', ShardCount: 1 }));
 await kinesis.send(new PutRecordCommand({
@@ -395,8 +330,6 @@ const { ShardIterator } = await kinesis.send(new GetShardIteratorCommand({
 }));
 const { Records } = await kinesis.send(new GetRecordsCommand({ ShardIterator }));
 console.log(Records.map((record) => new TextDecoder().decode(record.Data)));
-
-await region.stop();
 ```
 
 </Runnable>

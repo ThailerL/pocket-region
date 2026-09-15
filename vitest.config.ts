@@ -9,7 +9,7 @@ export default defineConfig({
         test: {
           name: 'node',
           include: ['src/**/*.test.ts'],
-          exclude: ['src/browser.test.ts'],
+          exclude: ['src/browser.test.ts', 'src/runner.test.ts'],
         },
       },
       {
@@ -28,7 +28,9 @@ export default defineConfig({
             'src/lambda/lambda.test.ts',
             'src/region.test.ts',
             'src/request-handler.test.ts',
+            'src/runner.test.ts',
             'src/services.test.ts',
+            'src/with-region.test.ts',
           ],
           browser: {
             enabled: true,

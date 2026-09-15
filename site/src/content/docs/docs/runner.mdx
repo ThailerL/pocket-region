@@ -1,0 +1,84 @@
+---
+title: Examples in your docs
+description: Put a Run button on AWS code examples in your own docs, with the code running against a region in the reader's tab.
+---
+
+import Runnable from '../../../components/Runnable.astro';
+
+`createRunner` runs a code example in the page against a region, so docs can show the code a
+reader would write for AWS and run it as shown. How the code is displayed is up to you: pass the
+runner a string, and it hands back what the code printed.
+
+```js
+import { createRunner } from 'pocket-region/browser';
+
+const runner = createRunner();
+
+const result = await runner.run(code, {
+  onOutput: ({ stream, text }) => panel.append(`${text}\n`),
+});
+if (!result.ok) panel.append(`${result.error}\n`);
+```
+
+## Code written for AWS
+
+A snippet doesn't need Pocket Region's setup. The runner boots one region on the first run, empties
+it before every run after that unless [`reset`](#options) says otherwise, and fills in what AWS code gets from its environment: SDK clients
+it imports default to `us-east-1`, throwaway credentials, and the runner's region. So this runs as
+shown:
+
+<Runnable>
+
+```js
+import { S3Client, CreateBucketCommand, ListBucketsCommand } from '@aws-sdk/client-s3';
+
+const s3 = new S3Client({});
+await s3.send(new CreateBucketCommand({ Bucket: 'photos' }));
+const { Buckets } = await s3.send(new ListBucketsCommand({}));
+console.log(Buckets.map((bucket) => bucket.Name));
+```
+
+</Runnable>
+
+A snippet's own `region` and `credentials` are kept. A `requestHandler` it passes is not, so no
+request leaves the tab. A credential provider such as `fromCognitoIdentityPool` builds its own
+client, which the runner doesn't reach, and would call AWS.
+
+A snippet that imports `pocket-region/browser` brings its own region, as the examples in these docs
+do. The runner leaves its clients alone and boots nothing for it. Importing `pocket-region/node`
+fails, since a page can't run the Node entry.
+
+## Options
+
+| Option | Type | Default | |
+| --- | --- | --- | --- |
+| `load` | `(specifier: string) => Promise<object>` | jsDelivr | Imports what a snippet imports, other than `pocket-region`. By default, jsDelivr's `+esm` build of the latest version, such as `https://cdn.jsdelivr.net/npm/@aws-sdk/client-s3/+esm`. Pass your own to pin versions or serve the modules yourself. |
+| `region` | `BrowserRegionOptions` | none | Options for the runner's region. See [The region](/docs/region/#options). |
+| `reset` | `'each-run' \| 'never'` | `'each-run'` | When the runner empties its region. `'each-run'` empties it before every run after the first, so each example starts clean. `'never'` keeps what earlier runs made, for examples that build on each other, such as a tutorial whose second step writes to the bucket its first step created. |
+
+## The runner
+
+```ts
+type Runner = {
+  supported: boolean;
+  run(code: string, options?: { onOutput?, onStatus? }): Promise<RunResult>;
+  stop(): Promise<void>;
+};
+
+type RunResult = { ok: true; durationMs: number } | { ok: false; durationMs: number; error: unknown };
+```
+
+- **`supported`** is false in a browser without WebAssembly JSPI, where no region can boot. Show
+  the code without a Run button there.
+- **`run(code)`** resolves once the code finishes, and never rejects: what the code throws comes
+  back as `error`. Runs wait for each other, since they share the region.
+  - `onOutput({ stream, text })` gets each `console` call, `log`, `info`, and `debug` as `'log'`,
+    and `warn` and `error` as `'error'`. Values that aren't strings print as JSON. The page's own
+    `console` isn't touched.
+  - `onStatus(status)` gets `'booting'` before the region's first boot, which downloads about
+    15 MB on a first visit, `'resetting'` before a later run that empties the region, then `'running'`.
+- **`stop()`** stops the runner's region once the current run finishes.
+
+A snippet runs as the body of an async function, so top-level `await` works. It can import with
+`import … from '…'` at the start of a line and `import('…')` with a literal specifier, but it can't
+`export`. It runs in the page, so it can reach the page's globals.

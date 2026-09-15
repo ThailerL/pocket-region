@@ -1,5 +1,5 @@
+import { clientDefaults } from '../client-defaults.ts';
 import type { Dispatcher } from '../core.ts';
-import { requestHandler } from '../request-handler.ts';
 import { kebabCase, type Invocation } from './args.ts';
 import { UsageError } from './errors.ts';
 
@@ -34,8 +34,6 @@ const OPTIONS: Record<string, object> = {
 };
 
 const SERVICE_PATTERN = /^[a-z][a-z0-9-]*$/;
-
-const CREDENTIALS = { accessKeyId: 'pocket-region', secretAccessKey: 'pocket-region' };
 
 // The CLI's name for a service is the SDK's, apart from a handful AWS spells differently
 export const resolve = (service: string) => PACKAGES[service] ?? service;
@@ -139,10 +137,8 @@ export function servicesFor(
       const building = (async () => {
         const Client = clientClass(await module(service), service);
         return new Client({
-          region: 'us-east-1',
+          ...clientDefaults(region),
           endpoint: 'http://localhost:4566',
-          credentials: CREDENTIALS,
-          requestHandler: requestHandler(region),
           ...options.client,
           // Last, so a caller can move the endpoint and the credentials without being able to
           // lose the addressing a service needs
