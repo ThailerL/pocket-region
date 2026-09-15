@@ -69,7 +69,6 @@
     "@aws-sdk/client-ssm": "^3.1131.0",
     "@types/node": "^24.13.4",
     "@vitest/browser-playwright": "^5.0.0",
-    "fake-indexeddb": "^6.2.5",
     "fflate": "^0.8.3",
     "playwright": "^1.63.0",
     "typescript": "^7.0.2",

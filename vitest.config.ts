@@ -23,7 +23,13 @@ export default defineConfig({
         },
         test: {
           name: 'browser',
-          include: ['src/browser.test.ts', 'src/region.test.ts', 'src/request-handler.test.ts', 'src/services.test.ts'],
+          include: [
+            'src/browser.test.ts',
+            'src/lambda/lambda.test.ts',
+            'src/region.test.ts',
+            'src/request-handler.test.ts',
+            'src/services.test.ts',
+          ],
           browser: {
             enabled: true,
             headless: true,

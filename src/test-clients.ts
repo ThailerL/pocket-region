@@ -1,5 +1,6 @@
 // Test helpers that run in Node and in a page alike, so nothing here may import node:
 import { CreateQueueCommand, GetQueueAttributesCommand, ReceiveMessageCommand, type SQSClient } from '@aws-sdk/client-sqs';
+import { strToU8, zipSync } from 'fflate';
 import type { Region } from './core.ts';
 
 const encoder = new TextEncoder();
@@ -42,6 +43,8 @@ export async function jsonApi(service: 'sqs' | 'dynamodb', operation: string, bo
   });
   return { status: response.status, body: JSON.parse(decoder.decode(response.body)) };
 }
+
+export const zipOf = (name: string, content: string) => zipSync({ [name]: strToU8(content) });
 
 export async function createQueue(sqs: SQSClient, QueueName: string, Attributes?: Record<string, string>) {
   const { QueueUrl } = await sqs.send(new CreateQueueCommand({ QueueName, Attributes }));

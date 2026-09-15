@@ -1,6 +1,3 @@
-import { spawn } from 'node:child_process';
-import { once } from 'node:events';
-import { crc32 } from 'node:zlib';
 import {
   CreateEventSourceMappingCommand,
   CreateFunctionCommand,
@@ -19,43 +16,12 @@ import { CreateStreamCommand, DescribeStreamCommand, KinesisClient, PutRecordCom
 import { HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
 import { GetQueueAttributesCommand, SendMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createRegion as createPageRegion, type Region } from '../browser.ts';
-import { createRegion, type LambdaEvent, type LambdaObserver } from '../node.ts';
+import type { LambdaEvent, LambdaObserver, Region } from '../core.ts';
 import { requestHandler } from '../request-handler.ts';
-import { serve } from '../server.ts';
-import { authorization, bodies, clientConfig, createQueue } from '../test-clients.ts';
-import { freePort, installWorkerShim, serveVendor } from '../test-support.ts';
+import { authorization, bodies, clientConfig, createQueue, zipOf } from '../test-clients.ts';
+import { createTestRegion, regionPort } from '../test-region.ts';
 
 const decoder = new TextDecoder();
-
-// A stored zip of one file: enough for a deployment package, without a zip dependency
-function zipOf(name: string, content: string) {
-  const data = Buffer.from(content);
-  const fileName = Buffer.from(name);
-  const crc = crc32(data);
-  const local = Buffer.alloc(30);
-  local.writeUInt32LE(0x04034b50, 0);
-  local.writeUInt16LE(20, 4);
-  local.writeUInt32LE(crc, 14);
-  local.writeUInt32LE(data.length, 18);
-  local.writeUInt32LE(data.length, 22);
-  local.writeUInt16LE(fileName.length, 26);
-  const central = Buffer.alloc(46);
-  central.writeUInt32LE(0x02014b50, 0);
-  central.writeUInt16LE(20, 4);
-  central.writeUInt16LE(20, 6);
-  central.writeUInt32LE(crc, 16);
-  central.writeUInt32LE(data.length, 20);
-  central.writeUInt32LE(data.length, 24);
-  central.writeUInt16LE(fileName.length, 28);
-  const end = Buffer.alloc(22);
-  end.writeUInt32LE(0x06054b50, 0);
-  end.writeUInt16LE(1, 8);
-  end.writeUInt16LE(1, 10);
-  end.writeUInt32LE(46 + fileName.length, 12);
-  end.writeUInt32LE(30 + fileName.length + data.length, 16);
-  return Buffer.concat([local, fileName, data, central, fileName, end]);
-}
 
 const HANDLER = `
 let calls = 0;
@@ -85,34 +51,20 @@ export const handler = async (event) => {
 `;
 
 let region: Region;
-let vendor: Awaited<ReturnType<typeof serveVendor>> | undefined;
 let lambda: LambdaClient;
 let s3: S3Client;
 let sqs: SQSClient;
 
-let observed: LambdaEvent[] = [];
-let tagged: { line: string; functionName: string; environment: string }[] = [];
+const observed: LambdaEvent[] = [];
+const tagged: { line: string; functionName: string; environment: string }[] = [];
 const observer: LambdaObserver = {
   onEvent: (event) => observed.push(event),
   onOutput: (line, source) => tagged.push({ line, ...source }),
 };
 const eventsOf = (functionName: string) => observed.filter((event) => event.functionName === functionName);
 
-// The same handler, unbundled, runs on both hosts: fetch and process.env are all it needs
-const HOSTS: [string, () => Promise<Region>][] = [
-  ['in Node', async () => createRegion({ port: await freePort(), lambda: observer })],
-  [
-    'in a page',
-    async () => {
-      installWorkerShim();
-      vendor = await serveVendor();
-      return createPageRegion({ ...vendor, lambda: observer });
-    },
-  ],
-];
-
-const createFunction = (FunctionName: string, extra: object = {}, code = HANDLER, client = lambda) =>
-  client.send(
+const createFunction = (FunctionName: string, extra: object = {}, code = HANDLER) =>
+  lambda.send(
     new CreateFunctionCommand({
       FunctionName,
       Runtime: 'nodejs22.x',
@@ -123,15 +75,15 @@ const createFunction = (FunctionName: string, extra: object = {}, code = HANDLER
     }),
   );
 
-async function invoke(FunctionName: string, event: object, extra: object = {}, client = lambda) {
-  const response = await client.send(
+async function invoke(FunctionName: string, event: object, extra: object = {}) {
+  const response = await lambda.send(
     new InvokeCommand({ FunctionName, Payload: JSON.stringify(event), ...extra }),
   );
   return {
     status: response.StatusCode,
     error: response.FunctionError,
     payload: response.Payload ? JSON.parse(decoder.decode(response.Payload)) : undefined,
-    log: response.LogResult ? Buffer.from(response.LogResult, 'base64').toString() : undefined,
+    log: response.LogResult ? atob(response.LogResult) : undefined,
   };
 }
 
@@ -172,11 +124,9 @@ async function messagesLeft(QueueUrl: string) {
   return Number(Attributes!.ApproximateNumberOfMessages) + Number(Attributes!.ApproximateNumberOfMessagesNotVisible);
 }
 
-describe.each(HOSTS)('Lambda %s', (_, boot) => {
+describe('Lambda', () => {
   beforeAll(async () => {
-    observed = [];
-    tagged = [];
-    region = await boot();
+    region = await createTestRegion({ port: await regionPort(), lambda: observer });
     const config = clientConfig({ requestHandler: requestHandler(region) });
     // One attempt, so a throttle is seen rather than retried until it clears
     lambda = new LambdaClient({ ...config, maxAttempts: 1 });
@@ -186,7 +136,6 @@ describe.each(HOSTS)('Lambda %s', (_, boot) => {
 
   afterAll(async () => {
     await region?.stop();
-    vendor?.close();
   });
 
   it('runs a function created with the SDK, warm on the second call', async () => {
@@ -518,51 +467,4 @@ describe.each(HOSTS)('Lambda %s', (_, boot) => {
     expect(eventsOf('late-writer')).toContainEqual(expect.objectContaining({ phase: 'stopped', reason: 'the region reset' }));
     await expect(s3.send(new HeadBucketCommand({ Bucket: 'written-after-reset' }))).rejects.toThrow();
   }, 30_000);
-});
-
-describe('Lambda in Node', () => {
-  // The host serves the region itself, but a caller may already have
-  it('shares the port with a server the caller started', async () => {
-    const shared = await createRegion({ port: await freePort() });
-    const server = await serve(shared);
-    const own = new LambdaClient(clientConfig({ requestHandler: requestHandler(shared) }));
-    await createFunction('echo', {}, HANDLER, own);
-    expect((await invoke('echo', { bucket: 'shared' }, {}, own)).payload).toEqual({ created: 200 });
-    await shared.stop();
-    await server.close();
-  }, 30_000);
-
-  // In a process of its own, where nothing but the region can keep Node running
-  async function runAlone(code: string, expected: string) {
-    const module = JSON.stringify(new URL('../node.ts', import.meta.url).href);
-    const zip = JSON.stringify(zipOf('index.mjs', code).toString('base64'));
-    const script = `
-      import { createRegion } from ${module};
-      const region = await createRegion();
-      const call = (method, path, body) => region.dispatch({ method, path, headers: { host: 'localhost:4566', authorization: ${JSON.stringify(authorization('lambda'))}, 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify(body)) });
-      await call('POST', '/2015-03-31/functions', { FunctionName: 'one', Runtime: 'nodejs22.x', Handler: 'index.handler', Role: 'r', Code: { ZipFile: ${zip} } });
-      const invoked = new TextDecoder().decode((await call('POST', '/2015-03-31/functions/one/invocations', {})).body);
-      if (!invoked.includes(${JSON.stringify(expected)})) throw new Error('unexpected ' + invoked);
-      await region.stop();
-    `;
-    const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
-      stdio: ['ignore', 'ignore', 'pipe'],
-      signal: AbortSignal.timeout(30_000),
-    });
-    let stderr = '';
-    child.stderr.on('data', (chunk) => (stderr += chunk));
-    const [exitCode] = await once(child, 'exit');
-    expect(stderr).toBe('');
-    expect(exitCode).toBe(0);
-  }
-
-  it('lets Node exit once a region that ran a function is stopped', async () => {
-    await runAlone('export const handler = async () => 1', '1');
-  }, 40_000);
-
-  // An environment that dies without a word, as it does when its runtime cannot be found
-  it('keeps Node running until an environment that died starting has been answered for', async () => {
-    await runAlone('process.exit(3);', 'stopped before it asked for an invocation');
-  }, 40_000);
-
 });
