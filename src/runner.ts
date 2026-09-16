@@ -6,7 +6,7 @@ import { portFor } from './region/proxy.ts';
 import type { FromRunnerWorker, RunnerOutput, ToRunnerWorker } from './runner/protocol.ts';
 import { importing, onFailure, siblingUrl, startWorker } from './start-worker.ts';
 
-export type { ConsoleMethod, RunnerOutput, RunnerStream } from './runner/protocol.ts';
+export type { ConsoleMethod, RunnerOutput } from './runner/protocol.ts';
 export type RunnerStatus = 'booting' | 'resetting' | 'running';
 export type RunResult = { ok: true; durationMs: number } | { ok: false; durationMs: number; error: unknown };
 

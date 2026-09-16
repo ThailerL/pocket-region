@@ -1,10 +1,10 @@
 // The messages between createRunner on the page and the worker a snippet runs in
+import type { OutputStream } from '../core.ts';
 import type { WireError } from '../region/protocol.ts';
 
-export type RunnerStream = 'log' | 'error';
 export type ConsoleMethod = 'log' | 'info' | 'debug' | 'warn' | 'error' | 'table' | 'dir';
 // values are the console call's arguments, each copied to the page or, when it can't be, its text
-export type RunnerOutput = { method: ConsoleMethod; stream: RunnerStream; text: string; values: unknown[] };
+export type RunnerOutput = { method: ConsoleMethod; stream: OutputStream; text: string; values: unknown[] };
 
 export type ToRunnerWorker =
   // A port to the region follows once it has booted

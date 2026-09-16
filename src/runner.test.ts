@@ -52,13 +52,13 @@ console.log(Buckets.map((bucket) => bucket.Name));`);
     await chained.stop();
   }, 60_000);
 
-  it('separates log from error output, and leaves the page console alone', async () => {
+  it('separates stdout from stderr, and leaves the page console alone', async () => {
     const log = vi.spyOn(console, 'log');
     const { output } = await run("console.log('out', 1, { a: 1 });\nconsole.warn('careful');\nconsole.error(new TypeError('bad'));");
     expect(output).toEqual([
-      { method: 'log', stream: 'log', text: 'out 1 {\n  "a": 1\n}', values: ['out', 1, { a: 1 }] },
-      { method: 'warn', stream: 'error', text: 'careful', values: ['careful'] },
-      { method: 'error', stream: 'error', text: 'TypeError: bad', values: [new TypeError('bad')] },
+      { method: 'log', stream: 'stdout', text: 'out 1 {\n  "a": 1\n}', values: ['out', 1, { a: 1 }] },
+      { method: 'warn', stream: 'stderr', text: 'careful', values: ['careful'] },
+      { method: 'error', stream: 'stderr', text: 'TypeError: bad', values: [new TypeError('bad')] },
     ]);
     expect(log).not.toHaveBeenCalled();
     log.mockRestore();
@@ -75,8 +75,8 @@ console.log(Buckets.map((bucket) => bucket.Name));`);
   it('passes console.table and console.dir on with their method', async () => {
     const { output } = await run("console.table([{ title: 'IT' }]);\nconsole.dir({ a: 1 });");
     expect(output.map(({ method, stream, values }) => ({ method, stream, values }))).toEqual([
-      { method: 'table', stream: 'log', values: [[{ title: 'IT' }]] },
-      { method: 'dir', stream: 'log', values: [{ a: 1 }] },
+      { method: 'table', stream: 'stdout', values: [[{ title: 'IT' }]] },
+      { method: 'dir', stream: 'stdout', values: [{ a: 1 }] },
     ]);
     expect(output[0].text).toContain('│ 0       │ IT    │');
   });
@@ -110,8 +110,8 @@ console.log(\`\${out.Buckets!.length} \${Unit.Bucket}s\` satisfies string);`);
     const { result, output } = await run("Promise.reject('Region is missing');\nPromise.reject(new RangeError('lost'));\nawait new Promise((resolve) => setTimeout(resolve, 50));");
     expect(result.ok).toBe(true);
     expect(output).toEqual([
-      { method: 'error', stream: 'error', text: 'Uncaught (in promise) Region is missing', values: ['Uncaught (in promise)', 'Region is missing'] },
-      { method: 'error', stream: 'error', text: 'Uncaught (in promise) RangeError: lost', values: ['Uncaught (in promise)', new RangeError('lost')] },
+      { method: 'error', stream: 'stderr', text: 'Uncaught (in promise) Region is missing', values: ['Uncaught (in promise)', 'Region is missing'] },
+      { method: 'error', stream: 'stderr', text: 'Uncaught (in promise) RangeError: lost', values: ['Uncaught (in promise)', new RangeError('lost')] },
     ]);
   });
 

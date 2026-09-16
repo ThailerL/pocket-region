@@ -44,6 +44,6 @@ function textOf(method: ConsoleMethod, args: unknown[]) {
 
 export function createConsole(write: (output: RunnerOutput) => void): Record<ConsoleMethod, (...args: unknown[]) => void> {
   const call = (method: ConsoleMethod) => (...args: unknown[]) =>
-    write({ method, stream: method === 'warn' || method === 'error' ? 'error' : 'log', text: textOf(method, args), values: args });
+    write({ method, stream: method === 'warn' || method === 'error' ? 'stderr' : 'stdout', text: textOf(method, args), values: args });
   return { log: call('log'), info: call('info'), debug: call('debug'), table: call('table'), dir: call('dir'), warn: call('warn'), error: call('error') };
 }

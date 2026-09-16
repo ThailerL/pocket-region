@@ -12,7 +12,7 @@ describe('the console a snippet sees', () => {
     const { console, lines } = capture();
     const books = [{ title: 'IT', price: 15 }, { title: 'Carrie', genre: ['HORROR'] }, 'loose'];
     console.table(books);
-    expect(lines).toEqual([{ method: 'table', stream: 'log', values: [books], text: `┌─────────┬────────┬───────┬────────────┬────────┐
+    expect(lines).toEqual([{ method: 'table', stream: 'stdout', values: [books], text: `┌─────────┬────────┬───────┬────────────┬────────┐
 │ (index) │ title  │ price │ genre      │ Values │
 ├─────────┼────────┼───────┼────────────┼────────┤
 │ 0       │ IT     │ 15    │            │        │
@@ -43,18 +43,18 @@ describe('the console a snippet sees', () => {
   it('prints only what console.dir is given, not its options', () => {
     const { console, lines } = capture();
     console.dir({ a: 1 }, { depth: 0 });
-    expect(lines).toEqual([{ method: 'dir', stream: 'log', text: '{\n  "a": 1\n}', values: [{ a: 1 }, { depth: 0 }] }]);
+    expect(lines).toEqual([{ method: 'dir', stream: 'stdout', text: '{\n  "a": 1\n}', values: [{ a: 1 }, { depth: 0 }] }]);
   });
 
-  it('names the method each line came from, and sends warnings and errors to the error stream', () => {
+  it('names the method each line came from, and sends warnings and errors to stderr', () => {
     const { console, lines } = capture();
     for (const method of ['log', 'info', 'debug', 'warn', 'error'] as const) console[method](method);
     expect(lines.map(({ method, stream }) => [method, stream])).toEqual([
-      ['log', 'log'],
-      ['info', 'log'],
-      ['debug', 'log'],
-      ['warn', 'error'],
-      ['error', 'error'],
+      ['log', 'stdout'],
+      ['info', 'stdout'],
+      ['debug', 'stdout'],
+      ['warn', 'stderr'],
+      ['error', 'stderr'],
     ]);
   });
 });
