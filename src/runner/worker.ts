@@ -2,8 +2,9 @@
 import { fromWire, pendingCalls, toWire, workerEndpoint } from '../region/protocol.ts';
 import { regionOver } from '../region/proxy.ts';
 import { withRegion } from '../with-region.ts';
+import { createConsole, format } from './console.ts';
 import { AsyncFunction, IMPORT, rewriteImports } from './imports.ts';
-import type { FromRunnerWorker, RunnerStream, ToRunnerWorker } from './protocol.ts';
+import type { FromRunnerWorker, ToRunnerWorker } from './protocol.ts';
 import { stripTypes } from './strip.ts';
 
 const port = workerEndpoint<FromRunnerWorker, ToRunnerWorker>();
@@ -31,16 +32,6 @@ async function polyfillDom() {
   Object.assign(globalThis, { DOMParser, Node });
 }
 
-function format(value: unknown) {
-  if (typeof value === 'string') return value;
-  if (value instanceof Error) return `${value.name}: ${value.message}`;
-  try {
-    return JSON.stringify(value, null, 2) ?? String(value);
-  } catch {
-    return String(value);
-  }
-}
-
 function copyable(value: unknown) {
   try {
     structuredClone(value);
@@ -50,15 +41,13 @@ function copyable(value: unknown) {
   }
 }
 
-const write = (stream: RunnerStream) => (...args: unknown[]) => {
-  const text = args.map(format).join(' ');
+const console = createConsole((output) => {
   try {
-    post({ type: 'output', stream, text, values: args });
+    post({ type: 'output', output });
   } catch {
-    post({ type: 'output', stream, text, values: args.map(copyable) });
+    post({ type: 'output', output: { ...output, values: output.values.map(copyable) } });
   }
-};
-const console = { log: write('log'), info: write('log'), debug: write('log'), warn: write('error'), error: write('error') };
+});
 
 // A library that drops a rejection can leave the run hanging, so the reader at least sees why
 self.addEventListener('unhandledrejection', (event) => console.error('Uncaught (in promise)', event.reason));

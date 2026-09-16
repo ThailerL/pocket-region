@@ -3,12 +3,10 @@ import { jspiSupported, type Region } from './core.ts';
 import { fromImportMap } from './import-map.ts';
 import { answer, pendingCalls, toWire } from './region/protocol.ts';
 import { portFor } from './region/proxy.ts';
-import type { FromRunnerWorker, RunnerStream, ToRunnerWorker } from './runner/protocol.ts';
+import type { FromRunnerWorker, RunnerOutput, ToRunnerWorker } from './runner/protocol.ts';
 import { importing, onFailure, siblingUrl, startWorker } from './start-worker.ts';
 
-export type { RunnerStream } from './runner/protocol.ts';
-// values are the console call's arguments, each copied to the page or, when it can't be, its text
-export type RunnerOutput = { stream: RunnerStream; text: string; values: unknown[] };
+export type { ConsoleMethod, RunnerOutput, RunnerStream } from './runner/protocol.ts';
 export type RunnerStatus = 'booting' | 'resetting' | 'running';
 export type RunResult = { ok: true; durationMs: number } | { ok: false; durationMs: number; error: unknown };
 
@@ -77,7 +75,7 @@ export function createRunner(options: RunnerOptions = {}): Runner {
           answer(async () => resolve(data.specifier), (url, error) => started.postMessage({ type: 'resolved', id: data.id, url, error }));
           return;
         case 'output':
-          return current?.onOutput?.({ stream: data.stream, text: data.text, values: data.values });
+          return current?.onOutput?.(data.output);
         case 'done':
           return runs.settle(data.id);
         case 'failed':

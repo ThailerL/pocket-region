@@ -72,9 +72,11 @@ type RunResult = { ok: true; durationMs: number } | { ok: false; durationMs: num
   the code without a Run button there.
 - **`run(code)`** resolves once the code finishes, and never rejects: what the code throws comes
   back as `error`. Runs wait for each other, since they share the region.
-  - `onOutput({ stream, text, values })` gets each `console` call, `log`, `info`, and `debug` as
-    `'log'`, and `warn` and `error` as `'error'`, along with any rejected promise nothing handles.
-    `text` is the call as one string, with values that aren't strings as JSON. `values` holds the
+  - `onOutput({ method, stream, text, values })` gets each `console` call, with `method` naming
+    it. `log`, `info`, `debug`, `table`, and `dir` go to `'log'`, and `warn` and `error` to
+    `'error'`, along with any rejected promise nothing handles, as an `error`. `text` is the call
+    as one string, with values that aren't strings as JSON. For `table`, `text` is the table drawn
+    in box characters, and for `dir` it's the first argument alone. `values` holds the
     call's arguments themselves, copied to the page, so you can render them your own way. A `Set`,
     `Map`, `Date`, or typed array arrives as one. An argument that can't be copied, such as an
     object with a method, arrives as its text. The page's own `console` isn't touched.
