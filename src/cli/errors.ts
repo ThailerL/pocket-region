@@ -7,9 +7,12 @@ export function usageText(services?: string[], note?: string) {
   return `usage: aws <service> <operation> [--flag value ...]
 
 ${available}
-Operations and flags are the real AWS CLI's: --kebab-case names the SDK input key, so
---queue-url is QueueUrl. A flag value that looks like JSON is passed as JSON; pass a whole
-input document with --cli-input-json instead when a value's type is ambiguous.
+Operations and flags are the real AWS CLI's: --queue-url names the input's QueueUrl, and a
+flag the operation does not take is refused. Each value follows the type the operation gives
+that member, so a string is passed as typed, and a list or a structure takes either JSON or
+the CLI's shorthand, as in --key-schema AttributeName=id,KeyType=HASH. A whole input document
+can go in --cli-input-json. Flags the real CLI reads for itself, such as --region, are
+accepted and ignored.
 ${note ? `\n${note}\n` : ""}`;
 }
 

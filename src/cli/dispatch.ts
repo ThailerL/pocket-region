@@ -1,7 +1,9 @@
 import { clientDefaults } from '../client-defaults.ts';
 import type { Dispatcher } from '../core.ts';
-import { kebabCase, type Invocation } from './args.ts';
+import { flagCase, type Invocation } from './args.ts';
 import { UsageError } from './errors.ts';
+import { paramsFor } from './params.ts';
+import { membersOf } from './schema.ts';
 
 export type SdkModule = Record<string, unknown>;
 export type SdkClient = { send(command: unknown): Promise<Record<string, unknown>> };
@@ -157,13 +159,15 @@ export async function commandFor(service: string, operation: string, services: S
   const module = await services.module(service);
   const Command = module[`${operation}Command`];
   if (typeof Command !== 'function') {
-    throw new UsageError(`unknown operation "${kebabCase(operation)}" for "${service}"`, service);
+    throw new UsageError(`unknown operation "${flagCase(operation)}" for "${service}"`, service);
   }
   return Command as new (params: object) => unknown;
 }
 
-export async function dispatch({ service, operation, params }: Invocation, services: Services) {
+export async function dispatch(invocation: Invocation, services: Services) {
+  const { service, operation } = invocation;
   const Command = await commandFor(service, operation, services);
+  const params = paramsFor(invocation, membersOf(Command));
   const client = await services.client(service);
   const { $metadata, ...rest } = await client.send(new Command(params));
 

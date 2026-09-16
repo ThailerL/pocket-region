@@ -4,9 +4,11 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { RegionRequest } from '../core.ts';
 import { createRegion, type Region } from '../node.ts';
-import { kebabCase, parseArgs, parseValue, pascalCase, tokenize } from './args.ts';
+import { flagCase, parseArgs, parseValue, pascalCase, tokenize } from './args.ts';
 import { decoded, unresolvable } from './dispatch.ts';
 import { UsageError } from './errors.ts';
+import { paramsFor } from './params.ts';
+import { membersOf } from './schema.ts';
 import { awsCli, CliError } from './index.ts';
 import { formatBuckets, formatObjects, parseS3Uri } from './s3-verbs.ts';
 
@@ -21,10 +23,15 @@ describe('pascalCase', () => {
   });
 });
 
-describe('kebabCase', () => {
+describe('flagCase', () => {
   it('names an SDK operation back the way it was typed', () => {
-    expect(kebabCase('SendMessage')).toBe('send-message');
-    expect(kebabCase('ListObjectsV2')).toBe('list-objects-v2');
+    expect(flagCase('SendMessage')).toBe('send-message');
+    expect(flagCase('ListObjectsV2')).toBe('list-objects-v2');
+  });
+
+  it('breaks an acronym where the real CLI breaks it', () => {
+    expect(flagCase('SSESpecification')).toBe('sse-specification');
+    expect(flagCase('SSEKMSKeyId')).toBe('ssekms-key-id');
   });
 });
 
@@ -69,50 +76,188 @@ describe('tokenize', () => {
 });
 
 describe('parseArgs', () => {
-  it('reads flags into SDK input', () => {
+  it('reads the flags as they were typed', () => {
     expect(parseArgs(['sqs', 'create-queue', '--queue-name', 'orders'])).toEqual({
       service: 'sqs',
       operation: 'CreateQueue',
-      params: { QueueName: 'orders' },
+      flags: [{ flag: 'queue-name', values: ['orders'] }],
     });
-  });
-
-  it('takes a whole input document, which explicit flags still beat', () => {
-    const parsed = parseArgs([
-      'dynamodb',
-      'put-item',
-      '--cli-input-json',
-      '{"TableName": "a", "Item": {}}',
-      '--table-name',
-      'b',
-    ]);
-    expect(parsed.params).toEqual({ TableName: 'b', Item: {} });
   });
 
   it('takes --key=value, which is how documentation writes it', () => {
-    const parsed = parseArgs([
-      's3api',
-      'put-object',
-      '--bucket=notes',
-      '--key=a/b.txt',
-      '--body={"a": 1}',
-      '--metadata={"x": "y"}',
+    expect(parseArgs(['s3api', 'put-object', '--bucket=notes', '--body={"a": 1}']).flags).toEqual([
+      { flag: 'bucket', values: ['notes'] },
+      { flag: 'body', values: ['{"a": 1}'] },
     ]);
-    expect(parsed.params).toEqual({
-      Bucket: 'notes',
-      Key: 'a/b.txt',
-      Body: '{"a": 1}',
-      Metadata: { x: 'y' },
-    });
+  });
+
+  it('gives a flag every value up to the next flag, which is how a list is typed', () => {
+    const argv = tokenize('sqs get-queue-attributes --attribute-names All Policy --queue-url http://q');
+    expect(parseArgs(argv).flags).toEqual([
+      { flag: 'attribute-names', values: ['All', 'Policy'] },
+      { flag: 'queue-url', values: ['http://q'] },
+    ]);
   });
 
   it('keeps an attached empty value a string, not a boolean', () => {
-    expect(parseArgs(['s3api', 'list-objects-v2', '--prefix=']).params).toEqual({ Prefix: '' });
-    expect(parseArgs(['s3api', 'list-objects-v2', '--prefix']).params).toEqual({ Prefix: true });
+    expect(parseArgs(['s3api', 'list-objects-v2', '--prefix=']).flags).toEqual([
+      { flag: 'prefix', values: [''] },
+    ]);
+    expect(parseArgs(['s3api', 'list-objects-v2', '--prefix']).flags).toEqual([
+      { flag: 'prefix', values: [] },
+    ]);
   });
 
   it('refuses an argument that is not a flag', () => {
     expect(() => parseArgs(['sqs', 'create-queue', 'orders'])).toThrow(UsageError);
+  });
+});
+
+describe('paramsFor', () => {
+  const params = async (command: string, module: Promise<Record<string, unknown>>) => {
+    const invocation = parseArgs(tokenize(command));
+    const Command = (await module)[`${invocation.operation}Command`] as new (
+      input: object,
+    ) => unknown;
+    return paramsFor(invocation, membersOf(Command));
+  };
+  const sqs = import('@aws-sdk/client-sqs');
+  const sns = import('@aws-sdk/client-sns');
+  const s3 = import('@aws-sdk/client-s3');
+  const dynamodb = import('@aws-sdk/client-dynamodb');
+
+  it('names the input key the operation itself gives the flag', async () => {
+    expect(await params('sqs create-queue --queue-name orders', sqs)).toEqual({
+      QueueName: 'orders',
+    });
+  });
+
+  it('takes the flag the real CLI renamed, which the API spells otherwise', async () => {
+    const subscribe = await params(
+      'sns subscribe --topic-arn arn:t --protocol sqs --notification-endpoint arn:q',
+      sns,
+    );
+    expect(subscribe).toEqual({ TopicArn: 'arn:t', Protocol: 'sqs', Endpoint: 'arn:q' });
+  });
+
+  it('keeps a string member as typed, JSON or not', async () => {
+    expect(await params(`sqs send-message --queue-url http://q --message-body '{"a": 1}'`, sqs)) //
+      .toEqual({ QueueUrl: 'http://q', MessageBody: '{"a": 1}' });
+  });
+
+  it('reads the type the member has, so a number is a number and a map is JSON', async () => {
+    expect(
+      await params(`s3api list-objects-v2 --bucket notes --max-keys 5 --prefix 3things`, s3),
+    ).toEqual({ Bucket: 'notes', MaxKeys: 5, Prefix: '3things' });
+    expect(
+      await params(`s3api put-object --bucket notes --key a --metadata '{"x": "y"}'`, s3),
+    ).toEqual({ Bucket: 'notes', Key: 'a', Metadata: { x: 'y' } });
+  });
+
+  it('reads the shorthand the real CLI documents into a list of structures', async () => {
+    const created = await params(
+      'dynamodb create-table --table-name notes' +
+        ' --attribute-definitions AttributeName=id,AttributeType=S' +
+        ' --key-schema AttributeName=id,KeyType=HASH',
+      dynamodb,
+    );
+    expect(created).toEqual({
+      TableName: 'notes',
+      AttributeDefinitions: [{ AttributeName: 'id', AttributeType: 'S' }],
+      KeySchema: [{ AttributeName: 'id', KeyType: 'HASH' }],
+    });
+  });
+
+  it('takes a structure written out in full, and one nested inside another', async () => {
+    const created = await params(
+      'dynamodb create-table --table-name notes' +
+        ' --provisioned-throughput ReadCapacityUnits=1,WriteCapacityUnits=2' +
+        ' --global-secondary-indexes IndexName=by-tag,Projection={ProjectionType=ALL}',
+      dynamodb,
+    );
+    expect(created).toEqual({
+      TableName: 'notes',
+      // A number member is a number, which is what the shape says and JSON would need quoting to avoid
+      ProvisionedThroughput: { ReadCapacityUnits: 1, WriteCapacityUnits: 2 },
+      GlobalSecondaryIndexes: [{ IndexName: 'by-tag', Projection: { ProjectionType: 'ALL' } }],
+    });
+  });
+
+  it('keeps taking the same list as JSON, which is how our own documentation writes it', async () => {
+    const created = await params(
+      `dynamodb create-table --table-name notes --key-schema '[{"AttributeName":"id","KeyType":"HASH"}]'`,
+      dynamodb,
+    );
+    expect(created.KeySchema).toEqual([{ AttributeName: 'id', KeyType: 'HASH' }]);
+  });
+
+  it('takes each value after the flag as an element, and a bare one as a list of one', async () => {
+    expect(
+      await params('sqs get-queue-attributes --queue-url http://q --attribute-names All Policy', sqs),
+    ).toEqual({ QueueUrl: 'http://q', AttributeNames: ['All', 'Policy'] });
+    expect(
+      await params('sqs get-queue-attributes --queue-url http://q --attribute-names All', sqs),
+    ).toEqual({ QueueUrl: 'http://q', AttributeNames: ['All'] });
+  });
+
+  it('names the key the structure does not have, and what it has instead', async () => {
+    await expect(
+      params('dynamodb create-table --key-schema AttributeNam=id,KeyType=HASH', dynamodb),
+    ).rejects.toThrow(/has no "AttributeNam".*AttributeName/s);
+  });
+
+  it('refuses shorthand that assigns nothing to a key', async () => {
+    await expect(
+      params('dynamodb create-table --provisioned-throughput ReadCapacityUnits', dynamodb),
+    ).rejects.toThrow(/--provisioned-throughput/);
+  });
+
+  it('refuses a flag the operation does not take, and names the nearest', async () => {
+    await expect(params('sqs create-queue --queue-names orders', sqs)).rejects.toThrow(
+      /unknown option "--queue-names".*--queue-name/s,
+    );
+  });
+
+  it('turns a boolean off through the --no- form the real CLI documents', async () => {
+    expect(await params('dynamodb query --table-name notes --no-scan-index-forward', dynamodb)) //
+      .toEqual({ TableName: 'notes', ScanIndexForward: false });
+  });
+
+  it('accepts and drops the flags the real CLI reads for itself', async () => {
+    expect(await params('sqs list-queues --region us-west-2 --no-cli-pager', sqs)).toEqual({});
+  });
+
+  it('refuses a flag it would have to ignore to accept, rather than answering something else', async () => {
+    await expect(params('sqs list-queues --output text', sqs)).rejects.toThrow(
+      /--output: output is always JSON here/,
+    );
+  });
+
+  it('takes the renamed flag only under the name the real CLI gives it', async () => {
+    await expect(params('sns subscribe --endpoint arn:q', sns)).rejects.toThrow(
+      /unknown option "--endpoint".*--notification-endpoint/s,
+    );
+  });
+
+  it('types a member the SDK names in its own right, such as an encryption key', async () => {
+    expect(await params('s3api get-object --bucket notes --key a --sse-customer-key 12345', s3)) //
+      .toEqual({ Bucket: 'notes', Key: 'a', SSECustomerKey: '12345' });
+  });
+
+  it('refuses a flag on an operation that takes no input at all', async () => {
+    await expect(params('dynamodb describe-limits --not-a-flag x', dynamodb)).rejects.toThrow(
+      /unknown option "--not-a-flag"/,
+    );
+  });
+
+  it('takes a whole input document, which explicit flags still beat', async () => {
+    const command = `dynamodb put-item --cli-input-json '{"TableName": "a", "Item": {}}' --table-name b`;
+    expect(await params(command, dynamodb)).toEqual({ TableName: 'b', Item: {} });
+  });
+
+  it('spells the key from the flag where an SDK carries no shape to read', () => {
+    const invocation = parseArgs(tokenize('sqs create-queue --queue-name orders'));
+    expect(paramsFor(invocation, undefined)).toEqual({ QueueName: 'orders' });
   });
 });
 
