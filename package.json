@@ -44,7 +44,7 @@
   },
   "scripts": {
     "prepack": "npm run vendor && npm run build",
-    "embed": "node scripts/embed-python.mjs && node scripts/embed-runtime.mjs && node scripts/embed-version.mjs",
+    "embed": "node scripts/embed-python.mjs && node scripts/embed-runtime.mjs && node scripts/embed-version.mjs && node scripts/embed-sucrase.mjs",
     "build": "npm run embed && node -e \"fs.rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.build.json",
     "check": "npm run embed && tsc",
     "pretest": "npm run vendor",
@@ -71,6 +71,8 @@
     "@vitest/browser-playwright": "^5.0.0",
     "fflate": "^0.8.3",
     "playwright": "^1.63.0",
+    "rolldown": "^1.2.8",
+    "sucrase": "^3.35.1",
     "typescript": "^7.0.2",
     "vitest": "^5.0.0"
   }

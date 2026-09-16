@@ -70,6 +70,18 @@ console.log(Buckets.map((bucket) => bucket.Name));`);
     expect(result).toMatchObject({ ok: false, error: expect.objectContaining({ name: 'RangeError', message: 'broken' }) });
   });
 
+  it('runs TypeScript, and reports where a snippet fails to parse', async () => {
+    const { result, text } = await run(`import type { ListBucketsCommandOutput } from '@aws-sdk/client-s3';
+import { S3Client, ListBucketsCommand } from '@aws-sdk/client-s3';
+enum Unit { Bucket = 'bucket' }
+const out = (await new S3Client({}).send(new ListBucketsCommand({}))) as ListBucketsCommandOutput;
+console.log(\`\${out.Buckets!.length} \${Unit.Bucket}s\` satisfies string);`);
+    expect(result.ok).toBe(true);
+    expect(text).toEqual(['0 buckets']);
+    const broken = await run('const x: = 1;');
+    expect(broken.result).toMatchObject({ ok: false, error: expect.objectContaining({ message: expect.stringContaining('(1:10)') }) });
+  }, 60_000);
+
   it('refuses an import of pocket-region, and code it cannot run', async () => {
     const own = await run("import { createRegion } from 'pocket-region/browser';");
     expect(own.result).toMatchObject({ ok: false, error: expect.objectContaining({ message: expect.stringContaining("can't import pocket-region/browser") }) });

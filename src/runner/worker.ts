@@ -2,8 +2,9 @@
 import { fromWire, pendingCalls, toWire, workerEndpoint } from '../region/protocol.ts';
 import { regionOver } from '../region/proxy.ts';
 import { withRegion } from '../with-region.ts';
-import { AsyncFunction, IMPORT } from './imports.ts';
+import { AsyncFunction, IMPORT, rewriteImports } from './imports.ts';
 import type { FromRunnerWorker, RunnerStream, ToRunnerWorker } from './protocol.ts';
+import { stripTypes } from './strip.ts';
 
 const port = workerEndpoint<FromRunnerWorker, ToRunnerWorker>();
 const post = (message: FromRunnerWorker) => port.postMessage(message);
@@ -46,7 +47,13 @@ const console = { log: write('log'), info: write('log'), debug: write('log'), wa
 // A library that drops a rejection can leave the run hanging, so the reader at least sees why
 self.addEventListener('unhandledrejection', (event) => console.error('Uncaught (in promise)', event.reason));
 
-async function run(body: string, specifiers: string[], regionPort: Promise<MessagePort>) {
+const isPocketRegion = (specifier: string) => specifier.split('/')[0] === 'pocket-region';
+
+async function run(code: string, regionPort: Promise<MessagePort>) {
+  const { code: body, specifiers } = rewriteImports(stripTypes(code));
+  const refused = specifiers.find(isPocketRegion);
+  if (refused) throw new Error(`a snippet can't import ${refused}: it runs against the runner's region`);
+
   // The imports load while the region boots on the page
   const loading = new Map(specifiers.map((specifier) => [specifier, load(specifier)]));
   let attached: MessagePort | undefined;
@@ -71,7 +78,7 @@ port.onmessage = async ({ data }) => {
     case 'run': {
       const regionPort = new Promise<MessagePort>((resolve, reject) => (deliverRegion = { resolve, reject }));
       try {
-        await run(data.body, data.specifiers, regionPort);
+        await run(data.code, regionPort);
         post({ type: 'done', id: data.id });
       } catch (error) {
         post({ type: 'failed', id: data.id, error: toWire(error) });

@@ -3,7 +3,6 @@ import { jspiSupported, type Region } from './core.ts';
 import { fromImportMap } from './import-map.ts';
 import { answer, pendingCalls, toWire } from './region/protocol.ts';
 import { portFor } from './region/proxy.ts';
-import { rewriteImports } from './runner/imports.ts';
 import type { FromRunnerWorker, RunnerStream, ToRunnerWorker } from './runner/protocol.ts';
 import { importing, onFailure, siblingUrl, startWorker } from './start-worker.ts';
 
@@ -37,7 +36,6 @@ export type Runner = {
 };
 
 const fromCdn = (specifier: string) => fromImportMap(specifier, () => `https://cdn.jsdelivr.net/npm/${specifier}/+esm`);
-const isPocketRegion = (specifier: string) => specifier.split('/')[0] === 'pocket-region';
 
 export function createRunner(options: RunnerOptions = {}): Runner {
   const resolve = options.resolve ?? fromCdn;
@@ -88,16 +86,7 @@ export function createRunner(options: RunnerOptions = {}): Runner {
     return (worker = started);
   }
 
-  async function execute(code: string, runOptions: RunOptions) {
-    const { onStatus = () => {} } = runOptions;
-    const { code: body, specifiers } = rewriteImports(code);
-    const refused = specifiers.find(isPocketRegion);
-    if (refused) throw new Error(`a snippet can't import ${refused}: it runs against the runner's region`);
-    const target = workerFor();
-    current = runOptions;
-
-    // Posted first, so the snippet's imports load while the region boots
-    const finished = runs.start((id) => target.postMessage({ type: 'run', id, body, specifiers } satisfies ToRunnerWorker));
+  async function attach(target: Worker, onStatus: (status: RunnerStatus) => void) {
     try {
       const port = portFor(await regionFor(onStatus));
       target.postMessage({ type: 'region', port } satisfies ToRunnerWorker, [port]);
@@ -105,7 +94,18 @@ export function createRunner(options: RunnerOptions = {}): Runner {
       target.postMessage({ type: 'region', error: toWire(error) } satisfies ToRunnerWorker);
     }
     onStatus('running');
-    await finished;
+  }
+
+  async function execute(code: string, runOptions: RunOptions) {
+    const { onStatus = () => {} } = runOptions;
+    const target = workerFor();
+    current = runOptions;
+
+    // Posted first, so the snippet's imports load while the region boots
+    const finished = runs.start((id) => target.postMessage({ type: 'run', id, code } satisfies ToRunnerWorker));
+    // A run that fails first still waits for the region, so the next run's port isn't taken by this one
+    const [outcome] = await Promise.allSettled([finished, attach(target, onStatus)]);
+    if (outcome.status === 'rejected') throw outcome.reason;
   }
 
   return {

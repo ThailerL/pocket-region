@@ -81,6 +81,9 @@ type RunResult = { ok: true; durationMs: number } | { ok: false; durationMs: num
   an error saying `stopped`. The region the runner booted itself stops with it, and a later run
   boots again. A region you passed in is left alone.
 
+A snippet can be TypeScript. The runner removes the types before running it, without type
+checking, and leaves plain JavaScript as it is.
+
 A snippet runs as the body of an async function, so top-level `await` works. It can import with
 `import … from '…'` at the start of a line and `import('…')` with a literal specifier, but it can't
 `export`. It runs in a Web Worker, so it can't reach the page or its DOM, and a snippet that
