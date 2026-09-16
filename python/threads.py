@@ -10,7 +10,8 @@ import time
 
 from pyodide.ffi import run_sync
 
-# Automatic collection crashes Pyodide once ministack 1.5.11+ is loaded; collectGarbage runs it on demand
+# Automatic collection walks a suspended task's frames, which Pyodide has reused
+# https://github.com/pyodide/pyodide/issues/6464
 gc.disable()
 
 
