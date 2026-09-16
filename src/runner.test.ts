@@ -1,17 +1,18 @@
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { createRunner, type RunnerOutput, type RunnerStatus } from './browser.ts';
-import { assetsBaseUrl, indexURL } from './test-region.browser.ts';
+import { s3 } from './test-clients.ts';
+import { assetsBaseUrl, createTestRegion, indexURL } from './test-region.browser.ts';
 
-const modules: Record<string, () => Promise<object>> = {
-  '@aws-sdk/client-s3': () => import('@aws-sdk/client-s3'),
-  '@aws-sdk/client-sqs': () => import('@aws-sdk/client-sqs'),
-  fflate: () => import('fflate'),
+// A snippet's worker imports by URL, so its modules come from jsDelivr at the site's versions
+const versions: Record<string, string> = {
+  '@aws-sdk/client-s3': '3.1131.0',
+  '@xmldom/xmldom': '0.9.12',
+  fflate: '0.8.2',
 };
+const resolve = (specifier: string) => `https://cdn.jsdelivr.net/npm/${specifier}@${versions[specifier]}/+esm`;
+const boot = { assetsBaseUrl, indexURL };
 
-const load = (specifier: string) => modules[specifier]!();
-const region = { assetsBaseUrl, indexURL };
-
-const runner = createRunner({ region, load });
+const runner = createRunner({ boot, resolve });
 
 afterAll(() => runner.stop());
 
@@ -43,7 +44,7 @@ console.log(Buckets.map((bucket) => bucket.Name));`);
   }, 60_000);
 
   it("keeps what earlier runs made when reset is 'never'", async () => {
-    const chained = createRunner({ region, load, reset: 'never' });
+    const chained = createRunner({ boot, resolve, reset: 'never' });
     await run("import { S3Client, CreateBucketCommand } from '@aws-sdk/client-s3';\nawait new S3Client({}).send(new CreateBucketCommand({ Bucket: 'step-one' }));", chained);
     const second = await run(listBuckets, chained);
     expect(second.statuses).toEqual(['running']);
@@ -69,27 +70,9 @@ console.log(Buckets.map((bucket) => bucket.Name));`);
     expect(result).toMatchObject({ ok: false, error: expect.objectContaining({ name: 'RangeError', message: 'broken' }) });
   });
 
-  it("leaves a snippet that brings its own region to it, and boots nothing for it", async () => {
-    const own = createRunner({ load });
-    const { result, statuses, text } = await run(
-      `import { createRegion, requestHandler } from 'pocket-region/browser';
-import { SQSClient, CreateQueueCommand } from '@aws-sdk/client-sqs';
-const region = await createRegion({ assetsBaseUrl: '${assetsBaseUrl}', indexURL: '${indexURL}' });
-const sqs = new SQSClient({ region: 'us-east-1', credentials: { accessKeyId: 'a', secretAccessKey: 'a' }, requestHandler: requestHandler(region) });
-const { QueueUrl } = await sqs.send(new CreateQueueCommand({ QueueName: 'own' }));
-console.log(QueueUrl);
-await region.stop();`,
-      own,
-    );
-    expect(result.ok).toBe(true);
-    expect(statuses).toEqual(['running']);
-    expect(text[0]).toMatch(/\/own$/);
-    await own.stop();
-  }, 60_000);
-
-  it('refuses the Node entry, and code it cannot run', async () => {
-    const node = await run("import { createRegion } from 'pocket-region/node';");
-    expect(node.result).toMatchObject({ ok: false, error: expect.objectContaining({ message: expect.stringContaining('import pocket-region/browser') }) });
+  it('refuses an import of pocket-region, and code it cannot run', async () => {
+    const own = await run("import { createRegion } from 'pocket-region/browser';");
+    expect(own.result).toMatchObject({ ok: false, error: expect.objectContaining({ message: expect.stringContaining("can't import pocket-region/browser") }) });
     const exported = await run('export const a = 1;');
     expect(exported.result).toMatchObject({ ok: false, error: expect.objectContaining({ message: expect.stringContaining('cannot export') }) });
   });
@@ -101,6 +84,34 @@ await region.stop();`,
     await Promise.all([slow, fast]);
     expect(order).toEqual(['slow', 'fast']);
   });
+
+  it('runs against a region the page made, and leaves it as it is', async () => {
+    const made = await createTestRegion();
+    await s3('PUT', '/before', undefined, made);
+    const against = createRunner({ region: made, resolve });
+    const { statuses, text } = await run(listBuckets, against);
+    expect(statuses).toEqual(['running']);
+    expect(text).toEqual(['[\n  "before"\n]']);
+    await against.stop();
+    expect((await s3('GET', '/before', undefined, made)).status).toBe(200);
+    await made.stop();
+  }, 60_000);
+
+  it('keeps the name of an SDK error, and gives a snippet no DOM', async () => {
+    const { result } = await run("import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';\nawait new S3Client({}).send(new GetObjectCommand({ Bucket: 'absent', Key: 'x' }));");
+    expect(result).toMatchObject({ ok: false, error: expect.objectContaining({ name: 'NoSuchBucket' }) });
+    expect((await run('console.log(typeof document, typeof window);')).text).toEqual(['undefined undefined']);
+  }, 60_000);
+
+  it('stops a run that never ends, and runs again after', async () => {
+    const stuck = runner.run('for (;;) {}');
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await runner.stop();
+    expect(await stuck).toMatchObject({ ok: false, error: expect.objectContaining({ message: 'stopped' }) });
+    const after = await run("console.log('back');");
+    expect(after.statuses).toEqual(['booting', 'running']);
+    expect(after.text).toEqual(['back']);
+  }, 60_000);
 
   it('says whether this page can run a region', () => {
     expect(runner.supported).toBe('Suspending' in WebAssembly);

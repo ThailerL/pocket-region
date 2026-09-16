@@ -1,10 +1,9 @@
 // A page's region, started by createRegion as a module worker
 import { bootRegion, hostObserver, type Region, type RegionSettings, type StateFiles, type StateStore } from '../core.ts';
 import { createWorkerHost } from '../lambda/worker-host.ts';
-import { pendingCalls, toWire, type Endpoint, type FromRegionWorker, type StoreMethod, type ToRegionWorker } from './protocol.ts';
+import { pendingCalls, toWire, workerEndpoint, type Endpoint, type FromRegionWorker, type StoreMethod, type ToRegionWorker } from './protocol.ts';
 
-// DedicatedWorkerGlobalScope, without the lib that names it
-const port = self as unknown as Endpoint<FromRegionWorker, ToRegionWorker>;
+const port = workerEndpoint<FromRegionWorker, ToRegionWorker>();
 const post = (message: FromRegionWorker, transfer?: Transferable[]) => port.postMessage(message, transfer);
 
 const stores = pendingCalls<StateFiles>();
@@ -39,31 +38,40 @@ async function boot({ type: _, assets, port: regionPort, hasStore, listening }: 
 
 let region: Promise<Region> | undefined;
 
-port.onmessage = async ({ data }) => {
-  switch (data.type) {
-    case 'boot':
-      region = boot(data);
-      region.then(
-        ({ port }) => post({ type: 'booted', port }),
-        (error) => post({ type: 'boot-failed', error: toWire(error) }),
-      );
-      return;
-    case 'stored':
-      return stores.settle(data.id, data.files, data.error);
-    case 'call':
-      try {
-        const booted = await region!;
-        if (data.method === 'dispatch') {
-          const response = await booted.dispatch(data.request!);
-          // The body is a fresh copy out of Python: safe to transfer
-          post({ type: 'done', id: data.id, response }, [response.body.buffer as ArrayBuffer]);
-        } else {
-          await booted[data.method]();
-          post({ type: 'done', id: data.id });
+// Calls are answered on the endpoint they came in on; the page's is the one that boots
+function serve(endpoint: Endpoint<FromRegionWorker, ToRegionWorker>) {
+  endpoint.onmessage = async ({ data }) => {
+    switch (data.type) {
+      case 'boot':
+        region = boot(data);
+        region.then(
+          ({ port }) => post({ type: 'booted', port }),
+          (error) => post({ type: 'boot-failed', error: toWire(error) }),
+        );
+        return;
+      case 'stored':
+        return stores.settle(data.id, data.files, data.error);
+      case 'connect':
+        serve(data.port);
+        data.port.postMessage({ type: 'booted', port: (await region!).port });
+        return;
+      case 'call':
+        try {
+          const booted = await region!;
+          if (data.method === 'dispatch') {
+            const response = await booted.dispatch(data.request!);
+            // The body is a fresh copy out of Python: safe to transfer
+            endpoint.postMessage({ type: 'done', id: data.id, response }, [response.body.buffer as ArrayBuffer]);
+          } else {
+            await booted[data.method]();
+            endpoint.postMessage({ type: 'done', id: data.id });
+          }
+        } catch (error) {
+          endpoint.postMessage({ type: 'failed', id: data.id, error: toWire(error) });
         }
-      } catch (error) {
-        post({ type: 'failed', id: data.id, error: toWire(error) });
-      }
-      return;
-  }
-};
+        return;
+    }
+  };
+}
+
+serve(port);

@@ -14,7 +14,9 @@ export type Listening = { output: boolean; lambdaOutput: boolean; lambdaEvents: 
 export type ToRegionWorker =
   | { type: 'boot'; assets: BootAssets; port?: number; hasStore: boolean; listening: Listening }
   | { type: 'call'; id: number; method: RegionMethod; request?: RegionRequest }
-  | { type: 'stored'; id: number; files?: StateFiles; error?: WireError };
+  | { type: 'stored'; id: number; files?: StateFiles; error?: WireError }
+  // Another worker's way in, served like this one and answered with booted
+  | { type: 'connect'; port: MessagePort };
 
 export type FromRegionWorker =
   | { type: 'booted'; port: number }
@@ -30,6 +32,9 @@ export type Endpoint<Out, In> = {
   postMessage(message: Out, transfer?: Transferable[]): void;
   onmessage: ((event: MessageEvent<In>) => void) | null;
 };
+
+// DedicatedWorkerGlobalScope, without the lib that names it
+export const workerEndpoint = <Out, In>() => self as unknown as Endpoint<Out, In>;
 
 type Settled<T> = { resolve: (value?: T) => void; reject: (error: Error) => void };
 
@@ -54,6 +59,15 @@ export function pendingCalls<T>() {
       pending.clear();
     },
   };
+}
+
+// One request from the far side, answered with its value or its error
+export async function answer<T>(produce: () => Promise<T>, reply: (value?: T, error?: WireError) => void) {
+  try {
+    reply(await produce());
+  } catch (error) {
+    reply(undefined, toWire(error));
+  }
 }
 
 export function toWire(error: unknown): WireError {

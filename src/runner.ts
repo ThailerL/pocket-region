@@ -1,10 +1,13 @@
-import * as entry from './browser.ts';
-import type { BrowserRegionOptions } from './browser.ts';
+import { createRegion, type BrowserRegionOptions } from './browser.ts';
 import { jspiSupported, type Region } from './core.ts';
-import { AsyncFunction, IMPORT, rewriteImports } from './runner/imports.ts';
-import { withRegion } from './with-region.ts';
+import { fromImportMap } from './import-map.ts';
+import { answer, pendingCalls, toWire } from './region/protocol.ts';
+import { portFor } from './region/proxy.ts';
+import { rewriteImports } from './runner/imports.ts';
+import type { FromRunnerWorker, RunnerStream, ToRunnerWorker } from './runner/protocol.ts';
+import { importing, onFailure, siblingUrl, startWorker } from './start-worker.ts';
 
-export type RunnerStream = 'log' | 'error';
+export type { RunnerStream } from './runner/protocol.ts';
 export type RunnerOutput = { stream: RunnerStream; text: string };
 export type RunnerStatus = 'booting' | 'resetting' | 'running';
 export type RunResult = { ok: true; durationMs: number } | { ok: false; durationMs: number; error: unknown };
@@ -15,10 +18,12 @@ export type RunOptions = {
 };
 
 export type RunnerOptions = {
-  // The runner's own region, for snippets that don't create one
-  region?: BrowserRegionOptions;
-  // What a snippet's import of anything but pocket-region resolves to
-  load?: (specifier: string) => Promise<object>;
+  // A region to run against, left as it is
+  region?: Region;
+  // Without one, options for the region the runner boots and empties between runs
+  boot?: BrowserRegionOptions;
+  // Where a snippet's import of anything but pocket-region loads from
+  resolve?: (specifier: string) => string;
   reset?: RunnerReset;
 };
 
@@ -31,60 +36,76 @@ export type Runner = {
   stop(): Promise<void>;
 };
 
-const fromJsDelivr = (specifier: string): Promise<object> =>
-  import(/* @vite-ignore */ `https://cdn.jsdelivr.net/npm/${specifier}/+esm`);
-
-function format(value: unknown) {
-  if (typeof value === 'string') return value;
-  if (value instanceof Error) return `${value.name}: ${value.message}`;
-  try {
-    return JSON.stringify(value, null, 2) ?? String(value);
-  } catch {
-    return String(value);
-  }
-}
-
+const fromCdn = (specifier: string) => fromImportMap(specifier, () => `https://cdn.jsdelivr.net/npm/${specifier}/+esm`);
 const isPocketRegion = (specifier: string) => specifier.split('/')[0] === 'pocket-region';
 
 export function createRunner(options: RunnerOptions = {}): Runner {
-  const load = options.load ?? fromJsDelivr;
-  let region: Promise<Region> | undefined;
+  const resolve = options.resolve ?? fromCdn;
+  let own: Promise<Region> | undefined;
+  let worker: Worker | undefined;
+  let current: RunOptions | undefined;
+  const runs = pendingCalls<void>();
   // One snippet at a time: they share the region
   let queue: Promise<unknown> = Promise.resolve();
 
   async function regionFor(onStatus: (status: RunnerStatus) => void) {
-    if (!region) {
+    if (options.region) return options.region;
+    if (!own) {
       onStatus('booting');
-      region = entry.createRegion(options.region);
-      region.catch(() => (region = undefined));
+      own = createRegion(options.boot);
+      own.catch(() => (own = undefined));
     } else if (options.reset !== 'never') {
       onStatus('resetting');
-      await (await region).reset();
+      await (await own).reset();
     }
-    return region;
+    return own;
   }
 
-  async function execute(code: string, { onOutput, onStatus = () => {} }: RunOptions) {
-    const { code: body, specifiers } = rewriteImports(code);
-    const refused = specifiers.find((specifier) => isPocketRegion(specifier) && specifier !== 'pocket-region/browser');
-    if (refused) throw new Error(`${refused} can't run in a page: import pocket-region/browser`);
+  // Ends whatever is running, however stuck; the next run starts a fresh worker
+  const abort = (error: Error) => {
+    worker?.terminate();
+    worker = undefined;
+    runs.fail(error);
+  };
 
-    // Fetched alongside a first boot rather than after it; a failure surfaces at the import
-    const loading = new Map(specifiers.filter((specifier) => !isPocketRegion(specifier)).map((specifier) => [specifier, load(specifier)]));
-    for (const pending of loading.values()) pending.catch(() => {});
-    const shared = specifiers.some(isPocketRegion) ? undefined : await regionFor(onStatus);
-
-    const importer = async (specifier: string) => {
-      if (specifier === 'pocket-region/browser') return entry;
-      const module = await loading.get(specifier)!;
-      return shared ? withRegion(module, shared) : module;
+  function workerFor() {
+    if (worker) return worker;
+    const started = startWorker(importing(siblingUrl('runner/worker')), 'pocket-region-runner');
+    onFailure(started, "the runner's worker", abort);
+    started.onmessage = ({ data }: MessageEvent<FromRunnerWorker>) => {
+      switch (data.type) {
+        case 'resolve':
+          answer(async () => resolve(data.specifier), (url, error) => started.postMessage({ type: 'resolved', id: data.id, url, error }));
+          return;
+        case 'output':
+          return current?.onOutput?.({ stream: data.stream, text: data.text });
+        case 'done':
+          return runs.settle(data.id);
+        case 'failed':
+          return runs.settle(data.id, undefined, data.error);
+      }
     };
-    const write = (stream: RunnerStream) => (...args: unknown[]) =>
-      onOutput?.({ stream, text: args.map(format).join(' ') });
-    const console = { log: write('log'), info: write('log'), debug: write('log'), warn: write('error'), error: write('error') };
+    return (worker = started);
+  }
 
+  async function execute(code: string, runOptions: RunOptions) {
+    const { onStatus = () => {} } = runOptions;
+    const { code: body, specifiers } = rewriteImports(code);
+    const refused = specifiers.find(isPocketRegion);
+    if (refused) throw new Error(`a snippet can't import ${refused}: it runs against the runner's region`);
+    const target = workerFor();
+    current = runOptions;
+
+    // Posted first, so the snippet's imports load while the region boots
+    const finished = runs.start((id) => target.postMessage({ type: 'run', id, body, specifiers } satisfies ToRunnerWorker));
+    try {
+      const port = portFor(await regionFor(onStatus));
+      target.postMessage({ type: 'region', port } satisfies ToRunnerWorker, [port]);
+    } catch (error) {
+      target.postMessage({ type: 'region', error: toWire(error) } satisfies ToRunnerWorker);
+    }
     onStatus('running');
-    await new AsyncFunction(IMPORT, 'console', body)(importer, console);
+    await finished;
   }
 
   return {
@@ -102,10 +123,12 @@ export function createRunner(options: RunnerOptions = {}): Runner {
       queue = result;
       return result;
     },
+    // The runner's own region goes with the worker, and a later run boots again
     async stop() {
+      abort(new Error('stopped'));
       await queue;
-      const booted = region;
-      region = undefined;
+      const booted = own;
+      own = undefined;
       await (await booted?.catch(() => undefined))?.stop();
     },
   };

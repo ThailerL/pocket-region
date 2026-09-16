@@ -2,7 +2,7 @@ import { lockedLoad, requireJspi, type Region, type RegionSettings, type StateSt
 import type { BootAssets } from './region/protocol.ts';
 import { regionOver } from './region/proxy.ts';
 import { importing, siblingUrl, startWorker } from './start-worker.ts';
-import { PACKAGE_VERSION } from './version.generated.ts';
+import { defaultAssetsBaseUrl } from './import-map.ts';
 
 export type {
   Dispatch,
@@ -98,15 +98,6 @@ export function indexedDbStore(name: string): StateStore {
       }
     },
   };
-}
-
-// import.meta.resolve throws when the page's import map doesn't map the specifier
-function defaultAssetsBaseUrl() {
-  try {
-    return import.meta.resolve('pocket-region/vendor/');
-  } catch {
-    return `https://cdn.jsdelivr.net/npm/pocket-region@${PACKAGE_VERSION}/vendor/`;
-  }
 }
 
 // The region runs in a worker; the assets are located here, since a worker has no import map

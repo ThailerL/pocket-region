@@ -20,3 +20,13 @@ export function startWorker(source: string, name?: string) {
 }
 
 export const importing = (url: string) => `import ${JSON.stringify(url)};`;
+
+type Failing = { onerror?: ((event: ErrorEvent) => void) | null };
+
+// A module that fails to load never answers; the error event is the only sign
+export function onFailure(worker: Failing, what: string, fail: (error: Error) => void) {
+  worker.onerror = (event) => {
+    event.preventDefault();
+    fail(new Error(`${what} failed: ${event.message}`));
+  };
+}
