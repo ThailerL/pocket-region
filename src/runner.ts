@@ -7,7 +7,8 @@ import type { FromRunnerWorker, RunnerOutput, ToRunnerWorker } from './runner/pr
 import { importing, onFailure, siblingUrl, startWorker } from './start-worker.ts';
 
 export type { ConsoleMethod, RunnerOutput } from './runner/protocol.ts';
-export type RunnerStatus = 'booting' | 'resetting' | 'setting-up' | 'running';
+export type RunnerPhase = 'booting' | 'resetting' | 'setting-up' | 'running';
+export type RunnerStatus = { phase: RunnerPhase };
 export type RunResult = { ok: true; durationMs: number } | { ok: false; durationMs: number; error: unknown };
 
 export type RunOptions = {
@@ -51,14 +52,14 @@ export function createRunner(options: RunnerOptions = {}): Runner {
   function regionFor(onStatus: (status: RunnerStatus) => void): { region: Promise<Region>; fresh: boolean } {
     if (options.region) return { region: Promise.resolve(options.region), fresh: false };
     if (!own) {
-      onStatus('booting');
+      onStatus({ phase: 'booting' });
       own = createRegion(options.boot);
       own.catch(() => (own = undefined));
       return { region: own, fresh: true };
     }
     // A setup that failed partway leaves the region to be emptied before it runs again
     if (options.reset !== 'never' || prepared !== own) {
-      onStatus('resetting');
+      onStatus({ phase: 'resetting' });
       const emptied = own.then(async (region) => {
         await region.reset();
         return region;
@@ -112,9 +113,9 @@ export function createRunner(options: RunnerOptions = {}): Runner {
     return { id, finished };
   }
 
-  async function complete(target: Worker, run: ReturnType<typeof post>, region: Promise<Region>, status: RunnerStatus, onStatus: (status: RunnerStatus) => void) {
+  async function complete(target: Worker, run: ReturnType<typeof post>, region: Promise<Region>, phase: RunnerPhase, onStatus: (status: RunnerStatus) => void) {
     // A run that fails first still waits for its region, so the next run never overlaps a boot or reset
-    const [outcome] = await Promise.allSettled([run.finished, attach(target, run.id, region).then(() => onStatus(status))]);
+    const [outcome] = await Promise.allSettled([run.finished, attach(target, run.id, region).then(() => onStatus({ phase }))]);
     if (outcome.status === 'rejected') throw outcome.reason;
   }
 

@@ -118,7 +118,7 @@ type RunResult = { ok: true; durationMs: number } | { ok: false; durationMs: num
     call's arguments themselves, copied to the page, so you can render them your own way. A `Set`,
     `Map`, `Date`, or typed array arrives as one. An argument that can't be copied, such as an
     object with a method, arrives as its text. The page's own `console` isn't touched.
-  - `onStatus(status)` gets `'booting'` before the region's first boot, which downloads about
+  - `onStatus({ phase })` gets `'booting'` before the region's first boot, which downloads about
     15 MB on a first visit, `'resetting'` before a later run that empties the region, `'setting-up'` while
     [`setup`](#setting-up-a-region) runs, then `'running'`.
 - **`stop()`** ends the current run at once, however stuck it is: its result is `ok: false` with

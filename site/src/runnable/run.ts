@@ -38,7 +38,7 @@ export function connect(root: HTMLElement) {
   root.querySelector('.reset')!.addEventListener('click', () => editor?.reset());
 }
 
-const STATUS: Record<Browser.RunnerStatus, string> = {
+const STATUS: Record<Browser.RunnerPhase, string> = {
   booting: 'Booting a region… a first visit downloads about 15 MB',
   resetting: 'Emptying the region…',
   'setting-up': 'Setting up the region…',
@@ -56,7 +56,7 @@ async function run(code: string, { state, output }: Panel) {
     }
     const result = await current.run(code, {
       onOutput: ({ text }) => output.append(`${text}\n`),
-      onStatus: (status) => (state.textContent = STATUS[status]),
+      onStatus: ({ phase }) => (state.textContent = STATUS[phase]),
     });
     if (result.ok) {
       state.textContent = `Done in ${Math.round(result.durationMs)} ms`;

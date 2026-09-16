@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it, vi } from 'vitest';
-import { createRunner, type RunnerOutput, type RunnerStatus } from './browser.ts';
+import { createRunner, type RunnerOutput, type RunnerPhase } from './browser.ts';
 import { s3 } from './test-clients.ts';
 import { assetsBaseUrl, createTestRegion, indexURL } from './test-region.browser.ts';
 
@@ -18,8 +18,8 @@ afterAll(() => runner.stop());
 
 async function run(code: string, target = runner) {
   const output: RunnerOutput[] = [];
-  const statuses: RunnerStatus[] = [];
-  const result = await target.run(code, { onOutput: (line) => output.push(line), onStatus: (status) => statuses.push(status) });
+  const statuses: RunnerPhase[] = [];
+  const result = await target.run(code, { onOutput: (line) => output.push(line), onStatus: ({ phase }) => statuses.push(phase) });
   return { result, output, statuses, text: output.map((line) => line.text) };
 }
 
