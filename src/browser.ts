@@ -123,11 +123,17 @@ export async function createRegion(options: BrowserRegionOptions = {}): Promise<
     throw new Error(`no region assets at ${base.href} (meta.json answered ${response.status})`);
   }
   const manifest: VendorManifest = await response.json();
+  const indexURL = new URL(
+    options.indexURL ?? `https://cdn.jsdelivr.net/npm/pyodide@${manifest.pyodideVersion}/`,
+    globalThis.location?.href,
+  ).href;
+  // The runtime comes from where its wasm does, so a page needs no import map entry for it
+  const { loadPyodide }: typeof import('pyodide') = await import(/* @vite-ignore */ `${indexURL}pyodide.mjs`);
 
   return bootRegion(
     {
-      indexURL:
-        options.indexURL ?? `https://cdn.jsdelivr.net/npm/pyodide@${manifest.pyodideVersion}/`,
+      loadPyodide,
+      indexURL,
       stdLib: new URL(manifest.stdlib, base).href,
       wheels: manifest.wheels.map((file) => new URL(file, base).href),
     },

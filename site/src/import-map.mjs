@@ -4,7 +4,6 @@ export const importMap = {
   imports: {
     'pocket-region/browser': '/region/dist/browser.js',
     'pocket-region/vendor/': '/region/vendor/',
-    pyodide: 'https://cdn.jsdelivr.net/npm/pyodide@314.0.6/pyodide.mjs',
     '@aws-sdk/client-s3': 'https://cdn.jsdelivr.net/npm/@aws-sdk/client-s3@3.1131.0/+esm',
     '@aws-sdk/client-sqs': 'https://cdn.jsdelivr.net/npm/@aws-sdk/client-sqs@3.1131.0/+esm',
     '@aws-sdk/client-sns': 'https://cdn.jsdelivr.net/npm/@aws-sdk/client-sns@3.1131.0/+esm',

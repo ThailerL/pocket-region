@@ -1,4 +1,4 @@
-import { loadPyodide, type PyodideAPI } from 'pyodide';
+import type { loadPyodide, PyodideAPI } from 'pyodide';
 import { PYTHON_SOURCES } from './python.generated.ts';
 
 export type OutputStream = 'stdout' | 'stderr';
@@ -33,6 +33,8 @@ export type Region = Dispatcher & {
 // Where each asset is, already resolved: file paths from Node, URLs from a page. Pyodide
 // takes either, so nothing below knows which host it is running on
 export type RegionAssets = {
+  // The runtime itself: Node's dependency, or a page's fetch from indexURL, so no bare import here
+  loadPyodide: typeof loadPyodide;
   indexURL?: string;
   packageCacheDir?: string;
   stdLib: string;
@@ -243,7 +245,7 @@ async function startRegion(
   const { store } = settings;
   const onOutput = settings.onOutput ?? (() => {});
 
-  const py = await loadPyodide({
+  const py = await assets.loadPyodide({
     packageCacheDir: assets.packageCacheDir,
     indexURL: assets.indexURL,
     // The vendored copy carries bytecode; the runtime's own would compile on every boot

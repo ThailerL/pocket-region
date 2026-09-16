@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadPyodide } from 'pyodide';
 import {
   bootRegion,
   hostObserver,
@@ -133,6 +134,7 @@ export function createRegion(options: NodeRegionOptions = {}): Promise<Region> {
 
   return bootRegion(
     {
+      loadPyodide,
       indexURL: options.indexURL,
       packageCacheDir,
       stdLib: path.join(packageCacheDir, manifest.stdlib),
