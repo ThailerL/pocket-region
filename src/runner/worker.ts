@@ -61,32 +61,33 @@ async function run(code: string, regionPort: Promise<MessagePort>) {
 
   // The imports load while the region boots on the page
   const loading = new Map(specifiers.map((specifier) => [specifier, load(specifier)]));
-  let attached: MessagePort | undefined;
-  const [, region] = await Promise.all([polyfillDom(), regionPort.then((port) => regionOver((attached = port), {}))]);
+  const [, region] = await Promise.all([polyfillDom(), regionPort.then((port) => regionOver(port, {}))]);
 
   const importer = async (specifier: string) => withRegion(await loading.get(specifier)!, region);
-  try {
-    await new AsyncFunction(IMPORT, 'console', body)(importer, console);
-  } finally {
-    attached?.close();
-  }
+  await new AsyncFunction(IMPORT, 'console', body)(importer, console);
 }
 
-let deliverRegion: { resolve: (port: MessagePort) => void; reject: (error: Error) => void } | undefined;
+const regions = new Map<number, { resolve: (port: MessagePort) => void; reject: (error: Error) => void }>();
 
 port.onmessage = async ({ data }) => {
   switch (data.type) {
     case 'resolved':
       return resolutions.settle(data.id, data.url, data.error);
-    case 'region':
-      return data.port ? deliverRegion?.resolve(data.port) : deliverRegion?.reject(fromWire(data.error!));
+    case 'region': {
+      const waiting = regions.get(data.id)!;
+      regions.delete(data.id);
+      return data.port ? waiting.resolve(data.port) : waiting.reject(fromWire(data.error!));
+    }
     case 'run': {
-      const regionPort = new Promise<MessagePort>((resolve, reject) => (deliverRegion = { resolve, reject }));
+      const regionPort = new Promise<MessagePort>((resolve, reject) => regions.set(data.id, { resolve, reject }));
       try {
         await run(data.code, regionPort);
         post({ type: 'done', id: data.id });
       } catch (error) {
         post({ type: 'failed', id: data.id, error: toWire(error) });
+      } finally {
+        // Also a run that failed before its port arrived
+        regionPort.then((port) => port.close(), () => {});
       }
       return;
     }

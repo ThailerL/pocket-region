@@ -39,28 +39,33 @@ const fromCdn = (specifier: string) => fromImportMap(specifier, () => `https://c
 export function createRunner(options: RunnerOptions = {}): Runner {
   const resolve = options.resolve ?? fromCdn;
   let own: Promise<Region> | undefined;
-  // Whether setup has succeeded since the runner's region last booted or reset
-  let setUp = false;
+  // The runner's region, once it was last emptied and set up in full
+  let prepared: Promise<Region> | undefined;
   let worker: Worker | undefined;
   let current: RunOptions | undefined;
   const runs = pendingCalls<void>();
   // One snippet at a time: they share the region
   let queue: Promise<unknown> = Promise.resolve();
 
-  async function regionFor(onStatus: (status: RunnerStatus) => void) {
-    if (options.region) return options.region;
+  // Fresh when just booted or emptied, and so due for setup
+  function regionFor(onStatus: (status: RunnerStatus) => void): { region: Promise<Region>; fresh: boolean } {
+    if (options.region) return { region: Promise.resolve(options.region), fresh: false };
     if (!own) {
       onStatus('booting');
-      setUp = false;
       own = createRegion(options.boot);
       own.catch(() => (own = undefined));
-    } else if (options.reset !== 'never' || (options.setup !== undefined && !setUp)) {
-      // A setup that failed partway leaves the region to be emptied before it runs again
-      onStatus('resetting');
-      setUp = false;
-      await (await own).reset();
+      return { region: own, fresh: true };
     }
-    return own;
+    // A setup that failed partway leaves the region to be emptied before it runs again
+    if (options.reset !== 'never' || prepared !== own) {
+      onStatus('resetting');
+      const emptied = own.then(async (region) => {
+        await region.reset();
+        return region;
+      });
+      return { region: emptied, fresh: true };
+    }
+    return { region: own, fresh: false };
   }
 
   // Ends whatever is running, however stuck; the next run starts a fresh worker
@@ -90,42 +95,54 @@ export function createRunner(options: RunnerOptions = {}): Runner {
     return (worker = started);
   }
 
-  async function attach(target: Worker, region: Promise<Region>) {
+  async function attach(target: Worker, id: number, region: Promise<Region>) {
     try {
       const port = portFor(await region);
-      target.postMessage({ type: 'region', port } satisfies ToRunnerWorker, [port]);
+      target.postMessage({ type: 'region', id, port } satisfies ToRunnerWorker, [port]);
     } catch (error) {
-      target.postMessage({ type: 'region', error: toWire(error) } satisfies ToRunnerWorker);
+      target.postMessage({ type: 'region', id, error: toWire(error) } satisfies ToRunnerWorker);
     }
   }
 
-  async function runIn(target: Worker, code: string, region: Promise<Region>, announce: () => void) {
-    // Posted first, so the code's imports load while the region boots
-    const finished = runs.start((id) => target.postMessage({ type: 'run', id, code } satisfies ToRunnerWorker));
-    // A run that fails first still waits for the region, so the next run's port isn't taken by this one
-    const [outcome] = await Promise.allSettled([finished, attach(target, region).then(announce)]);
+  // The code's imports start loading now; it runs once attach sends its region
+  function post(target: Worker, code: string) {
+    let id = 0;
+    const finished = runs.start((started) => target.postMessage({ type: 'run', id: (id = started), code } satisfies ToRunnerWorker));
+    finished.catch(() => {});
+    return { id, finished };
+  }
+
+  async function complete(target: Worker, run: ReturnType<typeof post>, region: Promise<Region>, status: RunnerStatus, onStatus: (status: RunnerStatus) => void) {
+    // A run that fails first still waits for its region, so the next run never overlaps a boot or reset
+    const [outcome] = await Promise.allSettled([run.finished, attach(target, run.id, region).then(() => onStatus(status))]);
     if (outcome.status === 'rejected') throw outcome.reason;
   }
 
   async function execute(code: string, runOptions: RunOptions) {
     const { onStatus = () => {} } = runOptions;
     const target = workerFor();
-    const region = regionFor(onStatus);
+    const { region, fresh } = regionFor(onStatus);
+    const booted = own;
+    const setup = fresh && options.setup !== undefined ? post(target, options.setup) : undefined;
+    const snippet = post(target, code);
 
-    if (options.setup !== undefined && !setUp) {
+    if (setup) {
       const held: RunnerOutput[] = [];
       current = { onOutput: (output) => held.push(output) };
       try {
-        await runIn(target, options.setup, region, () => onStatus('setting-up'));
+        await complete(target, setup, region, 'setting-up', onStatus);
       } catch (error) {
         held.forEach((output) => runOptions.onOutput?.(output));
-        throw new Error(`setup failed: ${(error as Error).message}`, { cause: error });
+        const failure = new Error(`setup failed: ${(error as Error).message}`, { cause: error });
+        await attach(target, snippet.id, Promise.reject(failure));
+        await snippet.finished.catch(() => {});
+        throw failure;
       }
-      setUp = true;
     }
+    if (fresh) prepared = booted;
 
     current = runOptions;
-    await runIn(target, code, region, () => onStatus('running'));
+    await complete(target, snippet, region, 'running', onStatus);
   }
 
   return {

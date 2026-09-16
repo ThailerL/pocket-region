@@ -53,23 +53,26 @@ console.log(Buckets.map((bucket) => bucket.Name));`);
   }, 60_000);
 
   const createBucket = (name: string) =>
-    `import { S3Client, CreateBucketCommand } from '@aws-sdk/client-s3';\nawait new S3Client({}).send(new CreateBucketCommand({ Bucket: ${name} }));`;
+    `import { S3Client, CreateBucketCommand } from '@aws-sdk/client-s3';\nawait new S3Client({}).send(new CreateBucketCommand({ Bucket: '${name}' }));`;
 
   it('runs setup on the region whenever it is empty, and hides what setup prints', async () => {
-    const prepared = createRunner({ boot, resolve, setup: `console.log('preparing');\n${createBucket("'fixture'")}` });
+    const prepared = createRunner({ boot, resolve, setup: `console.log('preparing');\n${createBucket('fixture')}` });
     const first = await run(listBuckets, prepared);
     expect(first.statuses).toEqual(['booting', 'setting-up', 'running']);
     expect(first.text).toEqual(['[\n  "fixture"\n]']);
-    await run(createBucket("'extra'"), prepared);
+    await run(createBucket('extra'), prepared);
     const third = await run(listBuckets, prepared);
     expect(third.statuses).toEqual(['resetting', 'setting-up', 'running']);
     expect(third.text).toEqual(['[\n  "fixture"\n]']);
+    const refused = await run("import { createRegion } from 'pocket-region/browser';", prepared);
+    expect(refused.result).toMatchObject({ ok: false, error: expect.objectContaining({ message: expect.stringContaining("can't import") }) });
+    expect((await run(listBuckets, prepared)).text).toEqual(['[\n  "fixture"\n]']);
     await prepared.stop();
   }, 60_000);
 
   it("runs setup once when reset is 'never'", async () => {
-    const prepared = createRunner({ boot, resolve, reset: 'never', setup: createBucket("'fixture'") });
-    await run(createBucket("'extra'"), prepared);
+    const prepared = createRunner({ boot, resolve, reset: 'never', setup: createBucket('fixture') });
+    await run(createBucket('extra'), prepared);
     const second = await run(listBuckets, prepared);
     expect(second.statuses).toEqual(['running']);
     expect(second.text).toEqual(['[\n  "extra",\n  "fixture"\n]']);
@@ -77,8 +80,9 @@ console.log(Buckets.map((bucket) => bucket.Name));`);
   }, 60_000);
 
   it('shows what a failed setup printed, and empties the region before setup runs again', async () => {
-    const setup = `globalThis.attempt = (globalThis.attempt ?? 0) + 1;
-${createBucket('`try-${globalThis.attempt}`')}
+    const setup = `import { S3Client, CreateBucketCommand } from '@aws-sdk/client-s3';
+globalThis.attempt = (globalThis.attempt ?? 0) + 1;
+await new S3Client({}).send(new CreateBucketCommand({ Bucket: \`try-\${globalThis.attempt}\` }));
 console.log('attempt', globalThis.attempt);
 if (globalThis.attempt === 1) throw new Error('no table');`;
     const prepared = createRunner({ boot, resolve, reset: 'never', setup });
