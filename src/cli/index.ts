@@ -8,6 +8,7 @@ export type { Modules, SdkModule } from './dispatch.ts';
 export type { Files } from './s3-verbs.ts';
 
 export type CliResult = { stdout: string; stderr: string; code: number };
+export type AwsCli = (command: string | string[]) => Promise<CliResult>;
 
 export type AwsCliOptions = {
   // A non-zero exit becomes a rejection, which is what a test wants and a terminal does not
@@ -36,10 +37,10 @@ export class CliError extends Error {
 
 // The AWS CLI over a region: `const aws = awsCli(region); await aws('s3api list-buckets')`.
 // Output is returned rather than printed, since a page renders it and a test asserts on it
-export function awsCli(region: Dispatcher, options: AwsCliOptions = {}) {
+export function awsCli(region: Dispatcher, options: AwsCliOptions = {}): AwsCli {
   const services = servicesFor(region, options);
   const usage = usageText(options.modules && serviceNames(options.modules), options.note);
-  return async function aws(command: string | string[]): Promise<CliResult> {
+  return async function aws(command) {
     const argv = typeof command === 'string' ? tokenize(command) : command;
     let result: CliResult;
     try {

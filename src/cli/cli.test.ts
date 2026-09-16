@@ -9,7 +9,7 @@ import { decoded, unresolvable } from './dispatch.ts';
 import { UsageError } from './errors.ts';
 import { paramsFor } from './params.ts';
 import { membersOf } from './schema.ts';
-import { awsCli, CliError } from './index.ts';
+import { awsCli, CliError, type AwsCli } from './index.ts';
 import { formatBuckets, formatObjects, parseS3Uri } from './s3-verbs.ts';
 
 describe('pascalCase', () => {
@@ -426,7 +426,7 @@ describe('caller-supplied clients', () => {
 
 describe('awsCli against a region', () => {
   let region: Region;
-  let aws: ReturnType<typeof awsCli>;
+  let aws: AwsCli;
 
   beforeAll(async () => {
     region = await createRegion();

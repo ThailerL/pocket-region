@@ -9,8 +9,9 @@ import Runnable from '../../../components/Runnable.astro';
 import { awsCli } from 'pocket-region/node';     // Node
 import { awsCli } from 'pocket-region/browser';  // a page
 
-awsCli(region: Dispatcher, options?: AwsCliOptions):
-  (command: string | string[]) => Promise<CliResult>
+awsCli(region: Dispatcher, options?: AwsCliOptions): AwsCli
+
+type AwsCli = (command: string | string[]) => Promise<CliResult>;
 ```
 
 `awsCli` returns a function that runs one `aws` command. The output is returned rather than
