@@ -1,5 +1,5 @@
 // The messages between a page's region proxy and its worker
-import type { LambdaEnvironment, LambdaEvent, OutputStream, RegionRequest, RegionResponse, StateFiles } from '../core.ts';
+import type { LambdaEvent, LambdaOutput, RegionOutput, RegionRequest, RegionResponse, StateFiles } from '../core.ts';
 
 export type WireError = { name: string; message: string; stack?: string };
 
@@ -23,8 +23,8 @@ export type FromRegionWorker =
   | { type: 'boot-failed'; error: WireError }
   | { type: 'done'; id: number; response?: RegionResponse }
   | { type: 'failed'; id: number; error: WireError }
-  | { type: 'output'; line: string; stream: OutputStream }
-  | { type: 'lambda-output'; line: string; source: LambdaEnvironment }
+  | { type: 'output'; output: RegionOutput }
+  | { type: 'lambda-output'; output: LambdaOutput }
   | { type: 'lambda-event'; event: LambdaEvent }
   | { type: 'store'; id: number; method: StoreMethod; files?: StateFiles };
 

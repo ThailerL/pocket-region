@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createRegion, indexedDbStore, type StateFiles, type StateStore } from './browser.ts';
+import { createRegion, indexedDbStore, type RegionOutput, type StateFiles, type StateStore } from './browser.ts';
 import { s3 } from './test-clients.ts';
 import { assetsBaseUrl, createTestRegion } from './test-region.browser.ts';
 import { describeStore } from './test-stores.ts';
@@ -39,14 +39,14 @@ describe('a region in a worker', () => {
 
   it("saves through a store on the page, and reports the emulator's output as it boots", async () => {
     const replaced: StateFiles[] = [];
-    const lines: string[] = [];
+    const lines: RegionOutput[] = [];
     const store: StateStore = { load: async () => new Map(), replace: async (files) => void replaced.push(files) };
-    const region = await createTestRegion({ store, onOutput: (line) => lines.push(line) });
+    const region = await createTestRegion({ store, onOutput: (output) => lines.push(output) });
     await s3('PUT', '/bridged', undefined, region);
     await region.save();
     expect(replaced).toHaveLength(1);
     expect(replaced[0]!.size).toBeGreaterThan(0);
-    expect(lines.length).toBeGreaterThan(0);
+    expect(lines).toContainEqual({ text: expect.any(String), stream: 'stdout' });
     await region.stop();
   }, 60_000);
 });

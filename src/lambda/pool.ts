@@ -166,8 +166,8 @@ export class FunctionPool {
     this.settings.lambda.onEvent?.(event);
   }
 
-  private tell(env: Environment, line: string) {
-    this.settings.lambda.onOutput?.(line, { functionName: env.functionName, environment: env.id });
+  private tell(env: Environment, text: string) {
+    this.settings.lambda.onOutput?.({ text, functionName: env.functionName, environment: env.id });
   }
 
   private owned(env: Environment, requestId: string) {

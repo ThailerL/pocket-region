@@ -98,9 +98,9 @@ export function regionOver(port: RegionPort, settings: RegionSettings, assets?: 
         case 'failed':
           return calls.settle(data.id, undefined, data.error);
         case 'output':
-          return onOutput?.(data.line, data.stream);
+          return onOutput?.(data.output);
         case 'lambda-output':
-          return lambda?.onOutput?.(data.line, data.source);
+          return lambda?.onOutput?.(data.output);
         case 'lambda-event':
           return lambda?.onEvent?.(data.event);
         case 'store':

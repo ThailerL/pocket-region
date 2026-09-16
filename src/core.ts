@@ -2,6 +2,7 @@ import type { loadPyodide, PyodideAPI } from 'pyodide';
 import { PYTHON_SOURCES } from './python.generated.ts';
 
 export type OutputStream = 'stdout' | 'stderr';
+export type RegionOutput = { text: string; stream: OutputStream };
 
 export type RegionRequest = {
   method: string;
@@ -143,6 +144,7 @@ export type LambdaExecutor = {
 
 // An environment is named by its log stream
 export type LambdaEnvironment = { functionName: string; environment: string };
+export type LambdaOutput = LambdaEnvironment & { text: string };
 
 export type LambdaEvent = LambdaEnvironment &
   (
@@ -152,7 +154,7 @@ export type LambdaEvent = LambdaEnvironment &
   );
 
 export type LambdaObserver = {
-  onOutput?(line: string, source: LambdaEnvironment): void;
+  onOutput?(output: LambdaOutput): void;
   onEvent?(event: LambdaEvent): void;
 };
 
@@ -165,7 +167,7 @@ export type VendorManifest = { wheels: string[]; stdlib: string; pyodideVersion:
 export type RegionSettings = {
   // The port minted queue URLs name, since the AWS SDK dials the URL it is given
   port?: number;
-  onOutput?: (line: string, stream: OutputStream) => void;
+  onOutput?: (output: RegionOutput) => void;
   lambda?: LambdaObserver;
   // In memory only when absent
   store?: StateStore;
@@ -188,9 +190,9 @@ export const collectGarbage = (region: Region) => garbageCollectors.get(region)!
 // A host reports to the observer alone; the region's untagged onOutput hears each line too
 export const hostObserver = ({ onOutput, lambda }: RegionSettings): LambdaObserver => ({
   onEvent: (event) => lambda?.onEvent?.(event),
-  onOutput: (line, source) => {
-    lambda?.onOutput?.(line, source);
-    onOutput?.(line, 'stdout');
+  onOutput: (output) => {
+    lambda?.onOutput?.(output);
+    onOutput?.({ text: output.text, stream: 'stdout' });
   },
 });
 
@@ -256,12 +258,11 @@ async function startRegion(
     stdLibURL: assets.stdLib,
   });
   // Before any Python runs: print throws EBADF without these
-  py.setStdout({ batched: (line) => onOutput(line, 'stdout') });
-  py.setStderr({ batched: (line) => onOutput(line, 'stderr') });
-  await py.loadPackage(assets.wheels, {
-    messageCallback: (line) => onOutput(line, 'stdout'),
-    errorCallback: (line) => onOutput(line, 'stderr'),
-  });
+  const stdout = (text: string) => onOutput({ text, stream: 'stdout' });
+  const stderr = (text: string) => onOutput({ text, stream: 'stderr' });
+  py.setStdout({ batched: stdout });
+  py.setStderr({ batched: stderr });
+  await py.loadPackage(assets.wheels, { messageCallback: stdout, errorCallback: stderr });
 
   const port = settings.port ?? DEFAULT_PORT;
   // Bound once the sources have run; nothing dispatches before boot resolves

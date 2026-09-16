@@ -16,7 +16,7 @@ import { CreateStreamCommand, DescribeStreamCommand, KinesisClient, PutRecordCom
 import { HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
 import { GetQueueAttributesCommand, SendMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { LambdaEvent, LambdaObserver, Region } from '../core.ts';
+import type { LambdaEvent, LambdaObserver, LambdaOutput, Region } from '../core.ts';
 import { requestHandler } from '../request-handler.ts';
 import { authorization, bodies, clientConfig, createQueue, zipOf } from '../test-clients.ts';
 import { createTestRegion, regionPort } from '../test-region.ts';
@@ -56,10 +56,10 @@ let s3: S3Client;
 let sqs: SQSClient;
 
 const observed: LambdaEvent[] = [];
-const tagged: { line: string; functionName: string; environment: string }[] = [];
+const tagged: LambdaOutput[] = [];
 const observer: LambdaObserver = {
   onEvent: (event) => observed.push(event),
-  onOutput: (line, source) => tagged.push({ line, ...source }),
+  onOutput: (output) => tagged.push(output),
 };
 const eventsOf = (functionName: string) => observed.filter((event) => event.functionName === functionName);
 
@@ -159,7 +159,7 @@ describe('Lambda', () => {
     expect(coldDone).toMatchObject({ kind: 'invocation', phase: 'completed', environment, failed: false, initMs: expect.any(Number) });
     expect(warm).toMatchObject({ kind: 'invocation', phase: 'started', environment, coldStart: false });
     expect(warmDone).toMatchObject({ kind: 'invocation', phase: 'completed', environment, failed: false, initMs: undefined });
-    expect(tagged).toContainEqual({ line: expect.stringContaining('handling {"first":1}'), functionName: 'observed', environment });
+    expect(tagged).toContainEqual({ text: expect.stringContaining('handling {"first":1}'), functionName: 'observed', environment });
   }, 30_000);
 
   it('gives a function fresh environments after its configuration changes', async () => {

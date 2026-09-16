@@ -23,9 +23,9 @@ async function boot({ type: _, assets, port: regionPort, hasStore, listening }: 
   const settings: RegionSettings = {
     port: regionPort,
     store: hasStore ? bridgedStore : undefined,
-    onOutput: listening.output ? (line, stream) => post({ type: 'output', line, stream }) : undefined,
+    onOutput: listening.output ? (output) => post({ type: 'output', output }) : undefined,
     lambda: {
-      onOutput: listening.lambdaOutput ? (line, source) => post({ type: 'lambda-output', line, source }) : undefined,
+      onOutput: listening.lambdaOutput ? (output) => post({ type: 'lambda-output', output }) : undefined,
       onEvent: listening.lambdaEvents ? (event) => post({ type: 'lambda-event', event }) : undefined,
     },
   };

@@ -103,16 +103,17 @@ Pass `lambda` to `createRegion`:
 
 ```ts
 type LambdaEnvironment = { functionName: string; environment: string };
+type LambdaOutput = LambdaEnvironment & { text: string };
 
 type LambdaObserver = {
-  onOutput?(line: string, source: LambdaEnvironment): void;
+  onOutput?(output: LambdaOutput): void;
   onEvent?(event: LambdaEvent): void;
 };
 ```
 
 `environment` names one execution environment by its log stream. `onOutput` gets every line a
-handler writes, including the `START`, `END`, and `REPORT` lines. The region's own `onOutput` hears
-the same lines, untagged. `onEvent` gets a `LambdaEvent`: the `LambdaEnvironment` fields, plus one of:
+handler writes as `text`, including the `START`, `END`, and `REPORT` lines. The region's own
+`onOutput` hears the same lines as `stdout`, without the function's name. `onEvent` gets a `LambdaEvent`: the `LambdaEnvironment` fields, plus one of:
 
 | `kind` | `phase` | Fields |
 | --- | --- | --- |
@@ -126,7 +127,7 @@ CloudWatch.
 ```js
 const region = await createRegion({
   lambda: {
-    onOutput: (line, { functionName, environment }) => console.log(`[${functionName} ${environment}] ${line}`),
+    onOutput: ({ functionName, environment, text }) => console.log(`[${functionName} ${environment}] ${text}`),
     onEvent: (event) => { if (event.kind === 'invocation' && event.phase === 'completed' && event.failed) console.warn(`${event.functionName} failed`); },
   },
 });

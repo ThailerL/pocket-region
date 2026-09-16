@@ -101,7 +101,7 @@ describe('createRegion', () => {
     );
 
     const output: string[] = [];
-    const second = await createRegion({ store: directoryStore(stateDir), onOutput: (line) => output.push(line) });
+    const second = await createRegion({ store: directoryStore(stateDir), onOutput: ({ text }) => output.push(text) });
     expect(output.join('\n')).toContain('sqs.json was not loaded');
     const lookup = await jsonApi(
       'sqs',
