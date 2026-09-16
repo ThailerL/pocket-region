@@ -72,9 +72,12 @@ type RunResult = { ok: true; durationMs: number } | { ok: false; durationMs: num
   the code without a Run button there.
 - **`run(code)`** resolves once the code finishes, and never rejects: what the code throws comes
   back as `error`. Runs wait for each other, since they share the region.
-  - `onOutput({ stream, text })` gets each `console` call, `log`, `info`, and `debug` as `'log'`,
-    and `warn` and `error` as `'error'`, along with any rejected promise nothing handles. Values
-    that aren't strings print as JSON. The page's own `console` isn't touched.
+  - `onOutput({ stream, text, values })` gets each `console` call, `log`, `info`, and `debug` as
+    `'log'`, and `warn` and `error` as `'error'`, along with any rejected promise nothing handles.
+    `text` is the call as one string, with values that aren't strings as JSON. `values` holds the
+    call's arguments themselves, copied to the page, so you can render them your own way. A `Set`,
+    `Map`, `Date`, or typed array arrives as one. An argument that can't be copied, such as an
+    object with a method, arrives as its text. The page's own `console` isn't touched.
   - `onStatus(status)` gets `'booting'` before the region's first boot, which downloads about
     15 MB on a first visit, `'resetting'` before a later run that empties the region, then `'running'`.
 - **`stop()`** ends the current run at once, however stuck it is: its result is `ok: false` with

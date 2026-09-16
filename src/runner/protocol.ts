@@ -11,6 +11,6 @@ export type ToRunnerWorker =
 
 export type FromRunnerWorker =
   | { type: 'resolve'; id: number; specifier: string }
-  | { type: 'output'; stream: RunnerStream; text: string }
+  | { type: 'output'; stream: RunnerStream; text: string; values: unknown[] }
   | { type: 'done'; id: number }
   | { type: 'failed'; id: number; error: WireError };

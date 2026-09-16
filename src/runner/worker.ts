@@ -41,7 +41,23 @@ function format(value: unknown) {
   }
 }
 
-const write = (stream: RunnerStream) => (...args: unknown[]) => post({ type: 'output', stream, text: args.map(format).join(' ') });
+function copyable(value: unknown) {
+  try {
+    structuredClone(value);
+    return value;
+  } catch {
+    return format(value);
+  }
+}
+
+const write = (stream: RunnerStream) => (...args: unknown[]) => {
+  const text = args.map(format).join(' ');
+  try {
+    post({ type: 'output', stream, text, values: args });
+  } catch {
+    post({ type: 'output', stream, text, values: args.map(copyable) });
+  }
+};
 const console = { log: write('log'), info: write('log'), debug: write('log'), warn: write('error'), error: write('error') };
 
 // A library that drops a rejection can leave the run hanging, so the reader at least sees why

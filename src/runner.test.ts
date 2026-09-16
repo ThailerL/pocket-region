@@ -56,12 +56,20 @@ console.log(Buckets.map((bucket) => bucket.Name));`);
     const log = vi.spyOn(console, 'log');
     const { output } = await run("console.log('out', 1, { a: 1 });\nconsole.warn('careful');\nconsole.error(new TypeError('bad'));");
     expect(output).toEqual([
-      { stream: 'log', text: 'out 1 {\n  "a": 1\n}' },
-      { stream: 'error', text: 'careful' },
-      { stream: 'error', text: 'TypeError: bad' },
+      { stream: 'log', text: 'out 1 {\n  "a": 1\n}', values: ['out', 1, { a: 1 }] },
+      { stream: 'error', text: 'careful', values: ['careful'] },
+      { stream: 'error', text: 'TypeError: bad', values: [new TypeError('bad')] },
     ]);
     expect(log).not.toHaveBeenCalled();
     log.mockRestore();
+  });
+
+  it('passes what a snippet logs as values, and the text of what it cannot copy', async () => {
+    const { output } = await run(
+      "console.log(new Set(['a']), new Date(0), new Uint8Array([1, 2]), 10n, { items: new Map([['k', 1]]) });\nconsole.log({ send() {} }, 'next');",
+    );
+    expect(output[0].values).toEqual([new Set(['a']), new Date(0), new Uint8Array([1, 2]), 10n, { items: new Map([['k', 1]]) }]);
+    expect(output[1].values).toEqual(['{}', 'next']);
   });
 
   it('reports what a snippet throws, with the output before it', async () => {
@@ -93,8 +101,8 @@ console.log(\`\${out.Buckets!.length} \${Unit.Bucket}s\` satisfies string);`);
     const { result, output } = await run("Promise.reject('Region is missing');\nPromise.reject(new RangeError('lost'));\nawait new Promise((resolve) => setTimeout(resolve, 50));");
     expect(result.ok).toBe(true);
     expect(output).toEqual([
-      { stream: 'error', text: 'Uncaught (in promise) Region is missing' },
-      { stream: 'error', text: 'Uncaught (in promise) RangeError: lost' },
+      { stream: 'error', text: 'Uncaught (in promise) Region is missing', values: ['Uncaught (in promise)', 'Region is missing'] },
+      { stream: 'error', text: 'Uncaught (in promise) RangeError: lost', values: ['Uncaught (in promise)', new RangeError('lost')] },
     ]);
   });
 
