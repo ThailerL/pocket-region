@@ -77,6 +77,15 @@ console.log(Buckets.map((bucket) => bucket.Name));`);
     expect(exported.result).toMatchObject({ ok: false, error: expect.objectContaining({ message: expect.stringContaining('cannot export') }) });
   });
 
+  it('prints a rejection nothing handles', async () => {
+    const { result, output } = await run("Promise.reject('Region is missing');\nPromise.reject(new RangeError('lost'));\nawait new Promise((resolve) => setTimeout(resolve, 50));");
+    expect(result.ok).toBe(true);
+    expect(output).toEqual([
+      { stream: 'error', text: 'Uncaught (in promise) Region is missing' },
+      { stream: 'error', text: 'Uncaught (in promise) RangeError: lost' },
+    ]);
+  });
+
   it('runs one snippet at a time', async () => {
     const order: string[] = [];
     const slow = runner.run("await new Promise((resolve) => setTimeout(resolve, 50));\nconsole.log('slow');", { onOutput: ({ text }) => order.push(text) });

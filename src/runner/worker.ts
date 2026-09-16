@@ -43,6 +43,9 @@ function format(value: unknown) {
 const write = (stream: RunnerStream) => (...args: unknown[]) => post({ type: 'output', stream, text: args.map(format).join(' ') });
 const console = { log: write('log'), info: write('log'), debug: write('log'), warn: write('error'), error: write('error') };
 
+// A library that drops a rejection can leave the run hanging, so the reader at least sees why
+self.addEventListener('unhandledrejection', (event) => console.error('Uncaught (in promise)', event.reason));
+
 async function run(body: string, specifiers: string[], regionPort: Promise<MessagePort>) {
   // The imports load while the region boots on the page
   const loading = new Map(specifiers.map((specifier) => [specifier, load(specifier)]));
