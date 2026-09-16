@@ -1,12 +1,11 @@
 import type { CodeEntry, Dispatch, LambdaExecutor } from '../core.ts';
+import { startWorker } from '../start-worker.ts';
 import { createLambdaHost, type RegionHostOptions } from './host.ts';
 import type { LambdaError, SandboxFactory } from './pool.ts';
 import type { FetchRequest, FromWorker, ToWorker } from './worker-protocol.ts';
 import { WORKER_RUNTIME_SOURCE } from './worker-runtime.generated.ts';
 
 type Package = CodeEntry[];
-
-let runtimeUrl: string | undefined;
 
 // Lambda's handler setting: a file path without its extension, a dot, an export name. The
 // file is one ES module, since a module loaded from memory cannot import its neighbours
@@ -31,8 +30,7 @@ function workerSandbox(files: Package, dispatch: Dispatch): SandboxFactory {
       return { invoke() {}, kill() {} };
     }
 
-    runtimeUrl ??= URL.createObjectURL(new Blob([WORKER_RUNTIME_SOURCE], { type: 'text/javascript' }));
-    const worker = new Worker(runtimeUrl, { type: 'module', name: env.AWS_LAMBDA_LOG_STREAM_NAME });
+    const worker = startWorker(WORKER_RUNTIME_SOURCE, env.AWS_LAMBDA_LOG_STREAM_NAME);
     const post = (message: ToWorker) => worker.postMessage(message);
     let gone = false;
 

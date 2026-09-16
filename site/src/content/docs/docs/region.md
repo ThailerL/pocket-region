@@ -18,6 +18,14 @@ In Node, a region boots in about 500 ms, and later ones in the same process in a
 In a browser, a first visit downloads about 15 MB, and after that a region boots in about half a
 second.
 
+In a page, the region runs in a Web Worker, so nothing the emulator does stalls the page, and the
+`Region` you get back posts each call to it. The worker starts from a `blob:` URL that imports
+`dist/region/worker.js` from wherever `dist/browser.js` was loaded. That needs three things from a
+page: a Content Security Policy, if it has one, that allows `worker-src blob:` and the package's
+origin in `script-src`; a server that answers `.wasm` files as `application/wasm`; and, from a
+CDN, the plain `dist/browser.js` file rather than a bundled build such as jsDelivr's `+esm`, which
+moves the file's URL.
+
 ## Options
 
 | Option | Type | Entry | Default | |

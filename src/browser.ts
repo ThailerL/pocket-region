@@ -1,13 +1,7 @@
-import {
-  bootRegion,
-  hostObserver,
-  lockedLoad,
-  type Region,
-  type RegionSettings,
-  type StateStore,
-  type VendorManifest,
-} from './core.ts';
-import { createWorkerHost } from './lambda/worker-host.ts';
+import { lockedLoad, requireJspi, type Region, type RegionSettings, type StateStore, type VendorManifest } from './core.ts';
+import type { BootAssets } from './region/protocol.ts';
+import { regionOver } from './region/proxy.ts';
+import { importing, siblingUrl, startWorker } from './start-worker.ts';
 import { PACKAGE_VERSION } from './version.generated.ts';
 
 export type {
@@ -115,7 +109,15 @@ function defaultAssetsBaseUrl() {
   }
 }
 
+// The region runs in a worker; the assets are located here, since a worker has no import map
 export async function createRegion(options: BrowserRegionOptions = {}): Promise<Region> {
+  requireJspi();
+  // Loads while meta.json is fetched
+  const worker = startWorker(importing(siblingUrl('region/worker')), 'pocket-region');
+  return regionOver(worker, options, locateAssets(options));
+}
+
+async function locateAssets(options: BrowserRegionOptions): Promise<BootAssets> {
   const assetsBaseUrl = options.assetsBaseUrl ?? defaultAssetsBaseUrl();
   const base = new URL(assetsBaseUrl.endsWith('/') ? assetsBaseUrl : `${assetsBaseUrl}/`, globalThis.location?.href);
   const response = await fetch(new URL('meta.json', base));
@@ -123,21 +125,12 @@ export async function createRegion(options: BrowserRegionOptions = {}): Promise<
     throw new Error(`no region assets at ${base.href} (meta.json answered ${response.status})`);
   }
   const manifest: VendorManifest = await response.json();
-  const indexURL = new URL(
-    options.indexURL ?? `https://cdn.jsdelivr.net/npm/pyodide@${manifest.pyodideVersion}/`,
-    globalThis.location?.href,
-  ).href;
-  // The runtime comes from where its wasm does, so a page needs no import map entry for it
-  const { loadPyodide }: typeof import('pyodide') = await import(/* @vite-ignore */ `${indexURL}pyodide.mjs`);
-
-  return bootRegion(
-    {
-      loadPyodide,
-      indexURL,
-      stdLib: new URL(manifest.stdlib, base).href,
-      wheels: manifest.wheels.map((file) => new URL(file, base).href),
-    },
-    options,
-    (region) => createWorkerHost({ ...region, lambda: hostObserver(options) }),
-  );
+  return {
+    indexURL: new URL(
+      options.indexURL ?? `https://cdn.jsdelivr.net/npm/pyodide@${manifest.pyodideVersion}/`,
+      globalThis.location?.href,
+    ).href,
+    stdLib: new URL(manifest.stdlib, base).href,
+    wheels: manifest.wheels.map((file) => new URL(file, base).href),
+  };
 }

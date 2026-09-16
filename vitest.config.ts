@@ -1,6 +1,15 @@
 import { fileURLToPath } from 'node:url';
 import { playwright } from '@vitest/browser-playwright';
-import { defineConfig } from 'vitest/config';
+import { defineConfig, type Plugin } from 'vitest/config';
+
+// Vitest routes import() through a page-only global; workers started Vite's way get this stub, ours don't
+const workerRunnerStub = (): Plugin => ({
+  name: 'pocket-region:worker-runner-stub',
+  transform(code, id) {
+    if (!/\/src\/region\/worker\.ts$/.test(id)) return;
+    return { code: `globalThis.__vitest_browser_runner__ ??= { wrapDynamicImport: (f) => f() };\n${code}`, map: null };
+  },
+});
 
 export default defineConfig({
   test: {
@@ -13,6 +22,7 @@ export default defineConfig({
         },
       },
       {
+        plugins: [workerRunnerStub()],
         resolve: {
           alias: [
             {

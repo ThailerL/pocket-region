@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createRegion, indexedDbStore } from './browser.ts';
+import { createRegion, indexedDbStore, type StateFiles, type StateStore } from './browser.ts';
 import { s3 } from './test-clients.ts';
 import { assetsBaseUrl, createTestRegion } from './test-region.browser.ts';
 import { describeStore } from './test-stores.ts';
@@ -24,6 +24,31 @@ describe('createRegion in a page', () => {
       fetch.mockRestore();
     }
   });
+});
+
+describe('a region in a worker', () => {
+  it('reaches a store on the page, and keeps the name of what the store throws', async () => {
+    const store: StateStore = {
+      load: async () => {
+        throw new RangeError('nope');
+      },
+      replace: async () => {},
+    };
+    await expect(createTestRegion({ store })).rejects.toMatchObject({ name: 'RangeError', message: 'nope' });
+  });
+
+  it("saves through a store on the page, and reports the emulator's output as it boots", async () => {
+    const replaced: StateFiles[] = [];
+    const lines: string[] = [];
+    const store: StateStore = { load: async () => new Map(), replace: async (files) => void replaced.push(files) };
+    const region = await createTestRegion({ store, onOutput: (line) => lines.push(line) });
+    await s3('PUT', '/bridged', undefined, region);
+    await region.save();
+    expect(replaced).toHaveLength(1);
+    expect(replaced[0]!.size).toBeGreaterThan(0);
+    expect(lines.length).toBeGreaterThan(0);
+    await region.stop();
+  }, 60_000);
 });
 
 describeStore('indexedDbStore', async (name) => indexedDbStore(`pocket-region-${name}-${crypto.randomUUID()}`));
