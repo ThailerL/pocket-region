@@ -27,7 +27,7 @@ const modules: Record<string, () => Promise<unknown>> = {
 const examples = readdirSync(DOCS)
   .filter((file) => file.endsWith('.mdx'))
   .flatMap((file) =>
-    Array.from(readFileSync(new URL(file, DOCS), 'utf8').matchAll(/<Runnable>\s*```js\n([\s\S]*?)```\s*<\/Runnable>/g), (match, index) => ({
+    Array.from(readFileSync(new URL(file, DOCS), 'utf8').matchAll(/<Runnable(?: page)?>\s*```js\n([\s\S]*?)```\s*<\/Runnable>/g), (match, index) => ({
       name: `${file} example ${index + 1}`,
       code: match[1]!,
     })),

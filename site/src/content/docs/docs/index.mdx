@@ -41,12 +41,22 @@ nothing is dialed. In Node they can instead come from the environment or `~/.aws
 
 ## In a page
 
-A page loads the emulator over HTTP, from jsDelivr by default. To serve the package's `vendor/`
-directory from your own site instead, map `pocket-region/vendor/` to it in the page's import map,
-or pass `assetsBaseUrl`. A page has no environment, so pass the client its region and credentials.
-This site maps its own `vendor/`, and examples with a Run button run as shown, in this tab.
+A page loads the package from a URL. Map it in the page's import map, from jsDelivr or from a copy
+of `dist/` on your own site, and import it by name. Pin a version in a page you ship, such as
+`pocket-region@1.2.3`, which this example leaves out to always name the latest:
 
-<Runnable>
+```html
+<script type="importmap">
+  { "imports": { "pocket-region/browser": "https://cdn.jsdelivr.net/npm/pocket-region/dist/browser.js" } }
+</script>
+```
+
+The page loads the emulator over HTTP, from jsDelivr by default. To serve the package's `vendor/`
+directory from your own site instead, map `pocket-region/vendor/` to it in the same import map,
+or pass `assetsBaseUrl`. A page has no environment, so pass the client its region and credentials.
+This site maps its own `dist/` and `vendor/`, and examples with a Run button run as shown, in this tab.
+
+<Runnable page>
 
 ```js
 import { createRegion, requestHandler } from 'pocket-region/browser';
