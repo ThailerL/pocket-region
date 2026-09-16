@@ -33,7 +33,7 @@ export type {
 export type NodeRegionOptions = RegionSettings & {
   // Only for hosts where Pyodide cannot locate itself from import.meta.url
   indexURL?: string;
-  packageCacheDir?: string;
+  assetsDir?: string;
 };
 
 const LOCK_FILE = '.lock';
@@ -126,19 +126,16 @@ export function directoryStore(dir: string): StateStore {
 }
 
 export function createRegion(options: NodeRegionOptions = {}): Promise<Region> {
-  const packageCacheDir =
-    options.packageCacheDir ?? fileURLToPath(new URL('../vendor', import.meta.url));
-  const manifest: VendorManifest = JSON.parse(
-    fs.readFileSync(path.join(packageCacheDir, 'meta.json'), 'utf8'),
-  );
+  const assetsDir = options.assetsDir ?? fileURLToPath(new URL('../vendor', import.meta.url));
+  const manifest: VendorManifest = JSON.parse(fs.readFileSync(path.join(assetsDir, 'meta.json'), 'utf8'));
 
   return bootRegion(
     {
       loadPyodide,
       indexURL: options.indexURL,
-      packageCacheDir,
-      stdLib: path.join(packageCacheDir, manifest.stdlib),
-      wheels: manifest.wheels.map((file) => path.join(packageCacheDir, file)),
+      packageCacheDir: assetsDir,
+      stdLib: path.join(assetsDir, manifest.stdlib),
+      wheels: manifest.wheels.map((file) => path.join(assetsDir, file)),
     },
     options,
     (region) => createProcessHost({ ...region, lambda: hostObserver(options) }),

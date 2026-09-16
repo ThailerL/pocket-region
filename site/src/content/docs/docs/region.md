@@ -35,8 +35,8 @@ moves the file's URL.
 | `onOutput` | `(line: string, stream: 'stdout' \| 'stderr') => void` | both | none | Every line the emulator prints while loading and running, and every line a Lambda handler writes, as `stdout`. |
 | `lambda` | `LambdaObserver` | both | none | Hooks for watching functions run. See [Lambda](/docs/lambda/#watching-functions-run). |
 | `assetsBaseUrl` | `string` | browser | jsDelivr | The URL `vendor/` is served from: `meta.json`, the wheels, and the Python standard library. By default, what the page's import map maps `pocket-region/vendor/` to, and without a mapping, jsDelivr's copy of the installed release. Set either to serve `vendor/` from your own site, for example under a Content Security Policy. A relative URL resolves against the page. |
+| `assetsDir` | `string` | Node | the package's `vendor/` | The directory holding `meta.json`, the wheels, and the Python standard library: Node's counterpart of `assetsBaseUrl`. |
 | `indexURL` | `string` | both | see text | Where Pyodide's own runtime loads from. A page defaults to jsDelivr, at the Pyodide version the package was built with. In Node, set it only where Pyodide can't find itself from `import.meta.url`. |
-| `packageCacheDir` | `string` | Node | the package's `vendor/` | The directory holding the wheels and `meta.json`. |
 
 `port`, `store`, `onOutput`, and `lambda` are exported from both entries as `RegionSettings`, for
 code that builds options for either.
