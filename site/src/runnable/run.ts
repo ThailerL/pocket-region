@@ -41,6 +41,7 @@ export function connect(root: HTMLElement) {
 const STATUS: Record<Browser.RunnerStatus, string> = {
   booting: 'Booting a region… a first visit downloads about 15 MB',
   resetting: 'Emptying the region…',
+  'setting-up': 'Setting up the region…',
   running: 'Running…',
 };
 

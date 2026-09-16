@@ -52,9 +52,47 @@ A snippet can't import `pocket-region` itself: it is AWS code, and the region is
 | Option | Type | Default | |
 | --- | --- | --- | --- |
 | `resolve` | `(specifier: string) => string` | the import map, else jsDelivr | The URL a snippet's import loads from, for anything but `pocket-region`. By default, what the page's import map says, and for a specifier it doesn't map, jsDelivr's `+esm` build of the latest version, such as `https://cdn.jsdelivr.net/npm/@aws-sdk/client-s3/+esm`. Map or resolve `@xmldom/xmldom` too: the SDK's browser build parses XML with the DOM, which the snippet's worker lacks, so the runner loads that package for it. |
-| `region` | `Region` | none | A region from `createRegion` to run every snippet against. The runner never empties or stops it, so your page can set it up before a run and look at it after. |
+| `region` | `Region` | none | A region from `createRegion` to run every snippet against. The runner never empties or stops it, so your page can set it up before a run and look at it after. It can't be combined with `boot`, `reset`, or `setup`. See [Setting up a region](#setting-up-a-region). |
 | `boot` | `BrowserRegionOptions` | none | Without `region`, options for the region the runner boots itself. See [The region](/docs/region/#options). |
 | `reset` | `'each-run' \| 'never'` | `'each-run'` | When the runner empties the region it booted itself. `'each-run'` empties it before every run after the first, so each example starts clean. `'never'` keeps what earlier runs made, for examples that build on each other, such as a tutorial whose second step writes to the bucket its first step created. |
+| `setup` | `string` | none | Code, in the same form as a snippet, that runs on the runner's own region whenever it's empty: after a boot, and after each reset. See [Setting up a region](#setting-up-a-region). |
+
+## Setting up a region
+
+When every example needs the same resources, such as the table a library's quick start writes to,
+give the runner `setup`. It runs before a snippet whenever the region is empty, so with the
+default `reset` each run starts from the same state, and with `'never'` it runs once.
+
+```js
+const runner = createRunner({
+  setup: `
+    import { DynamoDBClient, CreateTableCommand } from '@aws-sdk/client-dynamodb';
+    await new DynamoDBClient({}).send(new CreateTableCommand({ TableName: 'books', ... }));
+  `,
+});
+```
+
+What setup prints is hidden unless it fails. A failed setup fails the run with an error starting
+`setup failed:`, the snippet doesn't run, and the next run empties the region and tries setup
+again, even with `reset: 'never'`.
+
+With a region you pass in, setup is your page's code. Empty the region and set it up before each
+run, once the previous run has finished, since a reset during a run empties the region under it:
+
+```js
+const region = await createRegion();
+const runner = createRunner({ region });
+let previous = Promise.resolve();
+
+function runExample(code) {
+  previous = previous.then(async () => {
+    await region.reset();
+    await createBooksTable(region); // your own setup, with requestHandler(region)
+    return runner.run(code, { onOutput });
+  });
+  return previous;
+}
+```
 
 ## The runner
 
@@ -81,7 +119,8 @@ type RunResult = { ok: true; durationMs: number } | { ok: false; durationMs: num
     `Map`, `Date`, or typed array arrives as one. An argument that can't be copied, such as an
     object with a method, arrives as its text. The page's own `console` isn't touched.
   - `onStatus(status)` gets `'booting'` before the region's first boot, which downloads about
-    15 MB on a first visit, `'resetting'` before a later run that empties the region, then `'running'`.
+    15 MB on a first visit, `'resetting'` before a later run that empties the region, `'setting-up'` while
+    [`setup`](#setting-up-a-region) runs, then `'running'`.
 - **`stop()`** ends the current run at once, however stuck it is: its result is `ok: false` with
   an error saying `stopped`. The region the runner booted itself stops with it, and a later run
   boots again. A region you passed in is left alone.

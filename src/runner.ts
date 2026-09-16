@@ -7,7 +7,7 @@ import type { FromRunnerWorker, RunnerOutput, ToRunnerWorker } from './runner/pr
 import { importing, onFailure, siblingUrl, startWorker } from './start-worker.ts';
 
 export type { ConsoleMethod, RunnerOutput } from './runner/protocol.ts';
-export type RunnerStatus = 'booting' | 'resetting' | 'running';
+export type RunnerStatus = 'booting' | 'resetting' | 'setting-up' | 'running';
 export type RunResult = { ok: true; durationMs: number } | { ok: false; durationMs: number; error: unknown };
 
 export type RunOptions = {
@@ -16,14 +16,14 @@ export type RunOptions = {
 };
 
 export type RunnerOptions = {
-  // A region to run against, left as it is
-  region?: Region;
-  // Without one, options for the region the runner boots and empties between runs
-  boot?: BrowserRegionOptions;
   // Where a snippet's import of anything but pocket-region loads from
   resolve?: (specifier: string) => string;
-  reset?: RunnerReset;
-};
+} & (
+  // A region to run against, left as it is
+  | { region: Region; boot?: never; reset?: never; setup?: never }
+  // Options for the region the runner boots and empties between runs, and code run on it while empty
+  | { region?: never; boot?: BrowserRegionOptions; reset?: RunnerReset; setup?: string }
+);
 
 // 'never' keeps what earlier runs made, for examples that build on each other
 export type RunnerReset = 'each-run' | 'never';
@@ -39,6 +39,8 @@ const fromCdn = (specifier: string) => fromImportMap(specifier, () => `https://c
 export function createRunner(options: RunnerOptions = {}): Runner {
   const resolve = options.resolve ?? fromCdn;
   let own: Promise<Region> | undefined;
+  // Whether setup has succeeded since the runner's region last booted or reset
+  let setUp = false;
   let worker: Worker | undefined;
   let current: RunOptions | undefined;
   const runs = pendingCalls<void>();
@@ -49,10 +51,13 @@ export function createRunner(options: RunnerOptions = {}): Runner {
     if (options.region) return options.region;
     if (!own) {
       onStatus('booting');
+      setUp = false;
       own = createRegion(options.boot);
       own.catch(() => (own = undefined));
-    } else if (options.reset !== 'never') {
+    } else if (options.reset !== 'never' || (options.setup !== undefined && !setUp)) {
+      // A setup that failed partway leaves the region to be emptied before it runs again
       onStatus('resetting');
+      setUp = false;
       await (await own).reset();
     }
     return own;
@@ -85,26 +90,42 @@ export function createRunner(options: RunnerOptions = {}): Runner {
     return (worker = started);
   }
 
-  async function attach(target: Worker, onStatus: (status: RunnerStatus) => void) {
+  async function attach(target: Worker, region: Promise<Region>) {
     try {
-      const port = portFor(await regionFor(onStatus));
+      const port = portFor(await region);
       target.postMessage({ type: 'region', port } satisfies ToRunnerWorker, [port]);
     } catch (error) {
       target.postMessage({ type: 'region', error: toWire(error) } satisfies ToRunnerWorker);
     }
-    onStatus('running');
+  }
+
+  async function runIn(target: Worker, code: string, region: Promise<Region>, announce: () => void) {
+    // Posted first, so the code's imports load while the region boots
+    const finished = runs.start((id) => target.postMessage({ type: 'run', id, code } satisfies ToRunnerWorker));
+    // A run that fails first still waits for the region, so the next run's port isn't taken by this one
+    const [outcome] = await Promise.allSettled([finished, attach(target, region).then(announce)]);
+    if (outcome.status === 'rejected') throw outcome.reason;
   }
 
   async function execute(code: string, runOptions: RunOptions) {
     const { onStatus = () => {} } = runOptions;
     const target = workerFor();
-    current = runOptions;
+    const region = regionFor(onStatus);
 
-    // Posted first, so the snippet's imports load while the region boots
-    const finished = runs.start((id) => target.postMessage({ type: 'run', id, code } satisfies ToRunnerWorker));
-    // A run that fails first still waits for the region, so the next run's port isn't taken by this one
-    const [outcome] = await Promise.allSettled([finished, attach(target, onStatus)]);
-    if (outcome.status === 'rejected') throw outcome.reason;
+    if (options.setup !== undefined && !setUp) {
+      const held: RunnerOutput[] = [];
+      current = { onOutput: (output) => held.push(output) };
+      try {
+        await runIn(target, options.setup, region, () => onStatus('setting-up'));
+      } catch (error) {
+        held.forEach((output) => runOptions.onOutput?.(output));
+        throw new Error(`setup failed: ${(error as Error).message}`, { cause: error });
+      }
+      setUp = true;
+    }
+
+    current = runOptions;
+    await runIn(target, code, region, () => onStatus('running'));
   }
 
   return {
