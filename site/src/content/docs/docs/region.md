@@ -14,7 +14,7 @@ import { createRegion } from 'pocket-region/browser';  // a page
 createRegion(options?: BrowserRegionOptions): Promise<Region>
 ```
 
-In Node, a region boots in about 500 ms, and later ones in the same process in about 350 ms.
+In Node, a region boots in about half a second.
 In a browser, a first visit downloads about 15 MB, and after that a region boots in about half a
 second.
 

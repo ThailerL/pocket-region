@@ -27,8 +27,7 @@ It needs WebAssembly JSPI: Node 24.20 or later, or a browser that supports it.
 The AWS APIs come from [MiniStack](https://ministack.org/), a Python AWS emulator that runs
 here under [Pyodide](https://github.com/pyodide/pyodide).
 
-In Node, the first region is ready in half a second, and each one after it in the same process
-takes about 350 ms. Resetting a region to empty takes under a millisecond for a typical test, so
+In Node, a region is ready in about half a second. Resetting a region to empty takes under a millisecond for a typical test, so
 every test can start clean without booting a new one.
 
 Read the docs at [pocket-region.dev/docs](https://pocket-region.dev/docs/), where you can edit
