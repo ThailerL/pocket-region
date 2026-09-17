@@ -40,9 +40,11 @@ says so.
 
 ## Examples
 
-The examples are written as they would be for AWS, with clients built from `{}`. Clicking Run
-executes an example here in your browser tab, against a region that's emptied before each run, as
-[Examples in your docs](/docs/runner/) describes. To run one in your own code, give its clients a region first:
+The examples are written as they would be for AWS, in JavaScript with clients built from `{}` and
+in Python with boto3. The JavaScript and Python buttons under an example switch every example on
+this page, and the choice is remembered. Clicking Run executes an example here in your browser
+tab, against a region that's emptied before each run, as [Examples in your docs](/docs/runner/)
+describes. To run a JavaScript one in your own code, give its clients a region first:
 
 ```js
 import { createRegion, requestHandler } from 'pocket-region/browser';
@@ -57,7 +59,8 @@ const config = {
 ```
 
 Without that, a client built from `{}` outside this page reaches AWS with whatever credentials
-your environment has.
+your environment has. A Python example reaches a region from your own code over HTTP: [serve](/docs/clients/#serve)
+one from Node and build each client with its URL as `endpoint_url`.
 
 ### S3
 
@@ -93,6 +96,32 @@ for (const record of Messages.flatMap((message) => JSON.parse(message.Body).Reco
 }
 ```
 
+```py
+import json
+
+import boto3
+
+s3 = boto3.client('s3')
+sqs = boto3.client('sqs')
+
+queue_url = sqs.create_queue(QueueName='uploads')['QueueUrl']
+queue_arn = sqs.get_queue_attributes(QueueUrl=queue_url, AttributeNames=['QueueArn'])['Attributes']['QueueArn']
+
+s3.create_bucket(Bucket='photos')
+s3.put_bucket_notification_configuration(
+    Bucket='photos',
+    NotificationConfiguration={
+        'QueueConfigurations': [{'QueueArn': queue_arn, 'Events': ['s3:ObjectCreated:*']}],
+    },
+)
+s3.put_object(Bucket='photos', Key='cat.jpg', Body=b'meow')
+
+messages = sqs.receive_message(QueueUrl=queue_url, MaxNumberOfMessages=10).get('Messages', [])
+for message in messages:
+    for record in json.loads(message['Body']).get('Records', []):
+        print(record['eventName'], record['s3']['bucket']['name'], record['s3']['object']['key'])
+```
+
 </Runnable>
 
 ### SQS
@@ -113,6 +142,19 @@ await sqs.send(new SendMessageCommand({ QueueUrl, MessageBody: 'order 42' }));
 
 const { Messages = [] } = await sqs.send(new ReceiveMessageCommand({ QueueUrl, MaxNumberOfMessages: 10 }));
 console.log(Messages.map((message) => message.Body));
+```
+
+```py
+import boto3
+
+sqs = boto3.client('sqs')
+
+queue_url = sqs.create_queue(QueueName='orders')['QueueUrl']
+sqs.send_message(QueueUrl=queue_url, MessageBody='order 41')
+sqs.send_message(QueueUrl=queue_url, MessageBody='order 42')
+
+messages = sqs.receive_message(QueueUrl=queue_url, MaxNumberOfMessages=10).get('Messages', [])
+print([message['Body'] for message in messages])
 ```
 
 </Runnable>
@@ -144,6 +186,25 @@ const { Items } = await dynamodb.send(new ScanCommand({ TableName: 'sessions' })
 console.log('sessions:', Items.map((item) => item.id.S).sort());
 ```
 
+```py
+import boto3
+
+dynamodb = boto3.client('dynamodb')
+
+dynamodb.create_table(
+    TableName='sessions',
+    KeySchema=[{'AttributeName': 'id', 'KeyType': 'HASH'}],
+    AttributeDefinitions=[{'AttributeName': 'id', 'AttributeType': 'S'}],
+    BillingMode='PAY_PER_REQUEST',
+)
+
+dynamodb.put_item(TableName='sessions', Item={'id': {'S': 'alice'}})
+dynamodb.put_item(TableName='sessions', Item={'id': {'S': 'bob'}})
+
+items = dynamodb.scan(TableName='sessions')['Items']
+print('sessions:', sorted(item['id']['S'] for item in items))
+```
+
 </Runnable>
 
 ### SNS
@@ -170,6 +231,26 @@ await sns.send(new PublishCommand({ TopicArn, Subject: 'placed', Message: 'order
 const { Messages = [] } = await sqs.send(new ReceiveMessageCommand({ QueueUrl }));
 const { Subject, Message } = JSON.parse(Messages[0].Body);
 console.log(Subject, Message);
+```
+
+```py
+import json
+
+import boto3
+
+sns = boto3.client('sns')
+sqs = boto3.client('sqs')
+
+queue_url = sqs.create_queue(QueueName='order-emails')['QueueUrl']
+queue_arn = sqs.get_queue_attributes(QueueUrl=queue_url, AttributeNames=['QueueArn'])['Attributes']['QueueArn']
+
+topic_arn = sns.create_topic(Name='orders')['TopicArn']
+sns.subscribe(TopicArn=topic_arn, Protocol='sqs', Endpoint=queue_arn)
+sns.publish(TopicArn=topic_arn, Subject='placed', Message='order 42')
+
+messages = sqs.receive_message(QueueUrl=queue_url)['Messages']
+notification = json.loads(messages[0]['Body'])
+print(notification['Subject'], notification['Message'])
 ```
 
 </Runnable>
@@ -207,6 +288,33 @@ const { Messages = [] } = await sqs.send(new ReceiveMessageCommand({ QueueUrl, M
 console.log(Messages.map((message) => JSON.parse(message.Body).detail));
 ```
 
+```py
+import json
+
+import boto3
+
+events = boto3.client('events')
+sqs = boto3.client('sqs')
+
+queue_url = sqs.create_queue(QueueName='large-orders')['QueueUrl']
+queue_arn = sqs.get_queue_attributes(QueueUrl=queue_url, AttributeNames=['QueueArn'])['Attributes']['QueueArn']
+
+events.put_rule(
+    Name='large-orders',
+    EventPattern=json.dumps({'source': ['shop'], 'detail': {'total': [{'numeric': ['>', 100]}]}}),
+)
+events.put_targets(Rule='large-orders', Targets=[{'Id': 'queue', 'Arn': queue_arn}])
+events.put_events(
+    Entries=[
+        {'Source': 'shop', 'DetailType': 'order placed', 'Detail': json.dumps({'total': 20})},
+        {'Source': 'shop', 'DetailType': 'order placed', 'Detail': json.dumps({'total': 250})},
+    ]
+)
+
+messages = sqs.receive_message(QueueUrl=queue_url, MaxNumberOfMessages=10).get('Messages', [])
+print([json.loads(message['Body'])['detail'] for message in messages])
+```
+
 </Runnable>
 
 ### Secrets Manager
@@ -226,6 +334,18 @@ await secrets.send(new PutSecretValueCommand({ SecretId: 'db-password', SecretSt
 
 const { SecretString, VersionStages } = await secrets.send(new GetSecretValueCommand({ SecretId: 'db-password' }));
 console.log(SecretString, VersionStages);
+```
+
+```py
+import boto3
+
+secrets = boto3.client('secretsmanager')
+
+secrets.create_secret(Name='db-password', SecretString='first')
+secrets.put_secret_value(SecretId='db-password', SecretString='second')
+
+secret = secrets.get_secret_value(SecretId='db-password')
+print(secret['SecretString'], secret['VersionStages'])
 ```
 
 </Runnable>
@@ -249,6 +369,18 @@ const { Parameters } = await ssm.send(new GetParametersByPathCommand({ Path: '/a
 console.log(Parameters.map(({ Name, Value }) => `${Name} = ${Value}`));
 ```
 
+```py
+import boto3
+
+ssm = boto3.client('ssm')
+
+ssm.put_parameter(Name='/app/api-key', Value='abc', Type='SecureString')
+ssm.put_parameter(Name='/app/region', Value='us-east-1', Type='String')
+
+parameters = ssm.get_parameters_by_path(Path='/app', WithDecryption=True)['Parameters']
+print([f"{parameter['Name']} = {parameter['Value']}" for parameter in parameters])
+```
+
 </Runnable>
 
 ### KMS
@@ -270,6 +402,16 @@ const { CiphertextBlob } = await kms.send(new EncryptCommand({
 }));
 const { Plaintext } = await kms.send(new DecryptCommand({ CiphertextBlob }));
 console.log(new TextDecoder().decode(Plaintext));
+```
+
+```py
+import boto3
+
+kms = boto3.client('kms')
+
+key_id = kms.create_key()['KeyMetadata']['KeyId']
+ciphertext = kms.encrypt(KeyId=key_id, Plaintext=b'hello')['CiphertextBlob']
+print(kms.decrypt(CiphertextBlob=ciphertext)['Plaintext'].decode())
 ```
 
 </Runnable>
@@ -301,6 +443,29 @@ const { events } = await logs.send(new FilterLogEventsCommand({ logGroupName: '/
 console.log(events.map((event) => event.message));
 ```
 
+```py
+import time
+
+import boto3
+
+logs = boto3.client('logs')
+
+logs.create_log_group(logGroupName='/app/web')
+logs.create_log_stream(logGroupName='/app/web', logStreamName='instance-1')
+now = int(time.time() * 1000)
+logs.put_log_events(
+    logGroupName='/app/web',
+    logStreamName='instance-1',
+    logEvents=[
+        {'timestamp': now, 'message': 'GET / 200'},
+        {'timestamp': now, 'message': 'GET /cart 500'},
+    ],
+)
+
+events = logs.filter_log_events(logGroupName='/app/web', filterPattern='500')['events']
+print([event['message'] for event in events])
+```
+
 </Runnable>
 
 ### Kinesis
@@ -330,6 +495,24 @@ const { ShardIterator } = await kinesis.send(new GetShardIteratorCommand({
 }));
 const { Records } = await kinesis.send(new GetRecordsCommand({ ShardIterator }));
 console.log(Records.map((record) => new TextDecoder().decode(record.Data)));
+```
+
+```py
+import boto3
+
+kinesis = boto3.client('kinesis')
+
+kinesis.create_stream(StreamName='clicks', ShardCount=1)
+kinesis.put_record(StreamName='clicks', PartitionKey='user-1', Data=b'click')
+
+shard_id = kinesis.list_shards(StreamName='clicks')['Shards'][0]['ShardId']
+shard_iterator = kinesis.get_shard_iterator(
+    StreamName='clicks',
+    ShardId=shard_id,
+    ShardIteratorType='TRIM_HORIZON',
+)['ShardIterator']
+records = kinesis.get_records(ShardIterator=shard_iterator)['Records']
+print([record['Data'].decode() for record in records])
 ```
 
 </Runnable>

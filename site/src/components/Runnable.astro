@@ -4,7 +4,9 @@
 // import map, for this site's own examples of the API, which the runner refuses. A page example
 // has no Stop: what a reader types there runs on the page's thread. A Python `>>>` session isn't
 // editable: its results appear inside the fence, under each statement, in place of the expected
-// output shown, and Reset puts the expected output back
+// output shown, and Reset puts the expected output back. With a JavaScript and a Python fence, a
+// toggle in the bar picks the one shown, for every such example on the page, and the choice is
+// remembered on <html> as data-snippets, set before paint by the head script in snippets.mjs
 const { page = false } = Astro.props;
 ---
 
@@ -17,6 +19,10 @@ const { page = false } = Astro.props;
     <button type="button" class="edit">Edit</button>
     <button type="button" class="reset">Reset</button>
     <span class="state"></span>
+    <div class="toggle" role="group" aria-label="Language">
+      <button type="button" data-language="javascript">JavaScript</button>
+      <button type="button" data-language="python">Python</button>
+    </div>
   </div>
   <pre class="output"></pre>
 </div>
@@ -41,6 +47,14 @@ const { page = false } = Astro.props;
   .runnable[data-page] .stop,
   .runnable.ran :global(.ec-line.expected),
   .output:empty {
+    display: none;
+  }
+
+  /* Only a runnable with both fences toggles, and it shows the chosen one */
+  .runnable:not(:has(pre[data-language='js'])) .toggle,
+  .runnable:not(:has(pre[data-language='py'])) .toggle,
+  :global(:root:not([data-snippets='python'])) .runnable:has(pre[data-language='js']) :global(.expressive-code:has(pre[data-language='py'])),
+  :global(:root[data-snippets='python']) .runnable:has(pre[data-language='py']) :global(.expressive-code:has(pre[data-language='js'])) {
     display: none;
   }
 
@@ -94,6 +108,34 @@ const { page = false } = Astro.props;
   .state {
     color: var(--sl-color-gray-2);
     font-size: var(--sl-text-sm);
+  }
+
+  .toggle {
+    display: flex;
+    margin-inline-start: auto;
+  }
+
+  .toggle button {
+    color: var(--sl-color-gray-2);
+    font-size: var(--sl-text-sm);
+    border-radius: 0;
+  }
+
+  .toggle button:first-child {
+    border-start-start-radius: 0.4rem;
+    border-end-start-radius: 0.4rem;
+  }
+
+  .toggle button:last-child {
+    border-start-end-radius: 0.4rem;
+    border-end-end-radius: 0.4rem;
+    border-inline-start: 0;
+  }
+
+  :global(:root:not([data-snippets='python'])) .toggle button[data-language='javascript'],
+  :global(:root[data-snippets='python']) .toggle button[data-language='python'] {
+    background: var(--sl-color-gray-5);
+    color: var(--sl-color-white);
   }
 
   .output {

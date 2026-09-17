@@ -1,0 +1,74 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`runnable Python docs examples > runner.mdx example 2 prints what it did 1`] = `
+[
+  "['photos']",
+]
+`;
+
+exports[`runnable Python docs examples > runner.mdx example 3 prints what it did 1`] = `
+[
+  "200",
+  "['photos']",
+]
+`;
+
+exports[`runnable Python docs examples > services.mdx example 1 prints what it did 1`] = `
+[
+  "ObjectCreated:Put photos cat.jpg",
+]
+`;
+
+exports[`runnable Python docs examples > services.mdx example 2 prints what it did 1`] = `
+[
+  "['order 41', 'order 42']",
+]
+`;
+
+exports[`runnable Python docs examples > services.mdx example 3 prints what it did 1`] = `
+[
+  "sessions: ['alice', 'bob']",
+]
+`;
+
+exports[`runnable Python docs examples > services.mdx example 4 prints what it did 1`] = `
+[
+  "placed order 42",
+]
+`;
+
+exports[`runnable Python docs examples > services.mdx example 5 prints what it did 1`] = `
+[
+  "[{'total': 250}]",
+]
+`;
+
+exports[`runnable Python docs examples > services.mdx example 6 prints what it did 1`] = `
+[
+  "second ['AWSCURRENT']",
+]
+`;
+
+exports[`runnable Python docs examples > services.mdx example 7 prints what it did 1`] = `
+[
+  "['/app/api-key = abc', '/app/region = us-east-1']",
+]
+`;
+
+exports[`runnable Python docs examples > services.mdx example 8 prints what it did 1`] = `
+[
+  "hello",
+]
+`;
+
+exports[`runnable Python docs examples > services.mdx example 9 prints what it did 1`] = `
+[
+  "['GET /cart 500']",
+]
+`;
+
+exports[`runnable Python docs examples > services.mdx example 10 prints what it did 1`] = `
+[
+  "['click']",
+]
+`;

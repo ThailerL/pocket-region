@@ -18,7 +18,7 @@ export default defineConfig({
         test: {
           name: 'node',
           include: ['src/**/*.test.ts'],
-          exclude: ['src/browser.test.ts', 'src/runner.test.ts'],
+          exclude: ['src/browser.test.ts', 'src/docs-python-examples.test.ts', 'src/runner.test.ts'],
         },
       },
       {
@@ -35,6 +35,7 @@ export default defineConfig({
           name: 'browser',
           include: [
             'src/browser.test.ts',
+            'src/docs-python-examples.test.ts',
             'src/lambda/lambda.test.ts',
             'src/region.test.ts',
             'src/request-handler.test.ts',

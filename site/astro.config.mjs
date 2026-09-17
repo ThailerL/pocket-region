@@ -1,6 +1,7 @@
 import starlight from '@astrojs/starlight';
 import { defineConfig } from 'astro/config';
 import { importMap } from './src/import-map.mjs';
+import { rememberedChoice } from './src/snippets.mjs';
 
 export default defineConfig({
   site: 'https://pocket-region.dev',
@@ -11,6 +12,7 @@ export default defineConfig({
       components: { SocialIcons: './src/components/DocsNavLinks.astro' },
       head: [
         { tag: 'script', attrs: { type: 'importmap' }, content: JSON.stringify(importMap) },
+        { tag: 'script', content: rememberedChoice },
         { tag: 'link', attrs: { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' } },
         { tag: 'meta', attrs: { property: 'og:image', content: 'https://pocket-region.dev/og.png' } },
         { tag: 'meta', attrs: { property: 'og:image:width', content: '1200' } },

@@ -3,6 +3,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import type { Region } from './core.ts';
 import { createRegion } from './node.ts';
 import { AsyncFunction, IMPORT, rewriteImports } from './runner/imports.ts';
+import { runnablesOf } from './test-docs.ts';
 import { withRegion } from './with-region.ts';
 
 const DOCS = new URL('../site/src/content/docs/docs/', import.meta.url);
@@ -24,14 +25,10 @@ const modules: Record<string, () => Promise<unknown>> = {
   '@aws-sdk/client-ssm': () => import('@aws-sdk/client-ssm'),
 };
 
+// A Python fence beside one runs in docs-python-examples.test.ts
 const examples = readdirSync(DOCS)
   .filter((file) => file.endsWith('.mdx'))
-  .flatMap((file) =>
-    Array.from(readFileSync(new URL(file, DOCS), 'utf8').matchAll(/<Runnable(?: page)?>\s*```js\n([\s\S]*?)```\s*<\/Runnable>/g), (match, index) => ({
-      name: `${file} example ${index + 1}`,
-      code: match[1]!,
-    })),
-  );
+  .flatMap((file) => runnablesOf(file, readFileSync(new URL(file, DOCS), 'utf8'), 'js'));
 
 // For examples written for AWS, as the runner has; without it their clients would reach AWS
 let shared: Promise<Region> | undefined;
