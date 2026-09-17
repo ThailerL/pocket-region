@@ -77,8 +77,10 @@ function interceptFetch(endpoint: string) {
   };
 }
 
+type Module = Record<string, unknown>;
+
 // A Blob URL keeps stack traces short; a host that cannot import one gets the source inline
-async function importModule(source: Uint8Array) {
+async function importModule(source: Uint8Array): Promise<Module> {
   const blob = new Blob([source as Uint8Array<ArrayBuffer>], { type: 'text/javascript' });
   const url = URL.createObjectURL(blob);
   try {
@@ -90,16 +92,69 @@ async function importModule(source: Uint8Array) {
   }
 }
 
+type ClientClass = new (config?: object) => object;
+
+// with-region.ts's loop, for a client package whose browser build reads no environment
+function defaulted(module: Module, Base: ClientClass, defaults: object): Module {
+  const entries = Object.entries(module).map(([name, value]) => {
+    if (typeof value !== 'function' || !(value.prototype instanceof Base)) return [name, value];
+    const Client = value as ClientClass;
+    const Defaulted = class extends Client {
+      constructor(config: object = {}) {
+        super({ ...defaults, ...config });
+      }
+    };
+    Object.defineProperty(Defaulted, 'name', { value: name });
+    return [name, Defaulted];
+  });
+  return Object.fromEntries(entries);
+}
+
 type Handler = (event: unknown, context: object) => unknown;
 
-const { env, source, exportName } = await receive('init');
+const { env, files, preload, importer, handler: handlerPath, exportName, defaults, xmldom } = await receive('init');
 // What a handler reads its configuration from, as it does on Lambda
 (globalThis as { process?: unknown }).process = { env };
 interceptFetch(env.AWS_ENDPOINT_URL!);
 
+const modules = new Map<string, Promise<Module>>();
+
+async function polyfillDom() {
+  if ('DOMParser' in globalThis) return;
+  const { DOMParser, Node } = await import(xmldom);
+  Object.assign(globalThis, { DOMParser, Node });
+}
+
+// An SDK client package comes with what its browser build expects of a page
+async function fromUrl(url: string) {
+  const module: Module = await import(url);
+  if (typeof module.__Client !== 'function') return module;
+  await polyfillDom();
+  return defaulted(module, module.__Client as ClientClass, defaults);
+}
+
+// Answers the calls the host rewrote imports into: a path in the package, or a URL
+function loadModule(specifier: string): Promise<Module> {
+  let loading = modules.get(specifier);
+  if (!loading) {
+    const source = files.get(specifier);
+    if (source) loading = importModule(source);
+    else if (URL.canParse(specifier)) loading = fromUrl(specifier);
+    else loading = Promise.reject(new Error(`The package has no ${specifier}`));
+    modules.set(specifier, loading);
+    // A failure is not the answer for the rest of the environment
+    loading.catch(() => modules.delete(specifier));
+  }
+  return loading;
+}
+(globalThis as Record<string, unknown>)[importer] = loadModule;
+
+// Rejections are seen where the handler imports them
+for (const url of preload) loadModule(url).catch(() => {});
+
 let handler: Handler;
 try {
-  handler = (await importModule(source))[exportName];
+  handler = (await loadModule(handlerPath))[exportName] as Handler;
   if (typeof handler !== 'function') {
     throw new Error(`The handler module does not export a function named "${exportName}"`);
   }

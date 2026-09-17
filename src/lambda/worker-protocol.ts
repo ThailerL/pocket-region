@@ -19,8 +19,24 @@ export type FetchReply = {
   body: Uint8Array;
 };
 
+export type Init = {
+  type: 'init';
+  env: Record<string, string>;
+  // Every module in the package by path, its imports rewritten into calls of the global named importer
+  files: Map<string, Uint8Array>;
+  importer: string;
+  handler: string;
+  exportName: string;
+  // The URLs those imports name, to load while the handler does
+  preload: string[];
+  // What an SDK client made with no options gets
+  defaults: object;
+  // The DOM parser the SDK's browser build reads XML with, which a worker lacks
+  xmldom: string;
+};
+
 export type ToWorker =
-  | { type: 'init'; env: Record<string, string>; source: Uint8Array; exportName: string }
+  | Init
   | { type: 'invocation'; requestId: string; deadline: number; arn: string; event: string }
   | FetchReply;
 

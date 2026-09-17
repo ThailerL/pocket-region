@@ -1,25 +1,59 @@
+import { clientConfigFrom } from '../client-defaults.ts';
 import type { CodeEntry, Dispatch, LambdaExecutor } from '../core.ts';
+import { fromCdn } from '../import-map.ts';
+import { IMPORT, rewriteImports } from '../runner/imports.ts';
 import { startWorker } from '../start-worker.ts';
 import { createLambdaHost, type RegionHostOptions } from './host.ts';
 import type { LambdaError, SandboxFactory } from './pool.ts';
 import type { FetchRequest, FromWorker, ToWorker } from './worker-protocol.ts';
 import { WORKER_RUNTIME_SOURCE } from './worker-runtime.generated.ts';
 
-type Package = CodeEntry[];
+// The package's modules, and the URLs their imports load from
+type Package = { files: Map<string, Uint8Array>; preload: string[] };
 
-// Lambda's handler setting: a file path without its extension, a dot, an export name. The
-// file is one ES module, since a module loaded from memory cannot import its neighbours
-function locateHandler(setting: string, files: Package) {
+const MODULE = /\.m?js$/;
+const RELATIVE = /^\.\.?\//;
+const XMLDOM = fromCdn('@xmldom/xmldom');
+const decoder = new TextDecoder();
+const encoder = new TextEncoder();
+
+// What a file's import names: a neighbour by its path in the package, anything else by URL
+const resolverFrom = (path: string) => (specifier: string) => {
+  if (RELATIVE.test(specifier)) return decodeURIComponent(new URL(specifier, `http://package/${path}`).pathname.slice(1));
+  return URL.canParse(specifier) ? specifier : fromCdn(specifier);
+};
+
+// A module loaded from memory cannot import its neighbours, so imports become calls the runtime
+// answers. A file the rewrite cannot read is kept as written: only loading it is the failure
+function rewritePackage(entries: CodeEntry[]): Package {
+  const files = new Map<string, Uint8Array>();
+  const preload = new Set<string>();
+  for (const [path, contents] of entries) {
+    if (!MODULE.test(path)) continue;
+    try {
+      const resolve = resolverFrom(path);
+      const { code, specifiers } = rewriteImports(decoder.decode(contents), resolve);
+      for (const url of specifiers.map(resolve).filter((resolved) => URL.canParse(resolved))) preload.add(url);
+      files.set(path, specifiers.length === 0 ? contents : encoder.encode(code));
+    } catch {
+      files.set(path, contents);
+    }
+  }
+  return { files, preload: [...preload] };
+}
+
+// Lambda's handler setting: a file path without its extension, a dot, an export name
+function locateHandler(setting: string, files: Map<string, Uint8Array>) {
   const dot = setting.lastIndexOf('.');
   if (dot < 1) throw new Error(`"${setting}" is not a file.export handler`);
   const file = setting.slice(0, dot);
-  const found = ['.mjs', '.js'].map((extension) => file + extension).map((name) => files.find(([path]) => path === name)).find(Boolean);
+  const found = ['.mjs', '.js'].map((extension) => file + extension).find((name) => files.has(name));
   if (!found) throw new Error(`There is no ${file}.mjs or ${file}.js`);
-  return { source: found[1], exportName: setting.slice(dot + 1) };
+  return { handler: found, exportName: setting.slice(dot + 1) };
 }
 
 // Each environment is a module worker, the Runtime API a message channel
-function workerSandbox(files: Package, dispatch: Dispatch): SandboxFactory {
+function workerSandbox({ files, preload }: Package, dispatch: Dispatch): SandboxFactory {
   return (env, events) => {
     let handler: ReturnType<typeof locateHandler>;
     try {
@@ -47,7 +81,7 @@ function workerSandbox(files: Package, dispatch: Dispatch): SandboxFactory {
         const reply = await dispatch({ method, path, headers, body });
         post({ type: 'fetched', id, status: reply.status, headers: reply.headers, body: reply.body });
       } catch (error) {
-        const body = new TextEncoder().encode((error as Error).message);
+        const body = encoder.encode((error as Error).message);
         post({ type: 'fetched', id, status: 500, headers: {}, body });
       }
     };
@@ -75,7 +109,7 @@ function workerSandbox(files: Package, dispatch: Dispatch): SandboxFactory {
       event.preventDefault?.();
       exited(`uncaught ${event.message}`);
     };
-    post({ type: 'init', env, ...handler });
+    post({ type: 'init', env, files, preload, importer: IMPORT, defaults: clientConfigFrom(env), xmldom: XMLDOM, ...handler });
 
     return {
       invoke({ requestId, config, event }, deadline) {
@@ -88,11 +122,11 @@ function workerSandbox(files: Package, dispatch: Dispatch): SandboxFactory {
 
 const initError = (error: Error): LambdaError => ({ errorType: 'Runtime.InitError', errorMessage: error.message });
 
-// Packages stay in memory; each environment gets a copy of its handler file
+// Packages stay in memory, rewritten once; each environment gets a copy
 export function createWorkerHost({ port, dispatch, lambda }: RegionHostOptions): LambdaExecutor {
   return createLambdaHost<Package>(
     {
-      pack: async (_codeSha256, entries) => entries,
+      pack: async (_codeSha256, entries) => rewritePackage(entries),
       spawn: (files) => workerSandbox(files, dispatch),
       dispose: async () => {},
     },

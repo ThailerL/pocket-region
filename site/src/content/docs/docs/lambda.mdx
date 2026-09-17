@@ -46,14 +46,19 @@ The deployment package is any zip. This one is built with [fflate](https://githu
 
 Only `nodejs*` runtimes run. `python*` and `provided.*` functions fail each invocation with a
 `Runtime.HandlerError` naming the runtime. Java, .NET, and Ruby functions answer MiniStack's own
-200 "Mock response" without running. The AWS SDK isn't preinstalled, so bundle it with your code.
+200 "Mock response" without running.
 
 | | Node | Page |
 | --- | --- | --- |
 | `Handler: 'index.handler'` loads | `index.mjs`, `index.js`, or `index.cjs` | `index.mjs` or `index.js` |
 | CommonJS | Works, with exports read from `default` | Doesn't work |
-| Relative imports | Work | Don't work: the handler must be a single ES module. Imports from a full URL, such as jsDelivr, work |
+| Relative imports | Work | Work, between the package's ES modules. `export … from` and circular imports don't |
+| Bare imports, such as `@aws-sdk/client-s3` | Need the package in `node_modules` or bundled in | Load from jsDelivr, or from the page's import map when it names them. SDK clients get the region as their defaults |
+| Imports from a full URL | Work | Work |
 | Parent environment variables | Only `PATH` | None |
+
+Lambda preinstalls the AWS SDK, and so does the page: a handler that imports it bare and creates a
+client with no options runs there as written. In Node, bundle the SDK with your code.
 
 ## What a handler sees
 
@@ -66,9 +71,12 @@ Lambda's standard `AWS_LAMBDA_*` variables are set, along with the function's ow
 | `AWS_REGION`, `AWS_DEFAULT_REGION` | `us-east-1` |
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | `test` |
 
-So an SDK client created inside a handler with no options reaches the region. In a page,
-`process.env` is provided for these, and `fetch` calls to the region's port on `localhost`,
-`127.0.0.1`, or `[::1]` are routed to the region. Every other `fetch` goes out as normal.
+So an SDK client created inside a handler with no options reaches the region, as it would on
+Lambda. In a page, `process.env` is provided for these, and `fetch` calls to the region's port on
+`localhost`, `127.0.0.1`, or `[::1]` are routed to the region. Every other `fetch` goes out as
+normal. One exception: the SDK's browser build reads no environment, so a page handler that
+bundles the SDK rather than importing it bare must pass `region`, `endpoint`, `credentials`, and
+`forcePathStyle` from `process.env` itself.
 
 ## Limits
 

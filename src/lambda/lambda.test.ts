@@ -18,7 +18,7 @@ import { GetQueueAttributesCommand, SendMessageCommand, SQSClient } from '@aws-s
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { LambdaEvent, LambdaObserver, LambdaOutput, Region } from '../core.ts';
 import { requestHandler } from '../request-handler.ts';
-import { authorization, bodies, clientConfig, createQueue, zipOf } from '../test-clients.ts';
+import { authorization, bodies, clientConfig, createQueue, zipOf, zipOfFiles } from '../test-clients.ts';
 import { createTestRegion, regionPort } from '../test-region.ts';
 
 const decoder = new TextDecoder();
@@ -170,6 +170,33 @@ describe('Lambda', () => {
       new UpdateFunctionConfigurationCommand({ FunctionName: 'configured', Environment: { Variables: { GREETING: 'after' } } }),
     );
     expect((await invoke('configured', {})).payload).toEqual({ greeting: 'after' });
+  }, 30_000);
+
+  it('runs a handler that imports its neighbours', async () => {
+    const files = {
+      'index.mjs': "import { greet } from './lib/greet.mjs';\nexport const handler = async (event) => ({ greeting: greet(event.name) });",
+      'lib/greet.mjs': "import { mark } from '../mark.mjs';\nexport const greet = (name) => `hello ${name}${mark}`;",
+      'mark.mjs': "export const mark = '!';",
+    };
+    await createFunction('neighbours', { Code: { ZipFile: zipOfFiles(files) } });
+    const { error, payload } = await invoke('neighbours', { name: 'world' });
+    expect(error).toBeUndefined();
+    expect(payload).toEqual({ greeting: 'hello world!' });
+  }, 30_000);
+
+  // Lambda's runtime has the SDK installed; the page host fetches it, the Node host has none to offer
+  it.skipIf(typeof document === 'undefined')('gives a handler the SDK it imports bare, pointed at the region', async () => {
+    const code = `import { S3Client, CreateBucketCommand, ListBucketsCommand } from '@aws-sdk/client-s3';
+export const handler = async (event) => {
+  const s3 = new S3Client({});
+  await s3.send(new CreateBucketCommand({ Bucket: event.bucket }));
+  const { Buckets } = await s3.send(new ListBucketsCommand({}));
+  return Buckets.map((bucket) => bucket.Name);
+};`;
+    await createFunction('bare-sdk', {}, code);
+    const { error, payload } = await invoke('bare-sdk', { bucket: 'from-a-bare-client' });
+    expect(error).toBeUndefined();
+    expect(payload).toContain('from-a-bare-client');
   }, 30_000);
 
   it('answers ResourceNotFoundException for an unknown function', async () => {

@@ -37,8 +37,12 @@ describe('rewriteImports', () => {
     expect(rewriteImports(source)).toEqual({ code: source, specifiers: [] });
   });
 
-  it('refuses an export', () => {
-    expect(() => rewriteImports('export const a = 1;')).toThrow('cannot export');
+  it('emits each specifier as resolve maps it, and lists them as written', () => {
+    const source = "import { a } from './a.mjs';\nexport const b = await import('fflate');";
+    expect(rewriteImports(source, (specifier) => `resolved:${specifier}`)).toEqual({
+      code: `const { a } = ${load('resolved:./a.mjs')};\nexport const b = await ${IMPORT}("resolved:fflate");`,
+      specifiers: ['./a.mjs', 'fflate'],
+    });
   });
 
   it('refuses a dynamic import of anything but a literal', () => {

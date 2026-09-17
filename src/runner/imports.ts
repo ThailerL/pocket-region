@@ -23,20 +23,22 @@ function declaration(defaultName: string | undefined, namespace: string | undefi
   return bindings.length === 0 ? `${load(specifier)};` : `const { ${bindings.join(', ')} } = ${load(specifier)};`;
 }
 
-// Turns a module's imports into awaited calls, so the snippet runs as a function body
-export function rewriteImports(code: string): { code: string; specifiers: string[] } {
+const asWritten = (specifier: string) => specifier;
+
+// Turns a module's imports into awaited calls of IMPORT, which gets each specifier as resolve
+// maps it; specifiers lists them as written
+export function rewriteImports(code: string, resolve: (specifier: string) => string = asWritten): { code: string; specifiers: string[] } {
   const specifiers: string[] = [];
-  if (/^[ \t]*export\s/m.test(code)) throw new SyntaxError('a snippet runs as a script body, so it cannot export');
 
   const rewritten = code
     .replace(STATIC, (match, defaultName, namespace, names, _quote, specifier: string) => {
       specifiers.push(specifier);
       // Kept to the original line count, so errors point at the line shown
-      return declaration(defaultName, namespace, names, specifier) + '\n'.repeat(match.split('\n').length - 1);
+      return declaration(defaultName, namespace, names, resolve(specifier)) + '\n'.repeat(match.split('\n').length - 1);
     })
     .replace(DYNAMIC, (_match, _quote, specifier: string) => {
       specifiers.push(specifier);
-      return call(specifier);
+      return call(resolve(specifier));
     });
 
   if (/\bimport\s*\(/.test(rewritten)) throw new SyntaxError("only import('a literal specifier') can run in a snippet");

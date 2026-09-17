@@ -1,7 +1,7 @@
 import { createRegion, type BrowserRegionOptions } from './browser.ts';
 import { AWS_DEFAULTS, awsEnvironment } from './client-defaults.ts';
 import { jspiSupported, type Region } from './core.ts';
-import { fromImportMap, pyodideIndexUrl } from './import-map.ts';
+import { fromCdn, pyodideIndexUrl } from './import-map.ts';
 import { answer, pendingCalls, toWire } from './region/protocol.ts';
 import { portFor } from './region/proxy.ts';
 import type { FromRunnerWorker, Language, PythonBoot, RunnerOutput, ToRunnerWorker } from './runner/protocol.ts';
@@ -51,8 +51,6 @@ export type Runner = {
   run(code: string, options?: RunOptions): Promise<RunResult>;
   stop(): Promise<void>;
 };
-
-const fromCdn = (specifier: string) => fromImportMap(specifier, () => `https://cdn.jsdelivr.net/npm/${specifier}/+esm`);
 
 const asSnippet = (code: string | Snippet): Snippet => (typeof code === 'string' ? { language: 'javascript', code } : code);
 

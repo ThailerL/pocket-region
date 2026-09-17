@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Throwaway: Lambda imports in a page</title>
+<script type="importmap">
+{
+  "imports": {
+    "pocket-region/browser": "/region/dist/browser.js",
+    "pocket-region/vendor/": "/region/vendor/",
+    "@aws-sdk/client-lambda": "https://cdn.jsdelivr.net/npm/@aws-sdk/client-lambda@3.1131.0/+esm",
+    "fflate": "https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js"
+  }
+}
+</script>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; max-width: 52rem; margin: 2rem auto; padding: 0 1rem; color: #222; background: #fff; }
+  pre { background: #f4f4f4; padding: 0.75rem 1rem; overflow-x: auto; border-radius: 6px; }
+  h2 { font-size: 1.1rem; margin-top: 2rem; }
+  .ok { color: #176f2c; } .bad { color: #a0262d; }
+</style>
+</head>
+<body>
+<h1>Throwaway: a page handler that imports its neighbours and the SDK</h1>
+<p>Deploys the three-file package below to a region in this tab, invokes it twice, and shows what came back. Nothing here is built or bundled: the handler imports <code>@aws-sdk/client-s3</code> bare and creates a client with no options.</p>
+
+<h2>The package</h2>
+<pre id="package"></pre>
+
+<h2>What happened</h2>
+<pre id="log">starting…</pre>
+
+<h2>Handler output (from the region's Lambda observer)</h2>
+<pre id="handler-output"></pre>
+
+<script type="module">
+import { createRegion, requestHandler } from 'pocket-region/browser';
+import { LambdaClient, CreateFunctionCommand, InvokeCommand } from '@aws-sdk/client-lambda';
+import { zipSync, strToU8 } from 'fflate';
+
+const files = {
+  'index.mjs': `import { S3Client, CreateBucketCommand, ListBucketsCommand } from '@aws-sdk/client-s3';
+import { greet } from './lib/greet.mjs';
+
+export const handler = async (event) => {
+  console.log('handling', JSON.stringify(event));
+  const s3 = new S3Client({});
+  await s3.send(new CreateBucketCommand({ Bucket: event.bucket }));
+  const { Buckets } = await s3.send(new ListBucketsCommand({}));
+  return { greeting: greet(event.name), buckets: Buckets.map((b) => b.Name) };
+};`,
+  'lib/greet.mjs': `import { mark } from '../mark.mjs';
+export const greet = (name) => \`hello \${name}\${mark}\`;`,
+  'mark.mjs': `export const mark = '!';`,
+};
+
+document.getElementById('package').textContent = Object.entries(files)
+  .map(([path, code]) => `// ${path}\n${code}`)
+  .join('\n\n');
+
+const log = document.getElementById('log');
+const lines = [];
+const say = (text, cls) => {
+  lines.push(cls ? `<span class="${cls}">${text}</span>` : text);
+  log.innerHTML = lines.join('\n');
+};
+const outputEl = document.getElementById('handler-output');
+
+try {
+  const t0 = performance.now();
+  say('booting the region…');
+  const region = await createRegion({
+    lambda: {
+      onOutput: ({ functionName, text }) => (outputEl.textContent += `[${functionName}] ${text}\n`),
+      onEvent: (event) => (outputEl.textContent += `[event] ${JSON.stringify(event)}\n`),
+    },
+  });
+  say(`user agent: ${navigator.userAgent}`);
+  say(`region up in ${Math.round(performance.now() - t0)} ms`, 'ok');
+
+  const lambda = new LambdaClient({ region: 'us-east-1', credentials: { accessKeyId: 'test', secretAccessKey: 'test' }, requestHandler: requestHandler(region) });
+  const zip = zipSync(Object.fromEntries(Object.entries(files).map(([p, c]) => [p, strToU8(c)])));
+  await lambda.send(new CreateFunctionCommand({
+    FunctionName: 'imports-demo',
+    Runtime: 'nodejs22.x',
+    Handler: 'index.handler',
+    Role: 'arn:aws:iam::000000000000:role/lambda',
+    Code: { ZipFile: zip },
+  }));
+  say('function created');
+
+  for (const [i, event] of [{ name: 'world', bucket: 'first' }, { name: 'again', bucket: 'second' }].entries()) {
+    const t1 = performance.now();
+    const { StatusCode, FunctionError, Payload } = await lambda.send(new InvokeCommand({ FunctionName: 'imports-demo', Payload: JSON.stringify(event) }));
+    const payload = new TextDecoder().decode(Payload);
+    const ms = Math.round(performance.now() - t1);
+    say(`invoke ${i + 1} (${i === 0 ? 'cold' : 'warm'}, ${ms} ms): status ${StatusCode}${FunctionError ? `, FunctionError ${FunctionError}` : ''}`, FunctionError ? 'bad' : 'ok');
+    say(`  payload: ${payload}`, FunctionError ? 'bad' : undefined);
+  }
+  say('done', 'ok');
+} catch (error) {
+  const status = error?.$metadata?.httpStatusCode;
+  say(`failed: ${error?.name ?? 'Error'}: ${error?.message ?? error}${status ? ` (HTTP ${status})` : ''}`, 'bad');
+  if (error?.stack) say(error.stack);
+}
+</script>
+</body>
+</html>

@@ -71,7 +71,9 @@ const isPocketRegion = (specifier: string) => specifier.split('/')[0] === 'pocke
 
 async function run({ code, fresh }: RunMessage, attached: Promise<Region>) {
   if (fresh) clearGlobals();
-  const { code: body, specifiers } = rewriteImports(stripTypes(code));
+  const stripped = stripTypes(code);
+  if (/^[ \t]*export\s/m.test(stripped)) throw new SyntaxError('a snippet runs as a script body, so it cannot export');
+  const { code: body, specifiers } = rewriteImports(stripped);
   const refused = specifiers.find(isPocketRegion);
   if (refused) throw new Error(`a snippet can't import ${refused}: it runs against the runner's region`);
 

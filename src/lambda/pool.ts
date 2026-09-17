@@ -75,6 +75,9 @@ type Environment = {
 
 export const failure = (message: string, log = ''): InvocationOutcome => ({ status: 'error', message, log });
 
+// Eight hex characters; not randomUUID, which a page served over plain http lacks
+const environmentId = () => Array.from(crypto.getRandomValues(new Uint8Array(4)), (byte) => byte.toString(16).padStart(2, '0')).join('');
+
 const exitMessage = (reason: string) => `Runtime exited with error: ${reason}`;
 
 // The runtime's error payload; anything else is a runtime that died mid-sentence
@@ -139,7 +142,7 @@ export class FunctionPool {
   }
 
   private spawn(config: FunctionConfig) {
-    const id = crypto.randomUUID().slice(0, 8);
+    const id = environmentId();
     // Every event arrives after env is assigned
     const env: Environment = {
       id,

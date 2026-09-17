@@ -44,7 +44,8 @@ export async function jsonApi(service: 'sqs' | 'dynamodb', operation: string, bo
   return { status: response.status, body: JSON.parse(decoder.decode(response.body)) };
 }
 
-export const zipOf = (name: string, content: string) => zipSync({ [name]: strToU8(content) });
+export const zipOfFiles = (files: Record<string, string>) => zipSync(Object.fromEntries(Object.entries(files).map(([name, content]) => [name, strToU8(content)])));
+export const zipOf = (name: string, content: string) => zipOfFiles({ [name]: content });
 
 export async function createQueue(sqs: SQSClient, QueueName: string, Attributes?: Record<string, string>) {
   const { QueueUrl } = await sqs.send(new CreateQueueCommand({ QueueName, Attributes }));
