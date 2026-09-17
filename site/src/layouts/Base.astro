@@ -26,10 +26,20 @@ const url = new URL(Astro.url.pathname, Astro.site);
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
+    <script is:inline>
+      {
+        const theme =
+          localStorage.getItem('starlight-theme') ||
+          (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+        document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+      }
+    </script>
     <slot name="head" />
   </head>
   <body>
     <SiteHeader />
-    <slot />
+    <div class="page">
+      <slot />
+    </div>
   </body>
 </html>

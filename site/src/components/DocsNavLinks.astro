@@ -1,0 +1,24 @@
+---
+import { Icon } from '@astrojs/starlight/components';
+---
+
+<a href="/docs/" aria-current="page">Docs</a>
+<a href="/demo">Demo</a>
+<a class="sl-flex" href="https://github.com/ThailerL/pocket-region" rel="me" aria-label="GitHub">
+  <Icon name="github" size="1.375rem" />
+</a>
+
+<style>
+  a {
+    color: var(--faint);
+    text-decoration: none;
+  }
+
+  a:hover {
+    color: var(--sl-color-white);
+  }
+
+  a[aria-current='page'] {
+    color: var(--accent);
+  }
+</style>

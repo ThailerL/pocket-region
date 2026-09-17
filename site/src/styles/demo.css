@@ -107,12 +107,31 @@
   display: none;
 }
 
+/* Full width, with the header's side padding so the edges line up with it */
+.page {
+  max-width: none;
+}
+
+@media (min-width: 50em) {
+  .page {
+    padding-inline: 1.5rem;
+  }
+}
+
 /* The page is exactly one screen */
 @media (min-width: 64rem) {
   body {
     display: flex;
     flex-direction: column;
     height: 100dvh;
+  }
+
+  .page {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    width: 100%;
     padding-bottom: 1rem;
   }
 

@@ -8,7 +8,7 @@ export default defineConfig({
     starlight({
       title: 'Pocket Region',
       customCss: ['./src/styles/docs.css'],
-      social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/ThailerL/pocket-region' }],
+      components: { SocialIcons: './src/components/DocsNavLinks.astro' },
       head: [
         { tag: 'script', attrs: { type: 'importmap' }, content: JSON.stringify(importMap) },
         { tag: 'link', attrs: { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' } },

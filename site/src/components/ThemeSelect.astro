@@ -1,0 +1,124 @@
+---
+import { Icon } from '@astrojs/starlight/components';
+---
+
+<label>
+  <span class="visually-hidden">Select theme</span>
+  <Icon name="laptop" class="icon choice auto" />
+  <Icon name="sun" class="icon choice light" />
+  <Icon name="moon" class="icon choice dark" />
+  <select autocomplete="off">
+    <option value="dark">Dark</option>
+    <option value="light">Light</option>
+    <option value="auto" selected>Auto</option>
+  </select>
+  <Icon name="down-caret" class="icon caret" />
+</label>
+
+<script>
+  type Theme = 'auto' | 'dark' | 'light';
+
+  // Starlight's key and encoding, so the docs and these pages share one choice
+  const storageKey = 'starlight-theme';
+
+  const parseTheme = (theme: unknown): Theme => (theme === 'dark' || theme === 'light' ? theme : 'auto');
+  const systemTheme = () => (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+  const loadTheme = () => parseTheme(localStorage.getItem(storageKey));
+
+  const select = document.querySelector<HTMLSelectElement>('header select');
+  const label = select?.closest('label');
+
+  function apply(theme: Theme) {
+    document.documentElement.dataset.theme = theme === 'auto' ? systemTheme() : theme;
+    if (select) select.value = theme;
+    label?.setAttribute('data-choice', theme);
+  }
+
+  apply(loadTheme());
+
+  select?.addEventListener('change', () => {
+    const theme = parseTheme(select.value);
+    localStorage.setItem(storageKey, theme === 'auto' ? '' : theme);
+    apply(theme);
+  });
+
+  matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+    if (loadTheme() === 'auto') apply('auto');
+  });
+</script>
+
+<style>
+  /* Starlight's Select, measured the same so the header lines up with the docs */
+  label {
+    --label-icon-size: 0.875rem;
+    --caret-size: 1.25rem;
+    --inline-padding: 0.5rem;
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    color: var(--faint);
+  }
+
+  label:hover {
+    color: var(--foreground);
+  }
+
+  .icon {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+  }
+
+  .choice {
+    font-size: var(--label-icon-size);
+    inset-inline-start: 0;
+  }
+
+  label:not([data-choice='light']) .light,
+  label:not([data-choice='dark']) .dark,
+  label[data-choice]:not([data-choice='auto']) .auto {
+    display: none;
+  }
+
+  .caret {
+    font-size: var(--caret-size);
+    inset-inline-end: 0;
+  }
+
+  select {
+    border: 0;
+    padding-block: 0.625rem;
+    padding-inline: calc(var(--label-icon-size) + var(--inline-padding) + 0.25rem)
+      calc(var(--caret-size) + var(--inline-padding) + 0.25rem);
+    margin-inline: calc(var(--inline-padding) * -1);
+    width: calc(6.25em + var(--inline-padding) * 2);
+    background-color: transparent;
+    font: inherit;
+    text-overflow: ellipsis;
+    color: inherit;
+    cursor: pointer;
+    appearance: none;
+  }
+
+  option {
+    background-color: var(--nav-background);
+    color: var(--foreground);
+  }
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  @media (min-width: 50em) {
+    select {
+      font-size: 0.875rem;
+    }
+  }
+</style>

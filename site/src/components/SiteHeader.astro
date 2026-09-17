@@ -1,31 +1,44 @@
 ---
+import ThemeSelect from './ThemeSelect.astro';
+
 const path = Astro.url.pathname.replace(/\/$/, '');
 ---
 
 <header>
-  <a class="home" href="/">Pocket Region</a>
+  <a class="home" href="/" translate="no">Pocket Region</a>
   <nav>
-    <a href="/docs/">Docs</a>
-    <a href="/demo" aria-current={path === '/demo' ? 'page' : undefined}>Demo</a>
-    <a class="github" href="https://github.com/ThailerL/pocket-region" aria-label="GitHub">
-      <svg viewBox="0 0 16 16" width="22" height="22" aria-hidden="true">
-        <path
-          fill="currentColor"
-          d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"
-        ></path>
-      </svg>
-    </a>
+    <div class="links">
+      <a href="/docs/">Docs</a>
+      <a href="/demo" aria-current={path === '/demo' ? 'page' : undefined}>Demo</a>
+      <a href="https://github.com/ThailerL/pocket-region" aria-label="GitHub">
+        <svg viewBox="0 0 16 16" width="22" height="22" aria-hidden="true">
+          <path
+            fill="currentColor"
+            d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"
+          ></path>
+        </svg>
+      </a>
+    </div>
+    <div class="theme">
+      <ThemeSelect />
+    </div>
   </nav>
 </header>
 
 <style>
+  /* Starlight's header measurements and font, so the links sit where they do on docs pages */
   header {
+    box-sizing: border-box;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding-bottom: 0.75rem;
-    margin-bottom: 1.25rem;
-    border-bottom: 1px solid var(--line);
+    gap: 1rem;
+    height: 3.5rem;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--nav-border);
+    background: var(--nav-background);
+    font-family:
+      -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', 'Noto Sans', Arial, sans-serif;
   }
 
   a {
@@ -33,30 +46,63 @@ const path = Astro.url.pathname.replace(/\/$/, '');
   }
 
   .home {
+    display: flex;
+    min-width: 0;
+    font-size: 1.25rem;
     font-weight: 600;
-    color: inherit;
+    color: var(--accent);
+    white-space: nowrap;
+    /* Clips a long title on narrow screens instead of widening the page, padded to keep the focus ring */
+    overflow: clip;
+    padding: 0.25rem;
+    margin: -0.25rem;
   }
 
-  .home:hover {
-    text-decoration: underline;
-  }
-
-  nav {
+  nav,
+  .links {
     display: flex;
     align-items: center;
-    gap: 1.25rem;
+    gap: 1rem;
   }
 
-  nav a {
+  /* Starlight drops the theme picker from its header on phones, so this does too */
+  .theme {
+    display: none;
+  }
+
+  @media (min-width: 50em) {
+    .theme {
+      display: flex;
+    }
+
+    .links::after {
+      content: '';
+      height: 2rem;
+      border-inline-end: 1px solid var(--nav-divider);
+    }
+  }
+
+  .links a {
     display: flex;
     color: var(--faint);
   }
 
-  nav a:hover {
-    color: inherit;
+  .links a:hover {
+    color: var(--foreground);
   }
 
-  nav a[aria-current='page'] {
+  .links a[aria-current='page'] {
     color: var(--accent);
+  }
+
+  @media (min-width: 50em) {
+    header {
+      height: 4rem;
+      padding-inline: 1.5rem;
+    }
+
+    .home {
+      font-size: 1.5rem;
+    }
   }
 </style>

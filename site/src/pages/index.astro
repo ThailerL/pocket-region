@@ -8,6 +8,23 @@ const region = await createRegion();
 const s3 = new S3Client({ requestHandler: requestHandler(region) });
 await s3.send(new PutObjectCommand({ Bucket: 'photos', Key: 'cat.txt', Body: 'meow' }));`;
 
+const narrowExample = `import {
+  createRegion,
+  requestHandler,
+} from 'pocket-region/node';
+
+const region = await createRegion();
+const s3 = new S3Client({
+  requestHandler: requestHandler(region),
+});
+await s3.send(new PutObjectCommand({
+  Bucket: 'photos',
+  Key: 'cat.txt',
+  Body: 'meow',
+}));`;
+
+const codeThemes = { light: 'github-light', dark: 'github-dark' } as const;
+
 const features = [
   {
     title: 'No server, no container',
@@ -55,7 +72,8 @@ const features = [
     </header>
 
     <section>
-      <Code code={example} lang="js" themes={{ light: 'github-light', dark: 'github-dark' }} />
+      <Code class="wide" code={example} lang="js" themes={codeThemes} />
+      <Code class="narrow" code={narrowExample} lang="js" themes={codeThemes} />
     </section>
 
     <section class="features">
@@ -130,12 +148,38 @@ const features = [
     font-size: 0.875rem;
   }
 
+  /* The wide snippet's 90-character lines fit from 52em. Below that, the 41-character copy scales its font to fit */
+  section :global(.wide) {
+    display: none;
+  }
+
+  section :global(.narrow) {
+    padding: 0.75rem;
+    font-size: clamp(0.75rem, (100vw - 4rem) / 25, 0.875rem);
+  }
+
+  @media (min-width: 52em) {
+    section :global(.wide) {
+      display: block;
+    }
+
+    section :global(.narrow) {
+      display: none;
+    }
+  }
+
   @media (prefers-color-scheme: dark) {
-    section :global(.astro-code),
-    section :global(.astro-code span) {
+    :global(:root:not([data-theme='light'])) section :global(.astro-code),
+    :global(:root:not([data-theme='light'])) section :global(.astro-code span) {
       color: var(--shiki-dark) !important;
       background-color: var(--shiki-dark-bg) !important;
     }
+  }
+
+  :global([data-theme='dark']) section :global(.astro-code),
+  :global([data-theme='dark']) section :global(.astro-code span) {
+    color: var(--shiki-dark) !important;
+    background-color: var(--shiki-dark-bg) !important;
   }
 
   .features {
