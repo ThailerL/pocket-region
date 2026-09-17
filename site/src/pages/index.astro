@@ -2,21 +2,19 @@
 import { Code } from 'astro:components';
 import Base from '../layouts/Base.astro';
 
-const example = `import { createRegion, requestHandler } from 'pocket-region/node';
+const example = `import { clientConfig, createRegion } from 'pocket-region/node';
 
 const region = await createRegion();
-const s3 = new S3Client({ requestHandler: requestHandler(region) });
+const s3 = new S3Client(clientConfig(region));
 await s3.send(new PutObjectCommand({ Bucket: 'photos', Key: 'cat.txt', Body: 'meow' }));`;
 
 const narrowExample = `import {
+  clientConfig,
   createRegion,
-  requestHandler,
 } from 'pocket-region/node';
 
 const region = await createRegion();
-const s3 = new S3Client({
-  requestHandler: requestHandler(region),
-});
+const s3 = new S3Client(clientConfig(region));
 await s3.send(new PutObjectCommand({
   Bucket: 'photos',
   Key: 'cat.txt',
@@ -55,7 +53,7 @@ const features = [
 
 <Base
   title="Pocket Region"
-  description="Real AWS services like S3, DynamoDB, and Lambda inside Node or a browser tab, reached with the ordinary AWS SDK."
+  description="AWS services like S3, DynamoDB, and Lambda inside Node or a browser tab, reached with the ordinary AWS SDK."
 >
   <main>
     <header class="hero">

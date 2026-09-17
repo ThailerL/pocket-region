@@ -1,41 +1,67 @@
 ---
 title: Connecting clients
-description: requestHandler for AWS SDK clients, serve for anything that needs an endpoint, and dispatch underneath both.
+description: clientConfig and requestHandler for AWS SDK clients, serve for anything that needs an endpoint, and dispatch underneath both.
 ---
 
 A region has no endpoint of its own. There are three ways to reach it:
 
 | | Use it for |
 | --- | --- |
-| `requestHandler(region)` | AWS SDK v3 clients in the same process or page |
+| `clientConfig(region)`, `requestHandler(region)` | AWS SDK v3 clients in the same process or page |
 | `serve(region, options?)` | Anything that needs a URL: another process, another language, the real AWS CLI. Node only |
 | `region.dispatch(request)` | Raw wire-protocol requests, and wrapping a region |
 
 All three accept any object with a `dispatch` method, not only a region: a
 [`Dispatcher`](#dispatch).
 
-## `requestHandler`
+## `clientConfig`
+
+```ts
+clientConfig(region: Dispatcher): { region: string; credentials: object; requestHandler: RegionRequestHandler }
+```
+
+A region name, throwaway credentials, and the handler as one config, for the common case where
+nothing in the environment supplies the first two, such as a page.
+
+```js
+import { clientConfig, createRegion } from 'pocket-region/node';
+import { S3Client } from '@aws-sdk/client-s3';
+
+const region = await createRegion();
+const s3 = new S3Client(clientConfig(region));
+```
+
+The region name is `us-east-1` and the credentials are throwaway, since nothing checks them.
+Spread it to add settings of your own, such as `{ ...clientConfig(region), maxAttempts: 1 }`.
+A client made this way is what a [runner](/docs/runner/) snippet's clients get.
+
+### `requestHandler`
 
 ```ts
 requestHandler(region: Dispatcher): RegionRequestHandler
 ```
 
-Pass the result as `requestHandler` to any AWS SDK v3 client. Requests become function calls,
-so nothing listens and nothing is dialed.
+The handler on its own, for a client that already has a region and credentials. It's the single
+setting to add to an existing Node client, which takes those from the environment or `~/.aws` as
+usual. Requests become function calls, so nothing listens and nothing is dialed.
 
 ```js
 import { requestHandler } from 'pocket-region/node';
 import { S3Client } from '@aws-sdk/client-s3';
 
+// AWS_REGION and credentials as usual, from the environment or ~/.aws
 const s3 = new S3Client({ requestHandler: requestHandler(region) });
 ```
 
-- **`region` and `credentials`** are still required, because the SDK refuses to build a request
-  without them, but any values do. The emulator routes a request by the credential scope in its
-  `Authorization` header and never checks the signature. In Node they can come from the
-  environment or `~/.aws` as usual; a page has to pass them, or use `clientConfig(region)`,
-  which is `requestHandler` plus `us-east-1` and throwaway credentials, as one config to pass or
-  spread.
+A region and credentials are still required, because the SDK refuses to build a request without
+them, but any values do. The emulator routes a request by the credential scope in its
+`Authorization` header and never checks the signature. A page has no environment to take them
+from, so it passes them itself, which is all `clientConfig` does.
+
+## Endpoints and bodies
+
+These hold for a client made either way.
+
 - **`endpoint`** isn't needed. Without one, the SDK addresses AWS's own host names, such as
   `photos.s3.us-east-1.amazonaws.com`, which the emulator understands, and nothing is dialed.
 - **With an `endpoint`** such as `http://localhost:4566`, S3 also needs `forcePathStyle: true`.

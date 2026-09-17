@@ -20,15 +20,11 @@ support JSPI. Safari doesn't yet, and `createRegion` throws there.
 ## In Node
 
 ```js
-import { createRegion, requestHandler } from 'pocket-region/node';
+import { clientConfig, createRegion } from 'pocket-region/node';
 import { S3Client, CreateBucketCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 
 const region = await createRegion();
-const s3 = new S3Client({
-  region: 'us-east-1',
-  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
-  requestHandler: requestHandler(region),
-});
+const s3 = new S3Client(clientConfig(region));
 
 await s3.send(new CreateBucketCommand({ Bucket: 'photos' }));
 await s3.send(new PutObjectCommand({ Bucket: 'photos', Key: 'cat.txt', Body: 'meow' }));
@@ -36,8 +32,18 @@ await s3.send(new PutObjectCommand({ Bucket: 'photos', Key: 'cat.txt', Body: 'me
 await region.stop();
 ```
 
-The SDK refuses to build a request without a region and credentials, but any values do and
-nothing is dialed. In Node they can instead come from the environment or `~/.aws` as usual.
+[`clientConfig`](/docs/clients/#clientconfig) is the region, throwaway credentials, and the
+handler that turns the client's requests into calls on the region, as one config. The SDK refuses
+to build a request without a region and credentials, but any values do and nothing is dialed.
+
+In Node those two can come from the environment or `~/.aws` as usual, which leaves
+[`requestHandler`](/docs/clients/#requesthandler) as the client's only setting:
+
+```js
+import { requestHandler } from 'pocket-region/node';
+
+const s3 = new S3Client({ requestHandler: requestHandler(region) });
+```
 
 ## In a page
 
@@ -53,22 +59,19 @@ of `dist/` on your own site, and import it by name. Pin a version in a page you 
 
 The page loads the emulator over HTTP, from jsDelivr by default. To serve the package's `vendor/`
 directory from your own site instead, map `pocket-region/vendor/` to it in the same import map,
-or pass `assetsBaseUrl`. A page has no environment, so pass the client its region and credentials.
+or pass `assetsBaseUrl`. A page has no environment to take credentials from, so `clientConfig` is
+how a client gets them there.
 This site maps its own `dist/` and `vendor/`, and examples with a Run button run as shown, in this tab.
 
 <Runnable page>
 
 ```js
-import { createRegion, requestHandler } from 'pocket-region/browser';
+import { clientConfig, createRegion } from 'pocket-region/browser';
 import { S3Client, CreateBucketCommand, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 
 const region = await createRegion();
 
-const s3 = new S3Client({
-  region: 'us-east-1',
-  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
-  requestHandler: requestHandler(region),
-});
+const s3 = new S3Client(clientConfig(region));
 
 await s3.send(new CreateBucketCommand({ Bucket: 'photos' }));
 await s3.send(new PutObjectCommand({ Bucket: 'photos', Key: 'cat.txt', Body: 'meow' }));

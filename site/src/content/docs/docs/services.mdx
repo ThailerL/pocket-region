@@ -47,14 +47,10 @@ tab, against a region that's emptied before each run, as [Examples in your docs]
 describes. To run a JavaScript one in your own code, give its clients a region first:
 
 ```js
-import { createRegion, requestHandler } from 'pocket-region/browser';
+import { clientConfig, createRegion } from 'pocket-region/browser';
 
 const region = await createRegion();
-const config = {
-  region: 'us-east-1',
-  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
-  requestHandler: requestHandler(region),
-};
+const config = clientConfig(region);
 // then new S3Client(config) wherever an example has new S3Client({})
 ```
 

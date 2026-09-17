@@ -1,7 +1,7 @@
 {
   "name": "pocket-region",
   "version": "0.8.0",
-  "description": "Real AWS services like S3, DynamoDB, and Lambda inside Node or a browser tab, reached with the ordinary AWS SDK",
+  "description": "AWS services like S3, DynamoDB, and Lambda inside Node or a browser tab, reached with the ordinary AWS SDK",
   "keywords": [
     "aws",
     "localstack",

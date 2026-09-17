@@ -6,15 +6,11 @@ function calls, without a socket, so there's no container to start and no server
 Lambda handlers run in child processes or Web Workers.
 
 ```js
-import { createRegion, requestHandler } from 'pocket-region/node';
+import { clientConfig, createRegion } from 'pocket-region/node';
 import { S3Client, CreateBucketCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 
 const region = await createRegion();
-const s3 = new S3Client({
-  region: 'us-east-1',
-  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
-  requestHandler: requestHandler(region),
-});
+const s3 = new S3Client(clientConfig(region));
 
 await s3.send(new CreateBucketCommand({ Bucket: 'photos' }));
 await s3.send(new PutObjectCommand({ Bucket: 'photos', Key: 'cat.txt', Body: 'meow' }));

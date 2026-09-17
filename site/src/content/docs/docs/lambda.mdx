@@ -12,16 +12,12 @@ invoke functions with the ordinary SDK. What isn't covered here behaves as it do
 <Runnable page>
 
 ```js
-import { createRegion, requestHandler } from 'pocket-region/browser';
+import { clientConfig, createRegion } from 'pocket-region/browser';
 import { LambdaClient, CreateFunctionCommand, InvokeCommand } from '@aws-sdk/client-lambda';
 import { strToU8, zipSync } from 'fflate';
 
 const region = await createRegion();
-const lambda = new LambdaClient({
-  region: 'us-east-1',
-  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
-  requestHandler: requestHandler(region),
-});
+const lambda = new LambdaClient(clientConfig(region));
 
 const code = 'export const handler = async (event) => `hello, ${event.name}`;';
 await lambda.send(new CreateFunctionCommand({
