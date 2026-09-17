@@ -34,8 +34,9 @@ jobs:
       - run: npm run vendor
       - run: npm run build
       - run: npx playwright install --with-deps chromium firefox
-      - run: npm test
+      # Before the tests: they import site/src/runnable/session.ts, whose tsconfig extends Astro's
       - run: npm ci --prefix site
+      - run: npm test
       - run: npm run check --prefix site
       # site/public/CNAME is in the artifact; without it, a deploy clears the custom domain
       - run: npm run build --prefix site

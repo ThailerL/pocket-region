@@ -32,6 +32,8 @@ jobs:
             exit 1
           }
       - run: npx playwright install --with-deps chromium firefox
+      # The tests import site/src/runnable/session.ts, whose tsconfig extends Astro's
+      - run: npm ci --prefix site
       - run: npm test
       # prepack rebuilds vendor/ and dist/, so the tarball is built here rather than uploaded
       - run: npm publish
