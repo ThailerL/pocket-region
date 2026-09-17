@@ -170,13 +170,38 @@ console.log(\`\${out.Buckets!.length} \${Unit.Bucket}s\` satisfies string);`);
     const made = await createTestRegion();
     await s3('PUT', '/before', undefined, made);
     const against = createRunner({ region: made, resolve });
-    // @ts-expect-error a region passed in is never reset
-    createRunner({ region: made, reset: 'each-run' });
     const { statuses, text } = await run(listBuckets, against);
     expect(statuses).toEqual(['running']);
     expect(text).toEqual(['[\n  "before"\n]']);
     await against.stop();
     expect((await s3('GET', '/before', undefined, made)).status).toBe(200);
+    await made.stop();
+  }, 60_000);
+
+  it('empties a region the page made before every run when asked, and sets it up', async () => {
+    const made = await createTestRegion();
+    await s3('PUT', '/before', undefined, made);
+    const against = createRunner({ region: made, resolve, reset: 'each-run', setup: createBucket('fixture') });
+    const first = await run(listBuckets, against);
+    expect(first.statuses).toEqual(['resetting', 'setting-up', 'running']);
+    expect(first.text).toEqual(['[\n  "fixture"\n]']);
+    await run(createBucket('extra'), against);
+    expect((await run(listBuckets, against)).text).toEqual(['[\n  "fixture"\n]']);
+    await against.stop();
+    expect((await s3('GET', '/fixture', undefined, made)).status).toBe(200);
+    await made.stop();
+  }, 60_000);
+
+  it('sets up a region the page made once, as it is', async () => {
+    const made = await createTestRegion();
+    await s3('PUT', '/before', undefined, made);
+    const against = createRunner({ region: made, resolve, setup: createBucket('fixture') });
+    const first = await run(listBuckets, against);
+    expect(first.statuses).toEqual(['setting-up', 'running']);
+    expect(first.text).toEqual(['[\n  "before",\n  "fixture"\n]']);
+    const second = await run(listBuckets, against);
+    expect(second.statuses).toEqual(['running']);
+    await against.stop();
     await made.stop();
   }, 60_000);
 

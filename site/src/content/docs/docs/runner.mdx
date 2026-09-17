@@ -52,10 +52,10 @@ A snippet can't import `pocket-region` itself: it is AWS code, and the region is
 | Option | Type | Default | |
 | --- | --- | --- | --- |
 | `resolve` | `(specifier: string) => string` | the import map, else jsDelivr | The URL a snippet's import loads from, for anything but `pocket-region`. By default, what the page's import map says, and for a specifier it doesn't map, jsDelivr's `+esm` build of the latest version, such as `https://cdn.jsdelivr.net/npm/@aws-sdk/client-s3/+esm`. Map or resolve `@xmldom/xmldom` too: the SDK's browser build parses XML with the DOM, which the snippet's worker lacks, so the runner loads that package for it. |
-| `region` | `Region` | none | A region from `createRegion` to run every snippet against. The runner never empties or stops it, so your page can set it up before a run and look at it after. It can't be combined with `boot`, `reset`, or `setup`. See [Setting up a region](#setting-up-a-region). |
+| `region` | `Region` | none | A region from `createRegion` to run every snippet against. The runner never stops it, and empties it only when `reset` says so, so your page can set it up before a run and look at it after. It can't be combined with `boot`. See [Setting up a region](#setting-up-a-region). |
 | `boot` | `BrowserRegionOptions` | none | Without `region`, options for the region the runner boots itself. See [The region](/docs/region/#options). |
-| `reset` | `'each-run' \| 'never'` | `'each-run'` | When the runner empties the region it booted itself. `'each-run'` empties it before every run after the first, so each example starts clean. `'never'` keeps what earlier runs made, for examples that build on each other, such as a tutorial whose second step writes to the bucket its first step created. |
-| `setup` | `string` | none | Code, in the same form as a snippet, that runs on the runner's own region whenever it's empty: after a boot, and after each reset. See [Setting up a region](#setting-up-a-region). |
+| `reset` | `'each-run' \| 'never'` | `'each-run'`, or `'never'` with `region` | When the runner empties the region. `'each-run'` empties it before every run, so each example starts clean. The runner's own region is empty when it boots, so its first run skips the reset. `'never'` keeps what earlier runs made, for examples that build on each other, such as a tutorial whose second step writes to the bucket its first step created. |
+| `setup` | `string` | none | Code, in the same form as a snippet, that runs on the region whenever it's empty: after a boot, after each reset, and on the first run against a region you passed in. See [Setting up a region](#setting-up-a-region). |
 
 ## Setting up a region
 
@@ -76,25 +76,22 @@ What setup prints is hidden unless it fails. A failed setup fails the run with a
 `setup failed:`, the snippet doesn't run, and the next run empties the region and tries setup
 again, even with `reset: 'never'`.
 
-With a region you pass in, setup is your page's code. Empty the region and set it up before each
-run, once the previous run has finished, since a reset during a run empties the region under it:
+With a region you pass in, the runner leaves it as it is unless you say otherwise: `reset`
+defaults to `'never'`, and `setup` runs once, on the first run, on whatever the region already
+holds. Ask for `reset: 'each-run'` to have the runner empty it before every run, including the
+first, and run setup on it each time:
 
 ```js
 const region = await createRegion();
-const runner = createRunner({ region });
-let previous = Promise.resolve();
-
-function runExample(code) {
-  previous = previous.then(async () => {
-    await region.reset();
-    await createBooksTable(region); // your own setup, with requestHandler(region)
-    return runner.run(code, { onOutput });
-  });
-  return previous;
-}
+const runner = createRunner({ region, reset: 'each-run', setup: createBooksTable });
 ```
 
-## The runner
+The runner waits for the previous run before it empties the region, so your page needn't
+serialise runs itself. If your page sets the region up in its own code instead, do it before the
+first run, or between runs once the previous one has finished, since a reset during a run empties
+the region under it.
+
+2## The runner
 
 ```ts
 type Runner = {

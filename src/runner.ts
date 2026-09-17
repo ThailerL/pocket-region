@@ -19,11 +19,15 @@ export type RunOptions = {
 export type RunnerOptions = {
   // Where a snippet's import of anything but pocket-region loads from
   resolve?: (specifier: string) => string;
+  // Defaults to 'each-run' for the runner's own region and 'never' for one passed in
+  reset?: RunnerReset;
+  // Code run on the region whenever it's empty
+  setup?: string;
 } & (
-  // A region to run against, left as it is
-  | { region: Region; boot?: never; reset?: never; setup?: never }
-  // Options for the region the runner boots and empties between runs, and code run on it while empty
-  | { region?: never; boot?: BrowserRegionOptions; reset?: RunnerReset; setup?: string }
+  // A region to run against, never stopped by the runner
+  | { region: Region; boot?: never }
+  // Options for the region the runner boots itself
+  | { region?: never; boot?: BrowserRegionOptions }
 );
 
 // 'never' keeps what earlier runs made, for examples that build on each other
@@ -39,34 +43,37 @@ const fromCdn = (specifier: string) => fromImportMap(specifier, () => `https://c
 
 export function createRunner(options: RunnerOptions = {}): Runner {
   const resolve = options.resolve ?? fromCdn;
+  const reset = options.reset ?? (options.region ? 'never' : 'each-run');
   let own: Promise<Region> | undefined;
-  // The runner's region, once it was last emptied and set up in full
-  let prepared: Promise<Region> | undefined;
+  // Whether the region was set up in full since it was last booted, passed in, or emptied
+  let prepared = false;
+  // A setup that failed partway leaves the region to be emptied before it runs again
+  let spoiled = false;
   let worker: Worker | undefined;
   let current: RunOptions | undefined;
   const runs = pendingCalls<void>();
   // One snippet at a time: they share the region
   let queue: Promise<unknown> = Promise.resolve();
 
-  // Fresh when just booted or emptied, and so due for setup
+  // Fresh when just booted, first passed in, or emptied, and so due for setup
   function regionFor(onStatus: (status: RunnerStatus) => void): { region: Promise<Region>; fresh: boolean } {
-    if (options.region) return { region: Promise.resolve(options.region), fresh: false };
-    if (!own) {
+    if (!options.region && !own) {
       onStatus({ phase: 'booting' });
       own = createRegion(options.boot);
       own.catch(() => (own = undefined));
+      prepared = spoiled = false;
       return { region: own, fresh: true };
     }
-    // A setup that failed partway leaves the region to be emptied before it runs again
-    if (options.reset !== 'never' || prepared !== own) {
+    const held = options.region ? Promise.resolve(options.region) : own!;
+    if (reset === 'each-run' || spoiled) {
       onStatus({ phase: 'resetting' });
-      const emptied = own.then(async (region) => {
+      const emptied = held.then(async (region) => {
         await region.reset();
         return region;
       });
       return { region: emptied, fresh: true };
     }
-    return { region: own, fresh: false };
+    return { region: held, fresh: !prepared };
   }
 
   // Ends whatever is running, however stuck; the next run starts a fresh worker
@@ -123,7 +130,6 @@ export function createRunner(options: RunnerOptions = {}): Runner {
     const { onStatus = () => {} } = runOptions;
     const target = workerFor();
     const { region, fresh } = regionFor(onStatus);
-    const booted = own;
     const setup = fresh && options.setup !== undefined ? post(target, options.setup) : undefined;
     const snippet = post(target, code);
 
@@ -133,6 +139,7 @@ export function createRunner(options: RunnerOptions = {}): Runner {
       try {
         await complete(target, setup, region, 'setting-up', onStatus);
       } catch (error) {
+        spoiled = true;
         held.forEach((output) => runOptions.onOutput?.(output));
         const failure = new Error(`setup failed: ${(error as Error).message}`, { cause: error });
         await attach(target, snippet.id, Promise.reject(failure));
@@ -140,7 +147,10 @@ export function createRunner(options: RunnerOptions = {}): Runner {
         throw failure;
       }
     }
-    if (fresh) prepared = booted;
+    if (fresh) {
+      prepared = true;
+      spoiled = false;
+    }
 
     current = runOptions;
     await complete(target, snippet, region, 'running', onStatus);
