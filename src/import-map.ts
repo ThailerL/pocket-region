@@ -9,5 +9,9 @@ export function fromImportMap(specifier: string, fallback: () => string) {
   }
 }
 
+// Pyodide's own runtime, from where the page says or jsDelivr at the version the tree was built against
+export const pyodideIndexUrl = (indexURL: string | undefined, version: string) =>
+  new URL(indexURL ?? `https://cdn.jsdelivr.net/npm/pyodide@${version}/`, globalThis.location?.href).href;
+
 export const defaultAssetsBaseUrl = () =>
   fromImportMap('pocket-region/vendor/', () => `https://cdn.jsdelivr.net/npm/pocket-region@${PACKAGE_VERSION}/vendor/`);

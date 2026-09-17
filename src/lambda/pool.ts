@@ -1,3 +1,4 @@
+import { awsEnvironment } from '../client-defaults.ts';
 import {
   unref,
   type FunctionConfig,
@@ -94,10 +95,7 @@ const environmentVariables = (config: FunctionConfig, logStream: string, endpoin
   AWS_LAMBDA_FUNCTION_MEMORY_SIZE: String(config.MemorySize),
   AWS_LAMBDA_LOG_STREAM_NAME: logStream,
   _HANDLER: config.Handler,
-  AWS_REGION: 'us-east-1',
-  AWS_DEFAULT_REGION: 'us-east-1',
-  AWS_ACCESS_KEY_ID: 'test',
-  AWS_SECRET_ACCESS_KEY: 'test',
+  ...awsEnvironment({ region: 'us-east-1', credentials: { accessKeyId: 'test', secretAccessKey: 'test' } }),
   AWS_ENDPOINT_URL: endpoint,
   ...config.Environment?.Variables,
 });

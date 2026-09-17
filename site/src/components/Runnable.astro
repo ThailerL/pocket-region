@@ -2,7 +2,9 @@
 // Wraps a code fence. Run executes the code as shown and shows what it logs underneath: in a
 // worker against a region booted for the page, or with `page`, on the page itself through its
 // import map, for this site's own examples of the API, which the runner refuses. A page example
-// has no Stop: what a reader types there runs on the page's thread
+// has no Stop: what a reader types there runs on the page's thread. A Python `>>>` session isn't
+// editable: its results appear inside the fence, under each statement, in place of the expected
+// output shown, and Reset puts the expected output back
 const { page = false } = Astro.props;
 ---
 
@@ -31,12 +33,24 @@ const { page = false } = Astro.props;
   }
 
   .runnable.editing :global(.expressive-code),
-  .runnable:not(.editing) :is(.editor, .reset),
+  .runnable:not(.editing) .editor,
+  .runnable:not(.editing):not(.ran) .reset,
   .runnable.editing .edit,
+  .runnable.session .edit,
   .runnable:not(.running) .stop,
   .runnable[data-page] .stop,
+  .runnable.ran :global(.ec-line.expected),
   .output:empty {
     display: none;
+  }
+
+  .runnable :global(.ec-line.result) {
+    color: var(--sl-color-gray-2);
+    font-style: italic;
+  }
+
+  .runnable :global(.ec-line.result.stderr) {
+    color: var(--sl-color-red);
   }
 
   .editor :global(.cm-editor) {

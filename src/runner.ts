@@ -1,17 +1,26 @@
 import { createRegion, type BrowserRegionOptions } from './browser.ts';
+import { AWS_DEFAULTS, awsEnvironment } from './client-defaults.ts';
 import { jspiSupported, type Region } from './core.ts';
-import { fromImportMap } from './import-map.ts';
+import { fromImportMap, pyodideIndexUrl } from './import-map.ts';
 import { answer, pendingCalls, toWire } from './region/protocol.ts';
 import { portFor } from './region/proxy.ts';
-import type { FromRunnerWorker, RunnerOutput, ToRunnerWorker } from './runner/protocol.ts';
+import type { FromRunnerWorker, Language, PythonBoot, RunnerOutput, ToRunnerWorker } from './runner/protocol.ts';
 import { importing, onFailure, siblingUrl, startWorker } from './start-worker.ts';
+import { PYODIDE_VERSION } from './version.generated.ts';
 
-export type { ConsoleMethod, RunnerOutput } from './runner/protocol.ts';
+export type { ConsoleMethod, JavaScriptOutput, Language, PythonOutput, RunnerOutput } from './runner/protocol.ts';
+export type Snippet = { language: Language; code: string };
 export type RunnerPhase = 'booting' | 'resetting' | 'setting-up' | 'running';
 export type RunnerStatus = { phase: RunnerPhase };
 export type RunResult = { ok: true; durationMs: number } | { ok: false; durationMs: number; error: unknown };
 
 export type RunOptions = {
+  // Defaults to 'javascript'
+  language?: Language;
+  // Print each expression statement's value as an interpreter session would. Python only
+  echo?: boolean;
+  // For this run, in place of the runner's: 'never' continues from the previous run
+  reset?: RunnerReset;
   onOutput?: (output: RunnerOutput) => void;
   onStatus?: (status: RunnerStatus) => void;
 };
@@ -21,8 +30,12 @@ export type RunnerOptions = {
   resolve?: (specifier: string) => string;
   // Defaults to 'each-run' for the runner's own region and 'never' for one passed in
   reset?: RunnerReset;
-  // Code run on the region whenever it's empty
-  setup?: string;
+  // Code run on the region whenever it's empty, JavaScript unless it says which language
+  setup?: string | Snippet;
+  python?: {
+    // What micropip installs before the first Python run, by default boto3
+    packages?: string[];
+  };
 } & (
   // A region to run against, never stopped by the runner
   | { region: Region; boot?: never }
@@ -41,6 +54,8 @@ export type Runner = {
 
 const fromCdn = (specifier: string) => fromImportMap(specifier, () => `https://cdn.jsdelivr.net/npm/${specifier}/+esm`);
 
+const asSnippet = (code: string | Snippet): Snippet => (typeof code === 'string' ? { language: 'javascript', code } : code);
+
 export function createRunner(options: RunnerOptions = {}): Runner {
   const resolve = options.resolve ?? fromCdn;
   const reset = options.reset ?? (options.region ? 'never' : 'each-run');
@@ -49,14 +64,16 @@ export function createRunner(options: RunnerOptions = {}): Runner {
   let prepared = false;
   // A setup that failed partway leaves the region to be emptied before it runs again
   let spoiled = false;
-  let worker: Worker | undefined;
+  const workers = new Map<Language, Worker>();
+  let active: Language | undefined;
+  let pythonBoot: PythonBoot | undefined;
   let current: RunOptions | undefined;
   const runs = pendingCalls<void>();
   // One snippet at a time: they share the region
   let queue: Promise<unknown> = Promise.resolve();
 
   // Fresh when just booted, first passed in, or emptied, and so due for setup
-  function regionFor(onStatus: (status: RunnerStatus) => void): { region: Promise<Region>; fresh: boolean } {
+  function regionFor(onStatus: (status: RunnerStatus) => void, wanted: RunnerReset): { region: Promise<Region>; fresh: boolean } {
     if (!options.region && !own) {
       onStatus({ phase: 'booting' });
       own = createRegion(options.boot);
@@ -65,7 +82,7 @@ export function createRunner(options: RunnerOptions = {}): Runner {
       return { region: own, fresh: true };
     }
     const held = options.region ? Promise.resolve(options.region) : own!;
-    if (reset === 'each-run' || spoiled) {
+    if (wanted === 'each-run' || spoiled) {
       onStatus({ phase: 'resetting' });
       const emptied = held.then(async (region) => {
         await region.reset();
@@ -76,17 +93,29 @@ export function createRunner(options: RunnerOptions = {}): Runner {
     return { region: held, fresh: !prepared };
   }
 
-  // Ends whatever is running, however stuck; the next run starts a fresh worker
-  const abort = (error: Error) => {
-    worker?.terminate();
-    worker = undefined;
+  // Ends whatever that language's worker is running, however stuck; its next run starts a fresh one
+  const abort = (error: Error, language = active) => {
+    workers.get(language!)?.terminate();
+    workers.delete(language!);
     runs.fail(error);
   };
 
-  function workerFor() {
-    if (worker) return worker;
-    const started = startWorker(importing(siblingUrl('runner/worker')), 'pocket-region-runner');
-    onFailure(started, "the runner's worker", abort);
+  // Pyodide for a snippet comes from where the region's does, or the CDN; micropip lives only on Pyodide's own CDN
+  const bootPython = (worker: Worker) => {
+    pythonBoot ??= {
+      indexURL: pyodideIndexUrl(options.boot?.indexURL, PYODIDE_VERSION),
+      packageBaseUrl: `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`,
+      packages: options.python?.packages ?? ['boto3'],
+      environment: awsEnvironment(AWS_DEFAULTS),
+    };
+    worker.postMessage({ type: 'boot', python: pythonBoot } satisfies ToRunnerWorker);
+  };
+
+  function workerFor(language: Language) {
+    const running = workers.get(language);
+    if (running) return running;
+    const started = startWorker(importing(siblingUrl(`runner/${language}-worker`)), `pocket-region-${language}-runner`);
+    onFailure(started, "the runner's worker", (error) => abort(error, language));
     started.onmessage = ({ data }: MessageEvent<FromRunnerWorker>) => {
       switch (data.type) {
         case 'resolve':
@@ -100,7 +129,9 @@ export function createRunner(options: RunnerOptions = {}): Runner {
           return runs.settle(data.id, undefined, data.error);
       }
     };
-    return (worker = started);
+    workers.set(language, started);
+    if (language === 'python') bootPython(started);
+    return started;
   }
 
   async function attach(target: Worker, id: number, region: Promise<Region>) {
@@ -113,36 +144,37 @@ export function createRunner(options: RunnerOptions = {}): Runner {
   }
 
   // The code's imports start loading now; it runs once attach sends its region
-  function post(target: Worker, code: string) {
+  function post({ language, code }: Snippet, fresh: boolean, echo?: boolean) {
+    const target = workerFor((active = language));
     let id = 0;
-    const finished = runs.start((started) => target.postMessage({ type: 'run', id: (id = started), code } satisfies ToRunnerWorker));
+    const finished = runs.start((started) => target.postMessage({ type: 'run', id: (id = started), code, fresh, echo } satisfies ToRunnerWorker));
     finished.catch(() => {});
-    return { id, finished };
+    return { finished, attach: (region: Promise<Region>) => attach(target, id, region) };
   }
 
-  async function complete(target: Worker, run: ReturnType<typeof post>, region: Promise<Region>, phase: RunnerPhase, onStatus: (status: RunnerStatus) => void) {
+  async function complete(run: ReturnType<typeof post>, region: Promise<Region>, phase: RunnerPhase, onStatus: (status: RunnerStatus) => void) {
     // A run that fails first still waits for its region, so the next run never overlaps a boot or reset
-    const [outcome] = await Promise.allSettled([run.finished, attach(target, run.id, region).then(() => onStatus({ phase }))]);
+    const [outcome] = await Promise.allSettled([run.finished, run.attach(region).then(() => onStatus({ phase }))]);
     if (outcome.status === 'rejected') throw outcome.reason;
   }
 
-  async function execute(code: string, runOptions: RunOptions) {
+  async function execute(code: Snippet, runOptions: RunOptions) {
     const { onStatus = () => {} } = runOptions;
-    const target = workerFor();
-    const { region, fresh } = regionFor(onStatus);
-    const setup = fresh && options.setup !== undefined ? post(target, options.setup) : undefined;
-    const snippet = post(target, code);
+    if (runOptions.echo && code.language !== 'python') throw new Error('echo is not supported for JavaScript: it needs an expression-statement rewrite the runner lacks');
+    const { region, fresh } = regionFor(onStatus, runOptions.reset ?? reset);
+    const setup = fresh && options.setup !== undefined ? post(asSnippet(options.setup), true) : undefined;
+    const snippet = post(code, fresh, runOptions.echo);
 
     if (setup) {
       const held: RunnerOutput[] = [];
       current = { onOutput: (output) => held.push(output) };
       try {
-        await complete(target, setup, region, 'setting-up', onStatus);
+        await complete(setup, region, 'setting-up', onStatus);
       } catch (error) {
         spoiled = true;
         held.forEach((output) => runOptions.onOutput?.(output));
         const failure = new Error(`setup failed: ${(error as Error).message}`, { cause: error });
-        await attach(target, snippet.id, Promise.reject(failure));
+        await snippet.attach(Promise.reject(failure));
         await snippet.finished.catch(() => {});
         throw failure;
       }
@@ -153,7 +185,7 @@ export function createRunner(options: RunnerOptions = {}): Runner {
     }
 
     current = runOptions;
-    await complete(target, snippet, region, 'running', onStatus);
+    await complete(snippet, region, 'running', onStatus);
   }
 
   return {
@@ -162,7 +194,7 @@ export function createRunner(options: RunnerOptions = {}): Runner {
       const result = queue.then(async (): Promise<RunResult> => {
         const started = performance.now();
         try {
-          await execute(code, runOptions);
+          await execute({ language: runOptions.language ?? 'javascript', code }, runOptions);
           return { ok: true, durationMs: performance.now() - started };
         } catch (error) {
           return { ok: false, durationMs: performance.now() - started, error };

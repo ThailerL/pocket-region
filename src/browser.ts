@@ -2,7 +2,7 @@ import { lockedLoad, requireJspi, type Region, type RegionSettings, type StateSt
 import type { BootAssets } from './region/protocol.ts';
 import { regionOver } from './region/proxy.ts';
 import { importing, siblingUrl, startWorker } from './start-worker.ts';
-import { defaultAssetsBaseUrl } from './import-map.ts';
+import { defaultAssetsBaseUrl, pyodideIndexUrl } from './import-map.ts';
 
 export type {
   Dispatch,
@@ -119,10 +119,7 @@ async function locateAssets(options: BrowserRegionOptions): Promise<BootAssets> 
   }
   const manifest: VendorManifest = await response.json();
   return {
-    indexURL: new URL(
-      options.indexURL ?? `https://cdn.jsdelivr.net/npm/pyodide@${manifest.pyodideVersion}/`,
-      globalThis.location?.href,
-    ).href,
+    indexURL: pyodideIndexUrl(options.indexURL, manifest.pyodideVersion),
     stdLib: new URL(manifest.stdlib, base).href,
     wheels: manifest.wheels.map((file) => new URL(file, base).href),
   };

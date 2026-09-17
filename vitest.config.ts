@@ -6,7 +6,7 @@ import { defineConfig, type Plugin } from 'vitest/config';
 const workerRunnerStub = (): Plugin => ({
   name: 'pocket-region:worker-runner-stub',
   transform(code, id) {
-    if (!/\/src\/(region|runner)\/worker\.ts$/.test(id)) return;
+    if (!/\/src\/.+\/[\w-]*worker\.ts$/.test(id)) return;
     return { code: `globalThis.__vitest_browser_runner__ ??= { wrapDynamicImport: (f) => f() };\n${code}`, map: null };
   },
 });

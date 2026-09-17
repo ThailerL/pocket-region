@@ -47,15 +47,57 @@ client, which the runner doesn't reach, and would call AWS.
 
 A snippet can't import `pocket-region` itself: it is AWS code, and the region is the runner's.
 
+## Python
+
+Pass `language: 'python'` to run a snippet with Python, where boto3 reaches the same region.
+The runner fills in a region, throwaway credentials, and the request hook, so this runs as shown
+against the region a JavaScript snippet on the same page uses.
+
+<Runnable>
+
+```py
+import boto3
+
+s3 = boto3.client('s3')
+s3.create_bucket(Bucket='photos')
+print([bucket['Name'] for bucket in s3.list_buckets()['Buckets']])
+```
+
+</Runnable>
+
+A snippet runs as a script: what it prints is all it prints. With [`echo: true`](#the-runner)
+it also prints what an interpreter session would have, the value of each expression statement as
+its `repr`, and nothing for `None`. That's how a page runs an example written as a `>>>` session:
+the prompts are the page's format, so the page removes them, drops the expected output between
+them, and runs the statements it's left with. This page blanks the expected output rather than
+dropping it, so every line keeps its number, runs the session below as one snippet with
+`echo: true`, and puts each result under the statement whose [`line`](#the-runner) it came from.
+
+<Runnable>
+
+```py
+>>> import boto3
+>>> s3 = boto3.client('s3')
+>>> s3.create_bucket(Bucket='photos')['ResponseMetadata']['HTTPStatusCode']
+>>> [bucket['Name'] for bucket in s3.list_buckets()['Buckets']]
+```
+
+</Runnable>
+
+The first Python run downloads Pyodide again for the snippet's own interpreter, which keeps a
+snippet that never ends out of the region, and installs boto3 from PyPI. Name what else a
+snippet imports in [`python.packages`](#options).
+
 ## Options
 
 | Option | Type | Default | |
 | --- | --- | --- | --- |
 | `resolve` | `(specifier: string) => string` | the import map, else jsDelivr | The URL a snippet's import loads from, for anything but `pocket-region`. By default, what the page's import map says, and for a specifier it doesn't map, jsDelivr's `+esm` build of the latest version, such as `https://cdn.jsdelivr.net/npm/@aws-sdk/client-s3/+esm`. Map or resolve `@xmldom/xmldom` too: the SDK's browser build parses XML with the DOM, which the snippet's worker lacks, so the runner loads that package for it. |
 | `region` | `Region` | none | A region from `createRegion` to run every snippet against. The runner never stops it, and empties it only when `reset` says so, so your page can set it up before a run and look at it after. It can't be combined with `boot`. See [Setting up a region](#setting-up-a-region). |
-| `boot` | `BrowserRegionOptions` | none | Without `region`, options for the region the runner boots itself. See [The region](/docs/region/#options). |
-| `reset` | `'each-run' \| 'never'` | `'each-run'`, or `'never'` with `region` | When the runner empties the region. `'each-run'` empties it before every run, so each example starts clean. The runner's own region is empty when it boots, so its first run skips the reset. `'never'` keeps what earlier runs made, for examples that build on each other, such as a tutorial whose second step writes to the bucket its first step created. |
-| `setup` | `string` | none | Code, in the same form as a snippet, that runs on the region whenever it's empty: after a boot, after each reset, and on the first run against a region you passed in. See [Setting up a region](#setting-up-a-region). |
+| `boot` | `BrowserRegionOptions` | none | Without `region`, options for the region the runner boots itself. See [The region](/docs/region/#options). A Python snippet's own Pyodide comes from its `indexURL` too. |
+| `reset` | `'each-run' \| 'never'` | `'each-run'`, or `'never'` with `region` | When the runner empties the region. `'each-run'` empties it before every run, so each example starts clean. The runner's own region is empty when it boots, so its first run skips the reset. `'never'` keeps what earlier runs made, for examples that build on each other, such as a tutorial whose second step writes to the bucket its first step created: the region's state, a Python run's names, and what a JavaScript run put on `globalThis`. A run after a reset starts with none of them. |
+| `setup` | `string \| { language, code }` | none | Code, in the same form as a snippet, that runs on the region whenever it's empty: after a boot, after each reset, and on the first run against a region you passed in. A string is JavaScript. See [Setting up a region](#setting-up-a-region). |
+| `python` | `{ packages?: string[] }` | `{ packages: ['boto3'] }` | What micropip installs from PyPI before the first Python run: the packages the snippets import, as pure-Python wheels. |
 
 ## Setting up a region
 
@@ -72,7 +114,8 @@ const runner = createRunner({
 });
 ```
 
-What setup prints is hidden unless it fails. A failed setup fails the run with an error starting
+What setup prints is hidden unless it fails. Setup prepares the region, not the snippet: a
+name it defines isn't there when the snippet runs. A failed setup fails the run with an error starting
 `setup failed:`, the snippet doesn't run, and the next run empties the region and tries setup
 again, even with `reset: 'never'`.
 
@@ -91,12 +134,12 @@ serialise runs itself. If your page sets the region up in its own code instead, 
 first run, or between runs once the previous one has finished, since a reset during a run empties
 the region under it.
 
-2## The runner
+## The runner
 
 ```ts
 type Runner = {
   supported: boolean;
-  run(code: string, options?: { onOutput?, onStatus? }): Promise<RunResult>;
+  run(code: string, options?: { language?, echo?, reset?, onOutput?, onStatus? }): Promise<RunResult>;
   stop(): Promise<void>;
 };
 
@@ -105,10 +148,23 @@ type RunResult = { ok: true; durationMs: number } | { ok: false; durationMs: num
 
 - **`supported`** is false in a browser without WebAssembly JSPI, where no region can boot. Show
   the code without a Run button there.
-- **`run(code)`** resolves once the code finishes, and never rejects: what the code throws comes
-  back as `error`. Runs wait for each other, since they share the region.
-  - `onOutput({ method, stream, text, values })` gets each `console` call, with `method` naming
-    it. `log`, `info`, `debug`, `table`, and `dir` go to `'stdout'`, and `warn` and `error` to
+- **`run(code)`** resolves once the code finishes, and never rejects: what the code throws or
+  raises comes back as `error`, with its `name`, `message`, `stack`, and the `line` of the snippet
+  it came from when that could be told. A Python error's `stack` is its traceback. Runs wait for
+  each other, since they share the region.
+  - `language` is `'javascript'` unless it says `'python'`.
+  - `echo` prints each expression statement's value as an interpreter session would, for Python
+    only.
+  - `reset` is this run's, in place of the runner's [`reset`](#options): `'never'` continues from
+    the previous run, keeping the region and, for Python, the names the previous run defined, so
+    a page can run a session one statement at a time.
+  - `onOutput(output)` gets each line the snippet prints, with `language`, `stream`, and `text`.
+    Python output is what `print` or a session's echo wrote, one line at a time. In both
+    languages, `line` is the 1-based line of the snippet whose call made the output: the
+    `console` call, `print`, or echoed statement, even when a library did the calling. It's
+    absent when nothing of the snippet was on the stack, such as a rejection reported after the
+    run. JavaScript output adds `method` and `values`: it gets each
+    `console` call, with `method` naming it. `log`, `info`, `debug`, `table`, and `dir` go to `'stdout'`, and `warn` and `error` to
     `'stderr'`, along with any rejected promise nothing handles, as an `error`. `text` is the call
     as one string, with values that aren't strings as JSON. For `table`, `text` is the table drawn
     in box characters, and for `dir` it's the first argument alone. `values` holds the
@@ -117,7 +173,8 @@ type RunResult = { ok: true; durationMs: number } | { ok: false; durationMs: num
     object with a method, arrives as its text. The page's own `console` isn't touched.
   - `onStatus({ phase })` gets `'booting'` before the region's first boot, which downloads about
     15 MB on a first visit, `'resetting'` before a later run that empties the region, `'setting-up'` while
-    [`setup`](#setting-up-a-region) runs, then `'running'`.
+    [`setup`](#setting-up-a-region) runs, then `'running'`. The first Python run loads its
+    interpreter and packages during whichever phase comes first.
 - **`stop()`** ends the current run at once, however stuck it is: its result is `ok: false` with
   an error saying `stopped`. The region the runner booted itself stops with it, and a later run
   boots again. A region you passed in is left alone.
@@ -125,7 +182,8 @@ type RunResult = { ok: true; durationMs: number } | { ok: false; durationMs: num
 A snippet can be TypeScript. The runner removes the types before running it, without type
 checking, and leaves plain JavaScript as it is.
 
-A snippet runs as the body of an async function, so top-level `await` works. It can import with
-`import … from '…'` at the start of a line and `import('…')` with a literal specifier, but it can't
-`export`. It runs in a Web Worker, so it can't reach the page or its DOM, and a snippet that
-loops forever freezes nothing but itself.
+A JavaScript snippet runs as the body of an async function, so top-level `await` works. It can
+import with `import … from '…'` at the start of a line and `import('…')` with a literal
+specifier, but it can't `export`. A Python snippet runs as a module, with top-level `await`
+allowed, in a fresh namespace each run. Either runs in a Web Worker, so it can't reach the page
+or its DOM, and a snippet that loops forever freezes nothing but itself.

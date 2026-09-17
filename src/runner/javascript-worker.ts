@@ -1,14 +1,12 @@
 // Runs one snippet at a time against the runner's region, started by createRunner as a module worker
-import { fromWire, pendingCalls, toWire, workerEndpoint } from '../region/protocol.ts';
-import { regionOver } from '../region/proxy.ts';
+import type { Region } from '../core.ts';
+import { pendingCalls } from '../region/protocol.ts';
 import { withRegion } from '../with-region.ts';
 import { createConsole, format } from './console.ts';
 import { AsyncFunction, IMPORT, rewriteImports } from './imports.ts';
-import type { FromRunnerWorker, ToRunnerWorker } from './protocol.ts';
+import { post, serveRuns, type RunMessage } from './serve.ts';
+import { lineIn, snippetLine } from './stack.ts';
 import { stripTypes } from './strip.ts';
-
-const port = workerEndpoint<FromRunnerWorker, ToRunnerWorker>();
-const post = (message: FromRunnerWorker) => port.postMessage(message);
 
 const resolutions = pendingCalls<string>();
 const modules = new Map<string, Promise<object>>();
@@ -25,11 +23,27 @@ const load = (specifier: string) => {
   return loading;
 };
 
+// What the worker itself put on the global object; a fresh run removes what snippets added since,
+// as a Python run starts its namespace over
+const own = new Set(Object.getOwnPropertyNames(globalThis));
+function clearGlobals() {
+  for (const name of Object.getOwnPropertyNames(globalThis)) {
+    if (!own.has(name) && Object.getOwnPropertyDescriptor(globalThis, name)?.configurable) delete (globalThis as Record<string, unknown>)[name];
+  }
+}
+
 // The SDK's browser build parses XML with the DOM, which a worker lacks
 async function polyfillDom() {
   if ('DOMParser' in globalThis) return;
   const { DOMParser, Node } = (await load('@xmldom/xmldom')) as Pick<typeof globalThis, 'DOMParser' | 'Node'>;
   Object.assign(globalThis, { DOMParser, Node });
+  own.add('DOMParser').add('Node');
+}
+
+// Where in the snippet it was thrown, when its stack still says
+function located(error: unknown) {
+  if (typeof error === 'object' && error !== null) Object.assign(error, { line: lineIn((error as Error).stack) });
+  return error;
 }
 
 function copyable(value: unknown) {
@@ -41,7 +55,8 @@ function copyable(value: unknown) {
   }
 }
 
-const console = createConsole((output) => {
+const console = createConsole((made) => {
+  const output = { ...made, line: snippetLine() };
   try {
     post({ type: 'output', output });
   } catch {
@@ -54,42 +69,24 @@ self.addEventListener('unhandledrejection', (event) => console.error('Uncaught (
 
 const isPocketRegion = (specifier: string) => specifier.split('/')[0] === 'pocket-region';
 
-async function run(code: string, regionPort: Promise<MessagePort>) {
+async function run({ code, fresh }: RunMessage, attached: Promise<Region>) {
+  if (fresh) clearGlobals();
   const { code: body, specifiers } = rewriteImports(stripTypes(code));
   const refused = specifiers.find(isPocketRegion);
   if (refused) throw new Error(`a snippet can't import ${refused}: it runs against the runner's region`);
 
   // The imports load while the region boots on the page
   const loading = new Map(specifiers.map((specifier) => [specifier, load(specifier)]));
-  const [, region] = await Promise.all([polyfillDom(), regionPort.then((port) => regionOver(port, {}))]);
+  const [, region] = await Promise.all([polyfillDom(), attached]);
 
   const importer = async (specifier: string) => withRegion(await loading.get(specifier)!, region);
-  await new AsyncFunction(IMPORT, 'console', body)(importer, console);
+  try {
+    await new AsyncFunction(IMPORT, 'console', body)(importer, console);
+  } catch (error) {
+    throw located(error);
+  }
 }
 
-const regions = new Map<number, { resolve: (port: MessagePort) => void; reject: (error: Error) => void }>();
-
-port.onmessage = async ({ data }) => {
-  switch (data.type) {
-    case 'resolved':
-      return resolutions.settle(data.id, data.url, data.error);
-    case 'region': {
-      const waiting = regions.get(data.id)!;
-      regions.delete(data.id);
-      return data.port ? waiting.resolve(data.port) : waiting.reject(fromWire(data.error!));
-    }
-    case 'run': {
-      const regionPort = new Promise<MessagePort>((resolve, reject) => regions.set(data.id, { resolve, reject }));
-      try {
-        await run(data.code, regionPort);
-        post({ type: 'done', id: data.id });
-      } catch (error) {
-        post({ type: 'failed', id: data.id, error: toWire(error) });
-      } finally {
-        // Also a run that failed before its port arrived
-        regionPort.then((port) => port.close(), () => {});
-      }
-      return;
-    }
-  }
-};
+serveRuns(run, (data) => {
+  if (data.type === 'resolved') resolutions.settle(data.id, data.url, data.error);
+});

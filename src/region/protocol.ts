@@ -1,7 +1,8 @@
 // The messages between a page's region proxy and its worker
 import type { LambdaEvent, LambdaOutput, RegionOutput, RegionRequest, RegionResponse, StateFiles } from '../core.ts';
 
-export type WireError = { name: string; message: string; stack?: string };
+// line is where in a snippet the error came from, when a runner's worker could tell
+export type WireError = { name: string; message: string; stack?: string; line?: number };
 
 export type RegionMethod = 'dispatch' | 'reset' | 'save' | 'stop';
 export type StoreMethod = 'load' | 'replace' | 'close';
@@ -71,14 +72,15 @@ export async function answer<T>(produce: () => Promise<T>, reply: (value?: T, er
 }
 
 export function toWire(error: unknown): WireError {
-  const { name, message, stack } = (error ?? {}) as Partial<Error>;
-  return { name: name ?? 'Error', message: message ?? String(error), stack };
+  const { name, message, stack, line } = (error ?? {}) as Partial<Error & { line: unknown }>;
+  return { name: name ?? 'Error', message: message ?? String(error), stack, line: typeof line === 'number' ? line : undefined };
 }
 
-export function fromWire({ name, message, stack }: WireError): Error {
+export function fromWire({ name, message, stack, line }: WireError): Error {
   const error = new Error(message);
   // Error.name lives on the prototype; an SDK's NoSuchBucket keeps its name this way
   Object.defineProperty(error, 'name', { value: name, configurable: true, writable: true });
   if (stack) error.stack = stack;
+  if (line !== undefined) Object.assign(error, { line });
   return error;
 }

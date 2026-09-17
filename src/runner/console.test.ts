@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { RunnerOutput } from './protocol.ts';
+import type { JavaScriptOutput } from './protocol.ts';
 import { createConsole } from './console.ts';
 
 function capture() {
-  const lines: RunnerOutput[] = [];
+  const lines: JavaScriptOutput[] = [];
   return { console: createConsole((line) => lines.push(line)), lines };
 }
 
@@ -12,7 +12,7 @@ describe('the console a snippet sees', () => {
     const { console, lines } = capture();
     const books = [{ title: 'IT', price: 15 }, { title: 'Carrie', genre: ['HORROR'] }, 'loose'];
     console.table(books);
-    expect(lines).toEqual([{ method: 'table', stream: 'stdout', values: [books], text: `┌─────────┬────────┬───────┬────────────┬────────┐
+    expect(lines).toEqual([{ language: 'javascript', method: 'table', stream: 'stdout', values: [books], text: `┌─────────┬────────┬───────┬────────────┬────────┐
 │ (index) │ title  │ price │ genre      │ Values │
 ├─────────┼────────┼───────┼────────────┼────────┤
 │ 0       │ IT     │ 15    │            │        │
@@ -43,7 +43,7 @@ describe('the console a snippet sees', () => {
   it('prints only what console.dir is given, not its options', () => {
     const { console, lines } = capture();
     console.dir({ a: 1 }, { depth: 0 });
-    expect(lines).toEqual([{ method: 'dir', stream: 'stdout', text: '{\n  "a": 1\n}', values: [{ a: 1 }, { depth: 0 }] }]);
+    expect(lines).toEqual([{ language: 'javascript', method: 'dir', stream: 'stdout', text: '{\n  "a": 1\n}', values: [{ a: 1 }, { depth: 0 }] }]);
   });
 
   it('names the method each line came from, and sends warnings and errors to stderr', () => {

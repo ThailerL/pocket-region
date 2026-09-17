@@ -1,7 +1,7 @@
-import { javascript } from '@codemirror/lang-javascript';
 import { Compartment, EditorState } from '@codemirror/state';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { EditorView, minimalSetup } from 'codemirror';
+import type { Language } from 'pocket-region/browser';
 
 export type Editor = { code(): string; reset(): void };
 
@@ -13,12 +13,16 @@ new MutationObserver(() => {
   for (const view of views) view.dispatch({ effects: theme.reconfigure(themed()) });
 }).observe(document.documentElement, { attributeFilter: ['data-theme'] });
 
-export function mount(parent: HTMLElement, original: string): Editor {
+// The grammar loads with the language, so a reader editing one never downloads the other
+const grammarFor = async (language: Language) =>
+  language === 'python' ? (await import('@codemirror/lang-python')).python() : (await import('@codemirror/lang-javascript')).javascript();
+
+export async function mount(parent: HTMLElement, original: string, language: Language): Promise<Editor> {
   const view = new EditorView({
     parent,
     state: EditorState.create({
       doc: original,
-      extensions: [minimalSetup, javascript(), theme.of(themed())],
+      extensions: [minimalSetup, await grammarFor(language), theme.of(themed())],
     }),
   });
   views.add(view);

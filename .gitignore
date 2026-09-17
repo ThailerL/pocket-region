@@ -3,6 +3,7 @@ dist/
 vendor/
 .vitest/
 src/python.generated.ts
+src/runner/python.generated.ts
 src/version.generated.ts
 src/lambda/process-runtime.generated.ts
 src/lambda/worker-runtime.generated.ts

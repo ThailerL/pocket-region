@@ -1,5 +1,5 @@
 // The console a snippet sees, turning each call into a line of output
-import type { ConsoleMethod, RunnerOutput } from './protocol.ts';
+import type { ConsoleMethod, JavaScriptOutput } from './protocol.ts';
 
 export function format(value: unknown, indent = 2) {
   if (typeof value === 'string') return value;
@@ -42,8 +42,8 @@ function textOf(method: ConsoleMethod, args: unknown[]) {
   return args.map((value) => format(value)).join(' ');
 }
 
-export function createConsole(write: (output: RunnerOutput) => void): Record<ConsoleMethod, (...args: unknown[]) => void> {
+export function createConsole(write: (output: JavaScriptOutput) => void): Record<ConsoleMethod, (...args: unknown[]) => void> {
   const call = (method: ConsoleMethod) => (...args: unknown[]) =>
-    write({ method, stream: method === 'warn' || method === 'error' ? 'stderr' : 'stdout', text: textOf(method, args), values: args });
+    write({ language: 'javascript', method, stream: method === 'warn' || method === 'error' ? 'stderr' : 'stdout', text: textOf(method, args), values: args });
   return { log: call('log'), info: call('info'), debug: call('debug'), table: call('table'), dir: call('dir'), warn: call('warn'), error: call('error') };
 }
