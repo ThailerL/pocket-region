@@ -12,13 +12,8 @@ const hashOne = element<HTMLButtonElement>('#hash-one');
 const burst = element<HTMLButtonElement>('#burst');
 element<HTMLElement>('#hash-code').textContent = HASH_HANDLER;
 
-export function connectHashing(lambda: LambdaApi) {
-  const { sdk, client } = lambda;
+export function connectHashing({ sdk, client }: LambdaApi) {
   let created: Promise<void> | undefined;
-
-  // Deployed once, the first time a button is pressed. A machine with fewer cores than
-  // passwords runs some of them in turn, hence the timeout
-  const createHashFunction = () => deployFunction(lambda, 'hash-password', HASH_HANDLER, 30);
 
   async function hash(password: string): Promise<Hashed> {
     const { Payload, FunctionError } = await client.send(
@@ -33,7 +28,8 @@ export function connectHashing(lambda: LambdaApi) {
     hashOne.disabled = burst.disabled = true;
     write(passwords.length === 1 ? '\n# hashing 1 password\n' : `\n# hashing ${passwords.length} passwords at once\n`, 'typed');
     try {
-      await (created ??= createHashFunction());
+      // A machine with fewer cores than passwords runs some of them in turn, hence the timeout
+      await (created ??= deployFunction('hash-password', HASH_HANDLER, 30));
       const started = Date.now();
       const results = await Promise.all(passwords.map(hash));
       const total = (Date.now() - started) / 1000;

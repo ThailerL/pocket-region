@@ -13,14 +13,17 @@ export function write(text: string, className?: string) {
   log.parentElement!.scrollTop = log.parentElement!.scrollHeight;
 }
 
+// Shows the command and its output, and hands the result back for a caller that acts on it
 export async function run(line: string) {
   if (!aws || !line.trim()) return;
   command.value = '';
   write(`\n$ aws ${line}\n`, 'typed');
-  const { stdout, stderr, code } = await aws(line);
+  const result = await aws(line);
+  const { stdout, stderr, code } = result;
   if (stdout) write(stdout);
   if (stderr) write(stderr, 'failed');
   if (!stdout && !stderr) write(`(exit ${code})\n`);
+  return result;
 }
 
 export function connect(cli: Aws) {

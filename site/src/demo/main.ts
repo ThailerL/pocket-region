@@ -1,4 +1,5 @@
 import { element } from './dom.ts';
+import { files } from './files.ts';
 import './examples.ts';
 import './tabs.ts';
 import { connectHashing } from './hashing.ts';
@@ -27,10 +28,10 @@ async function boot() {
     };
     write(`ready in ${Math.round(performance.now() - started)} ms. Try a command.\n`);
     for (const button of examples.querySelectorAll('button')) button.disabled = false;
-    connectRecordOrder(lambda);
-    connectHello(lambda);
+    connectRecordOrder();
+    connectHello();
     connectHashing(lambda);
-    connect(browser.awsCli(region));
+    connect(browser.awsCli(region, { files }));
   } catch (error) {
     write(`failed to boot: ${(error as Error).message}\n`, 'failed');
     const retry = document.createElement('button');

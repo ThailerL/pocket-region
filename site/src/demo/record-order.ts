@@ -1,8 +1,7 @@
-import { deployFunction } from './deploy.ts';
+import { deployFunction, fromButton } from './deploy.ts';
 import { element } from './dom.ts';
 import RECORD_ORDER from './handlers/record-order.mjs?raw';
-import type { LambdaApi } from './modules.ts';
-import { run, write } from './terminal.ts';
+import { run } from './terminal.ts';
 
 const ITEMS = ['lamp', 'desk', 'chair', 'plant', 'kettle'];
 
@@ -10,22 +9,15 @@ const deploy = element<HTMLButtonElement>('#deploy-record-order');
 const record = element<HTMLButtonElement>('#record-order');
 element<HTMLElement>('#record-order-code').textContent = RECORD_ORDER;
 
-export function connectRecordOrder(lambda: LambdaApi) {
+export function connectRecordOrder() {
   let orders = 0;
 
-  deploy.addEventListener('click', async () => {
-    deploy.disabled = true;
-    write('\n# deploying record-order\n', 'typed');
-    try {
-      await deployFunction(lambda, 'record-order', RECORD_ORDER);
-      write('deployed.\n');
+  deploy.addEventListener('click', () =>
+    fromButton(deploy, async () => {
+      await deployFunction('record-order', RECORD_ORDER);
       await run('s3 mb s3://orders');
-    } catch (error) {
-      write(`deploy failed: ${(error as Error).message}\n`, 'failed');
-    } finally {
-      deploy.disabled = false;
-    }
-  });
+    }),
+  );
 
   record.addEventListener('click', () => {
     orders++;

@@ -1,28 +1,33 @@
 import { element } from './dom.ts';
 
-const tabs = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+const tabs = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')].map((tab) => ({
+  tab,
+  panel: element<HTMLElement>(`#${tab.dataset.tab}-tab`),
+}));
 
-function select(name: string) {
-  for (const tab of tabs) {
-    const selected = tab.dataset.tab === name;
+const STEP: Record<string, number> = { ArrowRight: 1, ArrowLeft: -1 };
+
+function select(chosen: HTMLButtonElement) {
+  for (const { tab, panel } of tabs) {
+    const selected = tab === chosen;
     tab.setAttribute('aria-selected', String(selected));
     tab.tabIndex = selected ? 0 : -1;
-    element<HTMLElement>(`#${tab.dataset.tab}-tab`).hidden = !selected;
+    panel.hidden = !selected;
   }
 }
 
 function show(tab: HTMLButtonElement) {
   history.replaceState(null, '', `#${tab.dataset.tab}`);
-  select(tab.dataset.tab!);
+  select(tab);
   tab.focus();
 }
 
-for (const [index, tab] of tabs.entries()) {
+for (const [index, { tab }] of tabs.entries()) {
   tab.addEventListener('click', () => show(tab));
   tab.addEventListener('keydown', (event) => {
-    const step = { ArrowRight: 1, ArrowLeft: -1 }[event.key];
-    if (step) show(tabs[(index + step + tabs.length) % tabs.length]!);
+    const step = STEP[event.key];
+    if (step) show(tabs[(index + step + tabs.length) % tabs.length]!.tab);
   });
 }
 
-select(tabs.some((tab) => `#${tab.dataset.tab}` === location.hash) ? location.hash.slice(1) : tabs[0]!.dataset.tab!);
+select(tabs.find(({ tab }) => `#${tab.dataset.tab}` === location.hash)?.tab ?? tabs[0]!.tab);
