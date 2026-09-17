@@ -1,0 +1,15 @@
+<section class="function">
+  <h2>A Lambda that writes to S3</h2>
+  <p class="lede">
+    The handler imports the AWS SDK bare and makes a client with no options. The runtime points
+    it at the region, as Lambda points one at AWS. Each order becomes an object in the bucket.
+  </p>
+  <div class="actions">
+    <button id="deploy-record-order" disabled>Deploy record-order and its bucket</button>
+    <button id="record-order" disabled>Record an order</button>
+  </div>
+  <details>
+    <summary>Show the function's code</summary>
+    <pre><code id="record-order-code"></code></pre>
+  </details>
+</section>

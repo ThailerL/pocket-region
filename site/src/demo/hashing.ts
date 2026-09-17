@@ -1,8 +1,8 @@
+import { deployFunction } from './deploy.ts';
 import { element } from './dom.ts';
 import HASH_HANDLER from './handlers/hash-password.mjs?raw';
 import type { LambdaApi } from './modules.ts';
 import { write } from './terminal.ts';
-import { zipOf } from './zip.ts';
 
 const PASSWORDS = ['hunter2', 'correct horse battery staple', 'letmein', 'tr0ub4dor&3', 'swordfish'];
 
@@ -12,27 +12,13 @@ const hashOne = element<HTMLButtonElement>('#hash-one');
 const burst = element<HTMLButtonElement>('#burst');
 element<HTMLElement>('#hash-code').textContent = HASH_HANDLER;
 
-export function connectHashing({ sdk, client }: LambdaApi) {
+export function connectHashing(lambda: LambdaApi) {
+  const { sdk, client } = lambda;
   let created: Promise<void> | undefined;
 
-  // Created once, the first time a button is pressed
-  async function createHashFunction() {
-    try {
-      await client.send(
-        new sdk.CreateFunctionCommand({
-          FunctionName: 'hash-password',
-          Runtime: 'nodejs22.x',
-          Handler: 'index.handler',
-          Role: 'arn:aws:iam::000000000000:role/lambda',
-          // A machine with fewer cores than passwords runs some of them in turn
-          Timeout: 30,
-          Code: { ZipFile: await zipOf('index.mjs', HASH_HANDLER) },
-        }),
-      );
-    } catch (error) {
-      if (!(error instanceof sdk.ResourceConflictException)) throw error;
-    }
-  }
+  // Deployed once, the first time a button is pressed. A machine with fewer cores than
+  // passwords runs some of them in turn, hence the timeout
+  const createHashFunction = () => deployFunction(lambda, 'hash-password', HASH_HANDLER, 30);
 
   async function hash(password: string): Promise<Hashed> {
     const { Payload, FunctionError } = await client.send(

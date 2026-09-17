@@ -1,8 +1,10 @@
 import { element } from './dom.ts';
 import './examples.ts';
+import './tabs.ts';
 import { connectHashing } from './hashing.ts';
 import { connectHello } from './hello.ts';
 import { loadModules } from './modules.ts';
+import { connectRecordOrder } from './record-order.ts';
 import { connect, write } from './terminal.ts';
 
 const status = element<HTMLElement>('#status');
@@ -25,6 +27,7 @@ async function boot() {
     };
     write(`ready in ${Math.round(performance.now() - started)} ms. Try a command.\n`);
     for (const button of examples.querySelectorAll('button')) button.disabled = false;
+    connectRecordOrder(lambda);
     connectHello(lambda);
     connectHashing(lambda);
     connect(browser.awsCli(region));

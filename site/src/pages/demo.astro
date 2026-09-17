@@ -2,6 +2,7 @@
 import Base from '../layouts/Base.astro';
 import Concurrency from '../components/Concurrency.astro';
 import LambdaFunction from '../components/LambdaFunction.astro';
+import RecordOrder from '../components/RecordOrder.astro';
 import Terminal from '../components/Terminal.astro';
 import { importMap } from '../import-map.mjs';
 import '../styles/demo.css';
@@ -19,17 +20,21 @@ import '../styles/demo.css';
   </p>
 
   <div class="layout">
-    <div class="top">
-      <Terminal />
-      <div>
-        <div id="examples"></div>
-        <div class="examples" id="status"></div>
+    <Terminal />
+    <div class="panel">
+      <div class="tabs" role="tablist" aria-label="Demo sections">
+        <button role="tab" data-tab="lambda" aria-controls="lambda-tab">Lambda</button>
+        <button role="tab" data-tab="services" aria-controls="services-tab">S3, SQS, DynamoDB, SNS</button>
       </div>
-    </div>
-
-    <div class="controls">
-      <LambdaFunction />
-      <Concurrency />
+      <div class="examples" id="status"></div>
+      <div id="lambda-tab" role="tabpanel">
+        <LambdaFunction />
+        <RecordOrder />
+        <Concurrency />
+      </div>
+      <div id="services-tab" role="tabpanel" hidden>
+        <div id="examples"></div>
+      </div>
     </div>
   </div>
 </Base>
@@ -45,38 +50,24 @@ import '../styles/demo.css';
     margin-top: 1.25rem;
   }
 
-  .top {
-    display: grid;
-    gap: 1.5rem;
-  }
-
-  .controls > :global(* + *) {
-    margin-top: 1.25rem;
-  }
-
-  /* The terminal beside its example commands, the two Lambda sections below: the top row takes
-     whatever height the sections leave */
+  /* The terminal beside the tabbed panel, which scrolls so the page stays one screen */
   @media (min-width: 64rem) {
     .layout {
       flex: 1;
       min-height: 0;
-      /* Never shorter than the example commands, so they need no scroll bar of their own */
-      grid-template-rows: minmax(auto, 1fr) auto;
+      grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
     }
 
-    .top {
-      grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+    .panel {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
     }
 
-    .controls {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 1.5rem;
-      align-items: start;
-    }
-
-    .controls > :global(* + *) {
-      margin-top: 0;
+    [role='tabpanel'] {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
     }
   }
 </style>
