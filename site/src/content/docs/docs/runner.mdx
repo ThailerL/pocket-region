@@ -96,7 +96,7 @@ snippet imports in [`python.packages`](#options).
 | `region` | `Region` | none | A region from `createRegion` to run every snippet against. The runner never stops it, and empties it only when `reset` says so, so your page can set it up before a run and look at it after. It can't be combined with `boot`. See [Setting up a region](#setting-up-a-region). |
 | `boot` | `BrowserRegionOptions` | none | Without `region`, options for the region the runner boots itself. See [The region](/docs/region/#options). A Python snippet's own Pyodide comes from its `indexURL` too. |
 | `reset` | `'each-run' \| 'never'` | `'each-run'`, or `'never'` with `region` | When the runner empties the region. `'each-run'` empties it before every run, so each example starts clean. The runner's own region is empty when it boots, so its first run skips the reset. `'never'` keeps what earlier runs made, for examples that build on each other, such as a tutorial whose second step writes to the bucket its first step created: the region's state, a Python run's names, and what a JavaScript run put on `globalThis`. A run after a reset starts with none of them. |
-| `setup` | `string \| { language, code }` | none | Code, in the same form as a snippet, that runs on the region whenever it's empty: after a boot, after each reset, and on the first run against a region you passed in. A string is JavaScript. See [Setting up a region](#setting-up-a-region). |
+| `setup` | `string \| { language, code } \| (region) => Promise<void>` | none | What runs on the region whenever it's empty: after a boot, after each reset, and on the first run against a region you passed in. Code in the same form as a snippet, JavaScript when a string, or a function of the region for a setup the reader isn't shown. See [Setting up a region](#setting-up-a-region). |
 | `python` | `{ packages?: string[] }` | `{ packages: ['boto3'] }` | What micropip installs from PyPI before the first Python run: the packages the snippets import, as pure-Python wheels. |
 
 ## Setting up a region
@@ -114,10 +114,27 @@ const runner = createRunner({
 });
 ```
 
-What setup prints is hidden unless it fails. Setup prepares the region, not the snippet: a
-name it defines isn't there when the snippet runs. A failed setup fails the run with an error starting
+What setup prints is hidden unless it fails. A failed setup fails the run with an error starting
 `setup failed:`, the snippet doesn't run, and the next run empties the region and tries setup
-again, even with `reset: 'never'`.
+again, even with `reset: 'never'`. Setup prepares the region, not the snippet: a name it defines
+isn't there when the snippet runs.
+
+Show `setup` on the page as a fence when the reader should see it: it's the same text the runner
+runs. When the setup is your page's business rather than the reader's, pass a function instead.
+It runs on the page with the region, at the same moments and with the same failure handling,
+and what it prints goes to the page's console. [`clientConfig(region)`](/docs/clients/#requesthandler)
+gives its SDK clients what a snippet's clients get.
+
+```js
+import { clientConfig, createRunner } from 'pocket-region/browser';
+import { DynamoDBClient, CreateTableCommand } from '@aws-sdk/client-dynamodb';
+
+const runner = createRunner({
+  async setup(region) {
+    await new DynamoDBClient(clientConfig(region)).send(new CreateTableCommand({ TableName: 'books', ... }));
+  },
+});
+```
 
 With a region you pass in, the runner leaves it as it is unless you say otherwise: `reset`
 defaults to `'never'`, and `setup` runs once, on the first run, on whatever the region already

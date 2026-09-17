@@ -27,4 +27,4 @@ export const clientConfigFrom = (env: Record<string, string | undefined>) => ({
 });
 
 // What an SDK client of the region needs that against AWS would come from the environment
-export const clientDefaults = (region: Dispatcher) => ({ ...AWS_DEFAULTS, requestHandler: requestHandler(region) });
+export const clientConfig = (region: Dispatcher) => ({ ...AWS_DEFAULTS, requestHandler: requestHandler(region) });

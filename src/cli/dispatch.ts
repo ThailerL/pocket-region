@@ -1,4 +1,4 @@
-import { clientDefaults } from '../client-defaults.ts';
+import { clientConfig } from '../client-config.ts';
 import type { Dispatcher } from '../core.ts';
 import { flagCase, type Invocation } from './args.ts';
 import { UsageError } from './errors.ts';
@@ -140,7 +140,7 @@ export function servicesFor(
       const building = (async () => {
         const Client = clientClass(await module(service), service);
         return new Client({
-          ...clientDefaults(region),
+          ...clientConfig(region),
           endpoint: 'http://localhost:4566',
           ...options.client,
           // Last, so a caller can move the endpoint and the credentials without being able to

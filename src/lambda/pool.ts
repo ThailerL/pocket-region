@@ -1,4 +1,4 @@
-import { awsEnvironment } from '../client-defaults.ts';
+import { awsEnvironment } from '../client-config.ts';
 import {
   unref,
   type FunctionConfig,

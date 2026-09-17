@@ -1,4 +1,4 @@
-import { clientDefaults } from './client-defaults.ts';
+import { clientConfig } from './client-config.ts';
 import type { Dispatcher } from './core.ts';
 
 type ClientClass = new (config?: object) => object;
@@ -14,7 +14,7 @@ export function withRegion<T extends object>(module: T, region: Dispatcher): T {
     const Client = value as ClientClass;
     const Defaulted = class extends Client {
       constructor(config: object = {}) {
-        const defaults = clientDefaults(region);
+        const defaults = clientConfig(region);
         super({ ...defaults, ...config, requestHandler: defaults.requestHandler });
       }
     };

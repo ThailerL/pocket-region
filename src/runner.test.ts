@@ -75,6 +75,25 @@ console.log(Buckets.map((bucket) => bucket.Name));`);
     await prepared.stop();
   }, 60_000);
 
+  it('runs setup given as a function of the region, on the page', async () => {
+    let attempts = 0;
+    const prepared = createRunner({
+      boot,
+      resolve,
+      async setup(region) {
+        attempts += 1;
+        if (attempts === 1) throw new Error('not yet');
+        await s3('PUT', '/fixture', undefined, region);
+      },
+    });
+    const failed = await run(listBuckets, prepared);
+    expect(failed.result).toMatchObject({ ok: false, error: expect.objectContaining({ message: 'setup failed: not yet' }) });
+    const retried = await run(listBuckets, prepared);
+    expect(retried.statuses).toEqual(['resetting', 'setting-up', 'running']);
+    expect(retried.text).toEqual(['[\n  "fixture"\n]']);
+    await prepared.stop();
+  }, 60_000);
+
   it("runs setup once when reset is 'never'", async () => {
     const prepared = createRunner({ boot, resolve, reset: 'never', setup: createBucket('fixture') });
     await run(createBucket('extra'), prepared);

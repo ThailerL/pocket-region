@@ -33,7 +33,9 @@ const s3 = new S3Client({ requestHandler: requestHandler(region) });
 - **`region` and `credentials`** are still required, because the SDK refuses to build a request
   without them, but any values do. The emulator routes a request by the credential scope in its
   `Authorization` header and never checks the signature. In Node they can come from the
-  environment or `~/.aws` as usual; a page has to pass them.
+  environment or `~/.aws` as usual; a page has to pass them, or use `clientConfig(region)`,
+  which is `requestHandler` plus `us-east-1` and throwaway credentials, as one config to pass or
+  spread.
 - **`endpoint`** isn't needed. Without one, the SDK addresses AWS's own host names, such as
   `photos.s3.us-east-1.amazonaws.com`, which the emulator understands, and nothing is dialed.
 - **With an `endpoint`** such as `http://localhost:4566`, S3 also needs `forcePathStyle: true`.

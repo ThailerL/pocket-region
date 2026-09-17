@@ -1,4 +1,4 @@
-import { clientConfigFrom } from '../client-defaults.ts';
+import { clientConfigFrom } from '../client-config.ts';
 import type { CodeEntry, Dispatch, LambdaExecutor } from '../core.ts';
 import { fromCdn } from '../import-map.ts';
 import { IMPORT, rewriteImports } from '../runner/imports.ts';

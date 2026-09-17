@@ -1,5 +1,5 @@
 import { createRegion, type BrowserRegionOptions } from './browser.ts';
-import { AWS_DEFAULTS, awsEnvironment } from './client-defaults.ts';
+import { AWS_DEFAULTS, awsEnvironment } from './client-config.ts';
 import { jspiSupported, type Region } from './core.ts';
 import { fromCdn, pyodideIndexUrl } from './import-map.ts';
 import { answer, pendingCalls, toWire } from './region/protocol.ts';
@@ -10,6 +10,8 @@ import { PYODIDE_VERSION } from './version.generated.ts';
 
 export type { ConsoleMethod, JavaScriptOutput, Language, PythonOutput, RunnerOutput } from './runner/protocol.ts';
 export type Snippet = { language: Language; code: string };
+// Page code run on the region instead of a snippet, for a setup the reader isn't shown
+export type SetupFunction = (region: Region) => Promise<void>;
 export type RunnerPhase = 'booting' | 'resetting' | 'setting-up' | 'running';
 export type RunnerStatus = { phase: RunnerPhase };
 export type RunResult = { ok: true; durationMs: number } | { ok: false; durationMs: number; error: unknown };
@@ -30,8 +32,8 @@ export type RunnerOptions = {
   resolve?: (specifier: string) => string;
   // Defaults to 'each-run' for the runner's own region and 'never' for one passed in
   reset?: RunnerReset;
-  // Code run on the region whenever it's empty, JavaScript unless it says which language
-  setup?: string | Snippet;
+  // Run on the region whenever it's empty: code, JavaScript unless it says which language, or a function of the region
+  setup?: string | Snippet | SetupFunction;
   python?: {
     // What micropip installs before the first Python run, by default boto3
     packages?: string[];
@@ -160,14 +162,23 @@ export function createRunner(options: RunnerOptions = {}): Runner {
     const { onStatus = () => {} } = runOptions;
     if (runOptions.echo && code.language !== 'python') throw new Error('echo is not supported for JavaScript: it needs an expression-statement rewrite the runner lacks');
     const { region, fresh } = regionFor(onStatus, runOptions.reset ?? reset);
-    const setup = fresh && options.setup !== undefined ? post(asSnippet(options.setup), true) : undefined;
+    const wanted = fresh ? options.setup : undefined;
+    // Posted before the snippet, so it reaches the worker first
+    const setup = wanted === undefined || typeof wanted === 'function' ? wanted : post(asSnippet(wanted), true);
     const snippet = post(code, fresh, runOptions.echo);
 
     if (setup) {
+      // Only a worker's output comes back here; a setup function prints to the page's console
       const held: RunnerOutput[] = [];
-      current = { onOutput: (output) => held.push(output) };
       try {
-        await complete(setup, region, 'setting-up', onStatus);
+        if (typeof setup === 'function') {
+          const ready = await region;
+          onStatus({ phase: 'setting-up' });
+          await setup(ready);
+        } else {
+          current = { onOutput: (output) => held.push(output) };
+          await complete(setup, region, 'setting-up', onStatus);
+        }
       } catch (error) {
         spoiled = true;
         held.forEach((output) => runOptions.onOutput?.(output));

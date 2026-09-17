@@ -21,6 +21,7 @@ export type {
   StateStore,
 } from './core.ts';
 export * from './cli/index.ts';
+export { clientConfig } from './client-config.ts';
 export * from './request-handler.ts';
 export * from './runner.ts';
 
