@@ -2,10 +2,11 @@ import type { Dispatcher } from '../core.ts';
 import { parseArgs, tokenize } from './args.ts';
 import { dispatch, serviceNames, servicesFor, type Modules } from './dispatch.ts';
 import { report, usageText } from './errors.ts';
-import { runS3Verb, type Files } from './s3-verbs.ts';
+import type { Files } from './files.ts';
+import { runS3Verb } from './s3-verbs.ts';
 
 export type { Modules, SdkModule } from './dispatch.ts';
-export type { Files } from './s3-verbs.ts';
+export type { Files } from './files.ts';
 
 export type CliResult = { stdout: string; stderr: string; code: number };
 export type AwsCli = (command: string | string[]) => Promise<CliResult>;
@@ -13,7 +14,7 @@ export type AwsCli = (command: string | string[]) => Promise<CliResult>;
 export type AwsCliOptions = {
   // A non-zero exit becomes a rejection, which is what a test wants and a terminal does not
   throwOnError?: boolean;
-  // Where `s3 cp` reads and writes local paths; Node finds its own, a page has none
+  // Where `s3 cp` and a blob flag's `fileb://` path read and write; Node finds its own, a page has none
   files?: Files;
   // SDK client packages, keyed by resolved SDK name - `s3`, not `s3api`. Without them a
   // service is imported on demand, which no bundler can follow, so a bundle needs these
@@ -49,7 +50,7 @@ export function awsCli(region: Dispatcher, options: AwsCliOptions = {}): AwsCli 
         ? usage
         : argv[0] === 's3'
           ? await runS3Verb(argv.slice(1), services, options.files)
-          : await dispatch(parseArgs(argv), services);
+          : await dispatch(parseArgs(argv), services, options.files);
       result = { stdout, stderr: '', code: 0 };
     } catch (error) {
       result = { stdout: '', ...report(error, usage) };

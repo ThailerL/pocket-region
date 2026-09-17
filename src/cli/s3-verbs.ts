@@ -1,12 +1,6 @@
 import { commandFor, type Services } from './dispatch.ts';
 import { UsageError } from './errors.ts';
-
-// Local paths only exist where something can read and write them: Node supplies this by
-// itself, a page has to be given one
-export type Files = {
-  read(path: string): Promise<Uint8Array>;
-  write(path: string, bytes: Uint8Array): Promise<void>;
-};
+import { type Files, localFiles } from './files.ts';
 
 export type S3Uri = { Bucket: string; Key: string };
 
@@ -48,19 +42,6 @@ const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 // The verbs are conveniences over s3api, so the service is bound once and they name operations
 type S3 = (operation: string, params: object) => Promise<Record<string, unknown>>;
 
-async function localFiles(given?: Files): Promise<Files> {
-  if (given) return given;
-  try {
-    const fs = await import(/* @vite-ignore */ 'node:fs/promises');
-    return { read: (path) => fs.readFile(path), write: (path, bytes) => fs.writeFile(path, bytes) };
-  } catch {
-    throw new UsageError(
-      'a local path needs somewhere to read and write: pass awsCli(region, { files })',
-      's3',
-    );
-  }
-}
-
 type Verb = (s3: S3, rest: string[], files?: Files) => Promise<string[]>;
 
 const list: Verb = async (s3, [target]) => {
@@ -88,7 +69,7 @@ const copy: Verb = async (s3, [from, to], files) => {
     const { Body } = await s3('GetObject', source);
     const bytes = await (Body as { transformToByteArray(): Promise<Uint8Array> })
       .transformToByteArray();
-    await (await localFiles(files)).write(to, bytes);
+    await (await localFiles(files, 's3')).write(to, bytes);
     return [`download: ${from} to ${to}`];
   }
 
@@ -104,7 +85,7 @@ const copy: Verb = async (s3, [from, to], files) => {
     await s3('CopyObject', { Bucket: destination.Bucket, Key, CopySource });
     return [`copy: ${from} to ${target}`];
   }
-  const Body = await (await localFiles(files)).read(from);
+  const Body = await (await localFiles(files, 's3')).read(from);
   await s3('PutObject', { Bucket: destination.Bucket, Key, Body });
   return [`upload: ${from} to ${target}`];
 };

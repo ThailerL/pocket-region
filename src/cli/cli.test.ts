@@ -9,8 +9,21 @@ import { decoded, unresolvable } from './dispatch.ts';
 import { UsageError } from './errors.ts';
 import { paramsFor } from './params.ts';
 import { membersOf } from './schema.ts';
-import { awsCli, CliError, type AwsCli } from './index.ts';
+import { zipOf } from '../test-clients.ts';
+import { awsCli, CliError, type AwsCli, type Files } from './index.ts';
 import { formatBuckets, formatObjects, parseS3Uri } from './s3-verbs.ts';
+
+// A page's files: what was put there, and what a command writes
+const filesOf = (stored: Record<string, Uint8Array>): Files => ({
+  async read(path) {
+    const bytes = stored[path];
+    if (!bytes) throw new Error(`no such file: ${path}`);
+    return bytes;
+  },
+  async write(path, bytes) {
+    stored[path] = bytes;
+  },
+});
 
 describe('pascalCase', () => {
   it('spells an SDK input key from a CLI flag', () => {
@@ -114,12 +127,12 @@ describe('parseArgs', () => {
 });
 
 describe('paramsFor', () => {
-  const params = async (command: string, module: Promise<Record<string, unknown>>) => {
+  const params = async (command: string, module: Promise<Record<string, unknown>>, files?: Files) => {
     const invocation = parseArgs(tokenize(command));
     const Command = (await module)[`${invocation.operation}Command`] as new (
       input: object,
     ) => unknown;
-    return paramsFor(invocation, membersOf(Command));
+    return paramsFor(invocation, membersOf(Command), files);
   };
   const sqs = import('@aws-sdk/client-sqs');
   const sns = import('@aws-sdk/client-sns');
@@ -244,6 +257,26 @@ describe('paramsFor', () => {
       .toEqual({ Bucket: 'notes', Key: 'a', SSECustomerKey: '12345' });
   });
 
+  it('reads a value written as a path through files, as the real CLI reads a file', async () => {
+    const bytes = new Uint8Array([80, 75, 5, 6]);
+    const files = filesOf({ 'hello.zip': bytes, 'body.txt': new TextEncoder().encode('from a file') });
+    const lambda = import('@aws-sdk/client-lambda');
+    expect(
+      await params('lambda update-function-code --function-name hello --zip-file fileb://hello.zip', lambda, files),
+    ).toEqual({ FunctionName: 'hello', ZipFile: bytes });
+    expect(await params('sqs send-message --queue-url http://q --message-body file://body.txt', sqs, files)) //
+      .toEqual({ QueueUrl: 'http://q', MessageBody: 'from a file' });
+  });
+
+  it('lands --zip-file in Code.ZipFile on create-function, where the real CLI puts it', async () => {
+    const bytes = new Uint8Array([80, 75, 5, 6]);
+    const files = filesOf({ 'hello.zip': bytes });
+    const lambda = import('@aws-sdk/client-lambda');
+    expect(await params('lambda create-function --function-name hello --zip-file fileb://hello.zip', lambda, files)) //
+      .toEqual({ FunctionName: 'hello', Code: { ZipFile: bytes } });
+    await expect(params('lambda create-function --zip-file a b', lambda)).rejects.toThrow('--zip-file takes one value');
+  });
+
   it('refuses a flag on an operation that takes no input at all', async () => {
     await expect(params('dynamodb describe-limits --not-a-flag x', dynamodb)).rejects.toThrow(
       /unknown option "--not-a-flag"/,
@@ -255,9 +288,9 @@ describe('paramsFor', () => {
     expect(await params(command, dynamodb)).toEqual({ TableName: 'b', Item: {} });
   });
 
-  it('spells the key from the flag where an SDK carries no shape to read', () => {
+  it('spells the key from the flag where an SDK carries no shape to read', async () => {
     const invocation = parseArgs(tokenize('sqs create-queue --queue-name orders'));
-    expect(paramsFor(invocation, undefined)).toEqual({ QueueName: 'orders' });
+    expect(await paramsFor(invocation, undefined)).toEqual({ QueueName: 'orders' });
   });
 });
 
@@ -508,22 +541,23 @@ describe('awsCli against a region', () => {
   }, 30_000);
 
   it('reads and writes through a files adapter, as a page would', async () => {
-    const stored = new Map<string, Uint8Array>();
-    const paged = awsCli(region, {
-      files: {
-        async read(name) {
-          return stored.get(name) ?? new TextEncoder().encode('from the page');
-        },
-        async write(name, bytes) {
-          stored.set(name, bytes);
-        },
-      },
-    });
+    const stored: Record<string, Uint8Array> = { 'upload.txt': new TextEncoder().encode('from the page') };
+    const paged = awsCli(region, { files: filesOf(stored) });
     await paged('s3 mb s3://pages');
     await paged('s3 cp upload.txt s3://pages/hello.txt');
     await paged('s3 cp s3://pages/hello.txt downloaded.txt');
-    expect(new TextDecoder().decode(stored.get('downloaded.txt'))).toBe('from the page');
+    expect(new TextDecoder().decode(stored['downloaded.txt'])).toBe('from the page');
   });
+
+  it('deploys a function from a fileb:// zip served by the files adapter', async () => {
+    const zips = { 'greet.zip': zipOf('index.mjs', 'export const handler = async (event) => `hi, ${event.name}`;') };
+    const paged = awsCli(region, { throwOnError: true, files: filesOf(zips) });
+    await paged(
+      'lambda create-function --function-name greet --runtime nodejs22.x --handler index.handler --role arn:aws:iam::000000000000:role/lambda --zip-file fileb://greet.zip',
+    );
+    const invoked = await paged(`lambda invoke --function-name greet --payload '{"name":"shell"}'`);
+    expect(invoked.stdout).toContain('hi, shell');
+  }, 30_000);
 
   it('names the s3 verbs it takes', async () => {
     const result = await aws('s3 sync ./a s3://b');

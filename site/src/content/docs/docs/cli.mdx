@@ -60,7 +60,7 @@ exits. With `throwOnError`, it rejects with a `CliError` instead, whose `result`
 | `throwOnError` | `boolean` | Reject on a non-zero exit, which is usually what a test wants. |
 | `modules` | `Record<string, SdkModule>` | SDK client packages, keyed by SDK name, so `s3` also covers `s3api`. Without it, a client is imported the first time a command needs it. Bundlers can't follow that import, so a bundle, page, or worker must pass these. |
 | `client` | `object` | Merged into every client's configuration, such as your own credentials or endpoint. S3 stays path-style whatever this says. |
-| `files` | `{ read(path): Promise<Uint8Array>; write(path, bytes): Promise<void> }` | Where `s3 cp` reads and writes local paths. Node uses the file system. A page has none, and `cp` with a local path fails without this. |
+| `files` | `{ read(path): Promise<Uint8Array>; write(path, bytes): Promise<void> }` | Where `s3 cp` reads and writes local paths, and where a blob flag's `fileb://` value is read, as in `lambda create-function --zip-file fileb://function.zip`. Node uses the file system. A page has none, and either fails without this. |
 | `note` | `string` | Appended to the usage text. |
 
 ```js

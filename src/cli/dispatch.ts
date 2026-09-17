@@ -2,6 +2,7 @@ import { clientDefaults } from '../client-defaults.ts';
 import type { Dispatcher } from '../core.ts';
 import { flagCase, type Invocation } from './args.ts';
 import { UsageError } from './errors.ts';
+import type { Files } from './files.ts';
 import { paramsFor } from './params.ts';
 import { membersOf } from './schema.ts';
 
@@ -164,10 +165,10 @@ export async function commandFor(service: string, operation: string, services: S
   return Command as new (params: object) => unknown;
 }
 
-export async function dispatch(invocation: Invocation, services: Services) {
+export async function dispatch(invocation: Invocation, services: Services, files?: Files) {
   const { service, operation } = invocation;
   const Command = await commandFor(service, operation, services);
-  const params = paramsFor(invocation, membersOf(Command));
+  const params = await paramsFor(invocation, membersOf(Command), files);
   const client = await services.client(service);
   const { $metadata, ...rest } = await client.send(new Command(params));
 
