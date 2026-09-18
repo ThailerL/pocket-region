@@ -1,5 +1,4 @@
-// The messages between worker-host.ts and worker-runtime.ts. Types only: the runtime ships
-// as a string and may import no value
+// The messages between worker-host.ts and worker-runtime.ts
 import type { LambdaError } from '../core.ts';
 import type { PythonRuntime } from './pool.ts';
 
@@ -25,7 +24,7 @@ export type NodeInit = {
   // The package's modules by path, their imports rewritten into calls of the global named importer
   files: Map<string, Uint8Array>;
   importer: string;
-  handler: string;
+  file: string;
   exportName: string;
   // The URLs those imports name, to load while the handler does
   preload: string[];

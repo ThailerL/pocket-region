@@ -2,6 +2,7 @@ import { clientConfigFrom } from '../client-config.ts';
 import type { CodeEntry, Dispatch, LambdaError, LambdaExecutor } from '../core.ts';
 import { IMPORT, rewriteImports } from '../runner/imports.ts';
 import { startWorker } from '../start-worker.ts';
+import { locateHandler } from './handlers.ts';
 import { createLambdaHost, type RegionHostOptions } from './host.ts';
 import type { PythonRuntime, RuntimeFamily, SandboxFactory } from './pool.ts';
 import { PYTHON_RUNTIME_SOURCE } from './python-runtime.generated.ts';
@@ -62,20 +63,11 @@ async function rewritePackage(entries: CodeEntry[], resolveAll: ResolveAll): Pro
   return { files, modules, preload: [...preload], xmldom: urls[XMLDOM] };
 }
 
-// Lambda's handler setting: a file path without its extension, a dot, an export name
-function locateHandler(setting: string, files: Map<string, Uint8Array>) {
-  const dot = setting.lastIndexOf('.');
-  if (dot < 1) throw new Error(`"${setting}" is not a file.export handler`);
-  const file = setting.slice(0, dot);
-  const found = ['.mjs', '.js'].map((extension) => file + extension).find((name) => files.has(name));
-  if (!found) throw new Error(`There is no ${file}.mjs or ${file}.js`);
-  return { handler: found, exportName: setting.slice(dot + 1) };
-}
-
 // What a worker is told to run the function with
 function runtimeFor(family: RuntimeFamily, { files, modules, preload, xmldom }: Package, env: Record<string, string>, python: PythonHost): Init['runtime'] {
   if (family === 'python') return { family, files, ...python, source: PYTHON_RUNTIME_SOURCE };
-  const handler = locateHandler(env._HANDLER || 'index.handler', modules);
+  // No CommonJS: a module worker cannot run it
+  const handler = locateHandler(env._HANDLER || 'index.handler', ['.mjs', '.js'], (name) => modules.has(name));
   return { family, files: modules, importer: IMPORT, ...handler, preload, defaults: clientConfigFrom(env), xmldom };
 }
 
