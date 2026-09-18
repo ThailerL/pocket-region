@@ -8,7 +8,7 @@ export type RegionMethod = 'dispatch' | 'reset' | 'save' | 'stop';
 export type StoreMethod = 'load' | 'replace' | 'close';
 
 // pythonRuntime is the wheel URLs a Python function's environment preinstalls
-export type BootAssets = { indexURL: string; stdLib: string; wheels: string[]; pythonRuntime: string[] };
+export type BootAssets = { indexURL: string; pyodideVersion: string; stdLib: string; wheels: string[]; pythonRuntime: string[] };
 
 // Only what the page listens to is posted
 export type Listening = { output: boolean; lambdaOutput: boolean; lambdaEvents: boolean };

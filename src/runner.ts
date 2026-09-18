@@ -31,6 +31,10 @@ export type RunnerOptions = {
   reset?: RunnerReset;
   // Run on the region whenever it's empty: code, JavaScript unless it says which language, or a function of the region
   setup?: string | Snippet | SetupFunction;
+  python?: {
+    // What micropip installs from PyPI beside the region's boto3, as requirement strings such as 'pynamodb==6.1.0'
+    packages?: string[];
+  };
 } & (
   // A region to run against, never stopped by the runner
   | { region: Region; boot?: never }
@@ -96,8 +100,9 @@ export function createRunner(options: RunnerOptions = {}): Runner {
   // A snippet's Pyodide and boto3 are the ones the region's Python functions get
   const bootPython = (worker: Worker) =>
     Promise.resolve().then(() => boot().assets).then(
-      ({ indexURL, pythonRuntime }) => {
-        const python: PythonBoot = { indexURL, pythonRuntime, environment: awsEnvironment(AWS_DEFAULTS) };
+      ({ indexURL, pyodideVersion, pythonRuntime }) => {
+        const packages = options.python?.packages ?? [];
+        const python: PythonBoot = { indexURL, pyodideVersion, pythonRuntime, packages, environment: awsEnvironment(AWS_DEFAULTS) };
         worker.postMessage({ type: 'boot', python } satisfies ToRunnerWorker);
       },
       // A worker never booted would hold every later run

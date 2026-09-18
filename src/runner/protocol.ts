@@ -12,8 +12,8 @@ export type JavaScriptOutput = Output & { language: 'javascript'; method: Consol
 export type PythonOutput = Output & { language: 'python' };
 export type RunnerOutput = JavaScriptOutput | PythonOutput;
 
-// The region's own interpreter and wheels, and what the snippet's environment holds
-export type PythonBoot = Pick<BootAssets, 'indexURL' | 'pythonRuntime'> & { environment: Record<string, string> };
+// The region's own interpreter and wheels, what micropip installs after them, and what the snippet's environment holds
+export type PythonBoot = Pick<BootAssets, 'indexURL' | 'pyodideVersion' | 'pythonRuntime'> & { packages: string[]; environment: Record<string, string> };
 
 export type ToRunnerWorker =
   // Once, to the Python worker, whenever the region's assets are located

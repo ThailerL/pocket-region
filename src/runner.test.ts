@@ -300,6 +300,16 @@ describe('createRunner with Python', () => {
     await made.stop();
   }, 120_000);
 
+  it("installs python.packages beside the region's boto3, which stays at its pinned version", async () => {
+    const manifest: VendorManifest = await (await fetch(`${assetsBaseUrl}/meta.json`)).json();
+    const botocore = manifest.pythonRuntime.find(({ file }) => file.startsWith('botocore-'))!.file.split('-')[1];
+    const withPackages = createRunner({ boot, python: { packages: ['pynamodb==6.1.0'] } });
+    const { result, text } = await python('import botocore, pynamodb\nprint(pynamodb.__version__, botocore.__version__)', withPackages);
+    expect(result.ok).toBe(true);
+    expect(text).toEqual([`6.1.0 ${botocore}`]);
+    await withPackages.stop();
+  }, 120_000);
+
   it('echoes as the interpreter would when asked, with the lines as given', async () => {
     const output: PythonOutput[] = [];
     const result = await runner.run(

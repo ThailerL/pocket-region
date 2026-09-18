@@ -16,10 +16,22 @@ const bridge = {
   output: (stream: OutputStream, text: string, line: number | undefined) => post({ type: 'output', output: { language: 'python', stream, text, line } }),
 };
 
-async function boot({ indexURL, pythonRuntime, environment }: PythonBoot): Promise<Run> {
+async function boot({ indexURL, pyodideVersion, pythonRuntime, packages, environment }: PythonBoot): Promise<Run> {
   const { loadPyodide }: typeof import('pyodide') = await import(/* @vite-ignore */ `${indexURL}pyodide.mjs`);
-  // The wheels download while Pyodide bootstraps
-  const py: PyodideInterface = await loadPyodide({ indexURL, packages: pythonRuntime });
+  const installing = packages.length > 0;
+  // The wheels, and micropip when it's needed, download while Pyodide bootstraps. micropip is on
+  // Pyodide's own CDN only, not in its npm package
+  const py: PyodideInterface = await loadPyodide({
+    indexURL,
+    packages: installing ? [...pythonRuntime, 'micropip'] : pythonRuntime,
+    ...(installing && { packageBaseUrl: `https://cdn.jsdelivr.net/pyodide/v${pyodideVersion}/full/` }),
+  });
+  if (installing) {
+    // After the pinned wheels, so what they satisfy stays at the region's versions
+    const micropip = py.pyimport('micropip');
+    await micropip.install(packages);
+    micropip.destroy();
+  }
   bridge.environment = environment;
   py.registerJsModule('_pocket_region', bridge);
   // Takes over stdout and stderr after the load: what Pyodide printed while loading packages is not the snippet's output
