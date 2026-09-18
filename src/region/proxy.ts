@@ -1,4 +1,5 @@
 import type { Region, RegionRequest, RegionResponse, RegionSettings, StateFiles } from '../core.ts';
+import type { Resolve } from '../import-map.ts';
 import { onFailure } from '../start-worker.ts';
 import {
   answer,
@@ -18,17 +19,27 @@ export type RegionPort = Endpoint<ToRegionWorker, FromRegionWorker> & {
   terminate?(): void;
 };
 
-const connectors = new WeakMap<Region, () => MessagePort>();
+// What the side that boots a region's worker gives it
+type RegionBoot = { assets: Promise<BootAssets>; resolve: Resolve };
 
-// A port to the region's worker for another worker, such as a snippet's
-export function portFor(region: Region) {
-  const connect = connectors.get(region);
-  if (!connect) throw new Error('the runner needs a region from createRegion');
-  return connect();
+type Link = { connect: () => MessagePort; resolve: Resolve };
+
+const links = new WeakMap<Region, Link>();
+
+function linkOf(region: Region) {
+  const link = links.get(region);
+  if (!link) throw new Error('the runner needs a region from createRegion');
+  return link;
 }
 
-// Given assets, this side boots the far side; otherwise that side reports booted by itself
-export function regionOver(port: RegionPort, settings: RegionSettings, assets?: Promise<BootAssets>): Promise<Region> {
+// A port to the region's worker for another worker, such as a snippet's
+export const portFor = (region: Region) => linkOf(region).connect();
+
+// Where the region's handlers get their packages, for a snippet run against it
+export const resolverFor = (region: Region) => linkOf(region).resolve;
+
+// Given a boot, this side boots the far side; otherwise that side reports booted by itself
+export function regionOver(port: RegionPort, settings: RegionSettings, boot?: RegionBoot): Promise<Region> {
   const { store, onOutput, lambda } = settings;
   const calls = pendingCalls<RegionResponse>();
   let dead: Error | undefined;
@@ -56,7 +67,7 @@ export function regionOver(port: RegionPort, settings: RegionSettings, assets?: 
       failed(error);
     };
     onFailure(port, "the region's worker", die);
-    assets?.then(
+    boot?.assets.then(
       (ready) =>
         port.postMessage({
           type: 'boot',
@@ -84,11 +95,17 @@ export function regionOver(port: RegionPort, settings: RegionSettings, assets?: 
               }
             },
           };
-          connectors.set(region, () => {
-            const { port1, port2 } = new MessageChannel();
-            port.postMessage({ type: 'connect', port: port1 }, [port1]);
-            return port2;
-          });
+          // Only a region booted here is one a runner is handed
+          if (boot) {
+            links.set(region, {
+              connect() {
+                const { port1, port2 } = new MessageChannel();
+                port.postMessage({ type: 'connect', port: port1 }, [port1]);
+                return port2;
+              },
+              resolve: boot.resolve,
+            });
+          }
           return booted(region);
         }
         case 'boot-failed':
@@ -105,6 +122,13 @@ export function regionOver(port: RegionPort, settings: RegionSettings, assets?: 
           return lambda?.onEvent?.(data.event);
         case 'store':
           serveStore(data.id, data.method, data.files);
+          return;
+        // Only the worker this side booted asks
+        case 'resolve':
+          answer(
+            async () => Object.fromEntries(data.specifiers.map((specifier) => [specifier, boot!.resolve(specifier)])),
+            (urls, error) => port.postMessage({ type: 'resolved', id: data.id, urls, error }),
+          );
           return;
       }
     };

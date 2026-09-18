@@ -2,7 +2,7 @@ import { lockedLoad, requireJspi, type Region, type RegionSettings, type StateSt
 import type { BootAssets } from './region/protocol.ts';
 import { regionOver } from './region/proxy.ts';
 import { importing, siblingUrl, startWorker } from './start-worker.ts';
-import { defaultAssetsBaseUrl, pyodideIndexUrl } from './import-map.ts';
+import { defaultAssetsBaseUrl, pyodideIndexUrl, regionResolve, type Resolve } from './import-map.ts';
 
 export type {
   Dispatch,
@@ -30,6 +30,8 @@ export type BrowserRegionOptions = RegionSettings & {
   assetsBaseUrl?: string;
   // Pyodide's own runtime; by default jsDelivr at the version the tree was built against
   indexURL?: string;
+  // Where a handler's bare imports load from, and a runner's snippets; by default the import map, else jsDelivr
+  resolve?: Resolve;
 };
 
 const OBJECT_STORE = 'files';
@@ -108,7 +110,7 @@ export async function createRegion(options: BrowserRegionOptions = {}): Promise<
   requireJspi();
   // Loads while meta.json is fetched
   const worker = startWorker(importing(siblingUrl('region/worker')), 'pocket-region');
-  return regionOver(worker, options, locateAssets(options));
+  return regionOver(worker, options, { assets: locateAssets(options), resolve: regionResolve(options) });
 }
 
 async function locateAssets(options: BrowserRegionOptions): Promise<BootAssets> {

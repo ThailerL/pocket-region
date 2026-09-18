@@ -1,6 +1,8 @@
+import { CreateFunctionCommand, InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import { describe, expect, it, vi } from 'vitest';
-import { createRegion, indexedDbStore, type RegionOutput, type StateFiles, type StateStore } from './browser.ts';
-import { s3 } from './test-clients.ts';
+import { createRegion, indexedDbStore, requestHandler, type RegionOutput, type StateFiles, type StateStore } from './browser.ts';
+import { fromCdn } from './import-map.ts';
+import { clientConfig, s3, zipOf } from './test-clients.ts';
 import { assetsBaseUrl, createTestRegion } from './test-region.browser.ts';
 import { describeStore } from './test-stores.ts';
 
@@ -47,6 +49,25 @@ describe('a region in a worker', () => {
     expect(replaced).toHaveLength(1);
     expect(replaced[0]!.size).toBeGreaterThan(0);
     expect(lines).toContainEqual({ text: expect.any(String), stream: 'stdout' });
+    await region.stop();
+  }, 60_000);
+
+  it("loads a handler's bare imports from where the page's resolve says", async () => {
+    const greeting = `data:text/javascript,${encodeURIComponent("export const greeting = 'from the page';")}`;
+    const region = await createTestRegion({ resolve: (specifier) => (specifier === 'greeting' ? greeting : fromCdn(specifier)) });
+    const lambda = new LambdaClient(clientConfig({ requestHandler: requestHandler(region) }));
+    await lambda.send(
+      new CreateFunctionCommand({
+        FunctionName: 'greeter',
+        Runtime: 'nodejs22.x',
+        Handler: 'index.handler',
+        Role: 'arn:aws:iam::000000000000:role/lambda',
+        Code: { ZipFile: zipOf('index.mjs', "import { greeting } from 'greeting';\nexport const handler = async () => ({ greeting });") },
+      }),
+    );
+    const { FunctionError, Payload } = await lambda.send(new InvokeCommand({ FunctionName: 'greeter' }));
+    expect(FunctionError).toBeUndefined();
+    expect(JSON.parse(decoder.decode(Payload))).toEqual({ greeting: 'from the page' });
     await region.stop();
   }, 60_000);
 });

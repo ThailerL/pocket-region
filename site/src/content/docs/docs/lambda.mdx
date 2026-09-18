@@ -49,7 +49,7 @@ Only `nodejs*` runtimes run. `python*` and `provided.*` functions fail each invo
 | `Handler: 'index.handler'` loads | `index.mjs`, `index.js`, or `index.cjs` | `index.mjs` or `index.js` |
 | CommonJS | Works, with exports read from `default` | Doesn't work |
 | Relative imports | Work | Work, between the package's ES modules. `export … from` and circular imports don't |
-| Bare imports, such as `@aws-sdk/client-s3` | Resolve from your project's `node_modules`, the nearest one above the working directory | Load from jsDelivr, or from the page's import map when it names them. SDK clients get the region as their defaults |
+| Bare imports, such as `@aws-sdk/client-s3` | Resolve from your project's `node_modules`, the nearest one above the working directory | Load from where the region's [`resolve`](/docs/region/#options) says: by default the page's import map, else jsDelivr. SDK clients get the region as their defaults |
 | Imports from a full URL | Work | Work |
 | Parent environment variables | Only `PATH` | None |
 

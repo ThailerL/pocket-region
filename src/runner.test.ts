@@ -10,9 +10,9 @@ const versions: Record<string, string> = {
   fflate: '0.8.2',
 };
 const resolve = (specifier: string) => (specifier.startsWith('data:') ? specifier : `https://cdn.jsdelivr.net/npm/${specifier}@${versions[specifier]}/+esm`);
-const boot = { assetsBaseUrl, indexURL };
+const boot = { assetsBaseUrl, indexURL, resolve };
 
-const runner = createRunner({ boot, resolve });
+const runner = createRunner({ boot });
 
 afterAll(() => runner.stop());
 
@@ -49,7 +49,7 @@ console.log(Buckets.map((bucket) => bucket.Name));`);
   }, 60_000);
 
   it("keeps what earlier runs made when reset is 'never'", async () => {
-    const chained = createRunner({ boot, resolve, reset: 'never' });
+    const chained = createRunner({ boot, reset: 'never' });
     await run("import { S3Client, CreateBucketCommand } from '@aws-sdk/client-s3';\nawait new S3Client({}).send(new CreateBucketCommand({ Bucket: 'step-one' }));", chained);
     const second = await run(listBuckets, chained);
     expect(second.statuses).toEqual(['running']);
@@ -61,7 +61,7 @@ console.log(Buckets.map((bucket) => bucket.Name));`);
     `import { S3Client, CreateBucketCommand } from '@aws-sdk/client-s3';\nawait new S3Client({}).send(new CreateBucketCommand({ Bucket: '${name}' }));`;
 
   it('runs setup on the region whenever it is empty, and hides what setup prints', async () => {
-    const prepared = createRunner({ boot, resolve, setup: `console.log('preparing');\n${createBucket('fixture')}` });
+    const prepared = createRunner({ boot, setup: `console.log('preparing');\n${createBucket('fixture')}` });
     const first = await run(listBuckets, prepared);
     expect(first.statuses).toEqual(['booting', 'setting-up', 'running']);
     expect(first.text).toEqual(['[\n  "fixture"\n]']);
@@ -79,7 +79,6 @@ console.log(Buckets.map((bucket) => bucket.Name));`);
     let attempts = 0;
     const prepared = createRunner({
       boot,
-      resolve,
       async setup(region) {
         attempts += 1;
         if (attempts === 1) throw new Error('not yet');
@@ -95,7 +94,7 @@ console.log(Buckets.map((bucket) => bucket.Name));`);
   }, 60_000);
 
   it("runs setup once when reset is 'never'", async () => {
-    const prepared = createRunner({ boot, resolve, reset: 'never', setup: createBucket('fixture') });
+    const prepared = createRunner({ boot, reset: 'never', setup: createBucket('fixture') });
     await run(createBucket('extra'), prepared);
     const second = await run(listBuckets, prepared);
     expect(second.statuses).toEqual(['running']);
@@ -111,7 +110,7 @@ const attempt = bump();
 await new S3Client({}).send(new CreateBucketCommand({ Bucket: \`try-\${attempt}\` }));
 console.log('attempt', attempt);
 if (attempt === 1) throw new Error('no table');`;
-    const prepared = createRunner({ boot, resolve, reset: 'never', setup });
+    const prepared = createRunner({ boot, reset: 'never', setup });
     const failed = await run("console.log('never printed');", prepared);
     expect(failed.result).toMatchObject({ ok: false, error: expect.objectContaining({ message: 'setup failed: no table' }) });
     expect(failed.text).toEqual(['attempt 1']);
@@ -204,9 +203,9 @@ console.log(\`\${out.Buckets!.length} \${Unit.Bucket}s\` satisfies string);`);
   });
 
   it('runs against a region the page made, and leaves it as it is', async () => {
-    const made = await createTestRegion();
+    const made = await createTestRegion({ resolve });
     await s3('PUT', '/before', undefined, made);
-    const against = createRunner({ region: made, resolve });
+    const against = createRunner({ region: made });
     const { statuses, text } = await run(listBuckets, against);
     expect(statuses).toEqual(['running']);
     expect(text).toEqual(['[\n  "before"\n]']);
@@ -215,10 +214,20 @@ console.log(\`\${out.Buckets!.length} \${Unit.Bucket}s\` satisfies string);`);
     await made.stop();
   }, 60_000);
 
+  it("loads a snippet's imports from where the region it runs against says", async () => {
+    const greeting = `data:text/javascript,${encodeURIComponent("export const greeting = 'from the region';")}`;
+    const made = await createTestRegion({ resolve: (specifier) => (specifier === 'greeting' ? greeting : resolve(specifier)) });
+    const against = createRunner({ region: made });
+    const { text } = await run("import { greeting } from 'greeting';\nconsole.log(greeting);", against);
+    expect(text).toEqual(['from the region']);
+    await against.stop();
+    await made.stop();
+  }, 60_000);
+
   it('empties a region the page made before every run when asked, and sets it up', async () => {
-    const made = await createTestRegion();
+    const made = await createTestRegion({ resolve });
     await s3('PUT', '/before', undefined, made);
-    const against = createRunner({ region: made, resolve, reset: 'each-run', setup: createBucket('fixture') });
+    const against = createRunner({ region: made, reset: 'each-run', setup: createBucket('fixture') });
     const first = await run(listBuckets, against);
     expect(first.statuses).toEqual(['resetting', 'setting-up', 'running']);
     expect(first.text).toEqual(['[\n  "fixture"\n]']);
@@ -230,9 +239,9 @@ console.log(\`\${out.Buckets!.length} \${Unit.Bucket}s\` satisfies string);`);
   }, 60_000);
 
   it('sets up a region the page made once, as it is', async () => {
-    const made = await createTestRegion();
+    const made = await createTestRegion({ resolve });
     await s3('PUT', '/before', undefined, made);
-    const against = createRunner({ region: made, resolve, setup: createBucket('fixture') });
+    const against = createRunner({ region: made, setup: createBucket('fixture') });
     const first = await run(listBuckets, against);
     expect(first.statuses).toEqual(['setting-up', 'running']);
     expect(first.text).toEqual(['[\n  "before",\n  "fixture"\n]']);
@@ -267,7 +276,7 @@ describe('createRunner with Python', () => {
   const listBucketsPy = "import boto3\n\nprint([bucket['Name'] for bucket in boto3.client('s3').list_buckets()['Buckets']])";
 
   it('runs boto3 code written for AWS against the region JavaScript shares', async () => {
-    const chained = createRunner({ boot, resolve, reset: 'never' });
+    const chained = createRunner({ boot, reset: 'never' });
     const first = await python("import boto3\n\ns3 = boto3.client('s3')\ns3.create_bucket(Bucket='photos')\nprint([bucket['Name'] for bucket in s3.list_buckets()['Buckets']])", chained);
     expect(first.result.ok).toBe(true);
     expect(first.statuses).toEqual(['booting', 'running']);
@@ -325,7 +334,7 @@ s3.get_object(Bucket='alpha', Key='missing')`,
   }, 120_000);
 
   it('runs setup written in Python before a JavaScript snippet', async () => {
-    const prepared = createRunner({ boot, resolve, setup: { language: 'python', code: "import boto3\nname = 'fixture'\nboto3.client('s3').create_bucket(Bucket=name)\nprint('hidden')" } });
+    const prepared = createRunner({ boot, setup: { language: 'python', code: "import boto3\nname = 'fixture'\nboto3.client('s3').create_bucket(Bucket=name)\nprint('hidden')" } });
     const first = await run(listBuckets, prepared);
     expect(first.statuses).toEqual(['booting', 'setting-up', 'running']);
     expect(first.text).toEqual(['[\n  "fixture"\n]']);

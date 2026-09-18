@@ -16,6 +16,7 @@ export type ToRegionWorker =
   | { type: 'boot'; assets: BootAssets; port?: number; hasStore: boolean; listening: Listening }
   | { type: 'call'; id: number; method: RegionMethod; request?: RegionRequest }
   | { type: 'stored'; id: number; files?: StateFiles; error?: WireError }
+  | { type: 'resolved'; id: number; urls?: Record<string, string>; error?: WireError }
   // Another worker's way in, served like this one and answered with booted
   | { type: 'connect'; port: MessagePort };
 
@@ -27,7 +28,9 @@ export type FromRegionWorker =
   | { type: 'output'; output: RegionOutput }
   | { type: 'lambda-output'; output: LambdaOutput }
   | { type: 'lambda-event'; event: LambdaEvent }
-  | { type: 'store'; id: number; method: StoreMethod; files?: StateFiles };
+  | { type: 'store'; id: number; method: StoreMethod; files?: StateFiles }
+  // A worker has no import map, so the page resolves a handler's bare imports
+  | { type: 'resolve'; id: number; specifiers: string[] };
 
 export type Endpoint<Out, In> = {
   postMessage(message: Out, transfer?: Transferable[]): void;

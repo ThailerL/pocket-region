@@ -1,9 +1,9 @@
 import { createRegion, type BrowserRegionOptions } from './browser.ts';
 import { AWS_DEFAULTS, awsEnvironment } from './client-config.ts';
 import { jspiSupported, type Region } from './core.ts';
-import { fromCdn, pyodideIndexUrl } from './import-map.ts';
+import { pyodideIndexUrl, regionResolve } from './import-map.ts';
 import { answer, pendingCalls, toWire } from './region/protocol.ts';
-import { portFor } from './region/proxy.ts';
+import { portFor, resolverFor } from './region/proxy.ts';
 import type { FromRunnerWorker, Language, PythonBoot, RunnerOutput, ToRunnerWorker } from './runner/protocol.ts';
 import { importing, onFailure, siblingUrl, startWorker } from './start-worker.ts';
 import { PYODIDE_VERSION } from './version.generated.ts';
@@ -28,8 +28,6 @@ export type RunOptions = {
 };
 
 export type RunnerOptions = {
-  // Where a snippet's import of anything but pocket-region loads from
-  resolve?: (specifier: string) => string;
   // Defaults to 'each-run' for the runner's own region and 'never' for one passed in
   reset?: RunnerReset;
   // Run on the region whenever it's empty: code, JavaScript unless it says which language, or a function of the region
@@ -57,7 +55,8 @@ export type Runner = {
 const asSnippet = (code: string | Snippet): Snippet => (typeof code === 'string' ? { language: 'javascript', code } : code);
 
 export function createRunner(options: RunnerOptions = {}): Runner {
-  const resolve = options.resolve ?? fromCdn;
+  // A snippet's imports load as its region's handlers' do; asked before the region boots
+  const resolve = (specifier: string) => (options.region ? resolverFor(options.region) : regionResolve(options.boot))(specifier);
   const reset = options.reset ?? (options.region ? 'never' : 'each-run');
   let own: Promise<Region> | undefined;
   // Whether the region was set up in full since it was last booted, passed in, or emptied

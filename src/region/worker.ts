@@ -10,6 +10,10 @@ const stores = pendingCalls<StateFiles>();
 const askStore = (method: StoreMethod, files?: StateFiles) =>
   stores.start((id) => post({ type: 'store', id, method, files }));
 
+const resolutions = pendingCalls<Record<string, string>>();
+const resolveOnPage = (specifiers: string[]) =>
+  resolutions.start((id) => post({ type: 'resolve', id, specifiers })) as Promise<Record<string, string>>;
+
 // The page's store, which may hold a lock the page owns
 const bridgedStore: StateStore = {
   load: () => askStore('load') as Promise<StateFiles>,
@@ -32,7 +36,7 @@ async function boot({ type: _, assets, port: regionPort, hasStore, listening }: 
   return bootRegion(
     { ...assets, loadPyodide: (options) => runtime.then(({ loadPyodide }) => loadPyodide(options)) },
     settings,
-    (region) => createWorkerHost({ ...region, lambda: hostObserver(settings) }),
+    (region) => createWorkerHost({ ...region, lambda: hostObserver(settings), resolveAll: resolveOnPage }),
   );
 }
 
@@ -51,6 +55,8 @@ function serve(endpoint: Endpoint<FromRegionWorker, ToRegionWorker>) {
         return;
       case 'stored':
         return stores.settle(data.id, data.files, data.error);
+      case 'resolved':
+        return resolutions.settle(data.id, data.urls, data.error);
       case 'connect':
         serve(data.port);
         data.port.postMessage({ type: 'booted', port: (await region!).port });

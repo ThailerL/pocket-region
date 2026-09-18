@@ -1,6 +1,5 @@
 import { clientConfigFrom } from '../client-config.ts';
 import type { CodeEntry, Dispatch, LambdaExecutor } from '../core.ts';
-import { fromCdn } from '../import-map.ts';
 import { IMPORT, rewriteImports } from '../runner/imports.ts';
 import { startWorker } from '../start-worker.ts';
 import { createLambdaHost, type RegionHostOptions } from './host.ts';
@@ -8,38 +7,55 @@ import type { LambdaError, SandboxFactory } from './pool.ts';
 import type { FetchRequest, FromWorker, ToWorker } from './worker-protocol.ts';
 import { WORKER_RUNTIME_SOURCE } from './worker-runtime.generated.ts';
 
+// The URL each bare specifier loads from
+type ResolveAll = (specifiers: string[]) => Promise<Record<string, string>>;
+
 // The package's modules, and the URLs their imports load from
-type Package = { files: Map<string, Uint8Array>; preload: string[] };
+type Package = { files: Map<string, Uint8Array>; preload: string[]; xmldom: string };
 
 const MODULE = /\.m?js$/;
 const RELATIVE = /^\.\.?\//;
-const XMLDOM = fromCdn('@xmldom/xmldom');
+const XMLDOM = '@xmldom/xmldom';
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
 
+const isBare = (specifier: string) => !RELATIVE.test(specifier) && !URL.canParse(specifier);
+
+// A file the rewrite cannot read names nothing to resolve
+function importsOf(source: string) {
+  try {
+    return rewriteImports(source).specifiers;
+  } catch {
+    return [];
+  }
+}
+
 // What a file's import names: a neighbour by its path in the package, anything else by URL
-const resolverFrom = (path: string) => (specifier: string) => {
+const resolverFrom = (path: string, urls: Record<string, string>) => (specifier: string) => {
   if (RELATIVE.test(specifier)) return decodeURIComponent(new URL(specifier, `http://package/${path}`).pathname.slice(1));
-  return URL.canParse(specifier) ? specifier : fromCdn(specifier);
+  return urls[specifier] ?? specifier;
 };
 
 // A module loaded from memory cannot import its neighbours, so imports become calls the runtime
 // answers. A file the rewrite cannot read is kept as written: only loading it is the failure
-function rewritePackage(entries: CodeEntry[]): Package {
+async function rewritePackage(entries: CodeEntry[], resolveAll: ResolveAll): Promise<Package> {
+  const modules = entries.filter(([path]) => MODULE.test(path)).map(([path, contents]) => ({ path, contents, source: decoder.decode(contents) }));
+  const bare = [...new Set([XMLDOM, ...modules.flatMap(({ source }) => importsOf(source)).filter(isBare)])];
+  const urls = await resolveAll(bare);
+
   const files = new Map<string, Uint8Array>();
   const preload = new Set<string>();
-  for (const [path, contents] of entries) {
-    if (!MODULE.test(path)) continue;
+  for (const { path, contents, source } of modules) {
     try {
-      const resolve = resolverFrom(path);
-      const { code, specifiers } = rewriteImports(decoder.decode(contents), resolve);
+      const resolve = resolverFrom(path, urls);
+      const { code, specifiers } = rewriteImports(source, resolve);
       for (const url of specifiers.map(resolve).filter((resolved) => URL.canParse(resolved))) preload.add(url);
       files.set(path, specifiers.length === 0 ? contents : encoder.encode(code));
     } catch {
       files.set(path, contents);
     }
   }
-  return { files, preload: [...preload] };
+  return { files, preload: [...preload], xmldom: urls[XMLDOM] };
 }
 
 // Lambda's handler setting: a file path without its extension, a dot, an export name
@@ -53,7 +69,7 @@ function locateHandler(setting: string, files: Map<string, Uint8Array>) {
 }
 
 // Each environment is a module worker, the Runtime API a message channel
-function workerSandbox({ files, preload }: Package, dispatch: Dispatch): SandboxFactory {
+function workerSandbox({ files, preload, xmldom }: Package, dispatch: Dispatch): SandboxFactory {
   return (env, events) => {
     let handler: ReturnType<typeof locateHandler>;
     try {
@@ -109,7 +125,7 @@ function workerSandbox({ files, preload }: Package, dispatch: Dispatch): Sandbox
       event.preventDefault?.();
       exited(`uncaught ${event.message}`);
     };
-    post({ type: 'init', env, files, preload, importer: IMPORT, defaults: clientConfigFrom(env), xmldom: XMLDOM, ...handler });
+    post({ type: 'init', env, files, preload, importer: IMPORT, defaults: clientConfigFrom(env), xmldom, ...handler });
 
     return {
       invoke({ requestId, config, event }, deadline) {
@@ -123,10 +139,10 @@ function workerSandbox({ files, preload }: Package, dispatch: Dispatch): Sandbox
 const initError = (error: Error): LambdaError => ({ errorType: 'Runtime.InitError', errorMessage: error.message });
 
 // Packages stay in memory, rewritten once; each environment gets a copy
-export function createWorkerHost({ port, dispatch, lambda }: RegionHostOptions): LambdaExecutor {
+export function createWorkerHost({ port, dispatch, lambda, resolveAll }: RegionHostOptions & { resolveAll: ResolveAll }): LambdaExecutor {
   return createLambdaHost<Package>(
     {
-      pack: async (_codeSha256, entries) => rewritePackage(entries),
+      pack: (_codeSha256, entries) => rewritePackage(entries, resolveAll),
       spawn: (files) => workerSandbox(files, dispatch),
       dispose: async () => {},
     },
