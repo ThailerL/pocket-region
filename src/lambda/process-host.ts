@@ -1,22 +1,28 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { buffer } from 'node:stream/consumers';
-import type { CodeEntry, Invocation, LambdaExecutor } from '../core.ts';
+import type { CodeEntry, Invocation, LambdaExecutor, PythonWheel } from '../core.ts';
 import { serve, type RegionServer } from '../server.ts';
 import { createLambdaHost, type RegionHostOptions } from './host.ts';
-import { parseError, type LambdaError, type SandboxFactory } from './pool.ts';
+import { parseError, type LambdaError, type PythonRuntime, type SandboxFactory } from './pool.ts';
 import { PROCESS_RUNTIME_SOURCE } from './process-runtime.generated.ts';
+import { PYTHON_RUNTIME_SOURCE } from './python-runtime.generated.ts';
 
 const RUNTIME_API_PREFIX = '/2018-06-01/runtime/';
 const EMPTY = Buffer.alloc(0);
 
+// Where a Python environment's Pyodide is, and the wheels it preinstalls, cached in cacheDir once fetched
+export type PythonInstall = { indexURL: string; wheels: PythonWheel[]; cacheDir: string };
+
 type Package = { taskRoot: string; runtimeScript: string };
 
-// Each environment is a child process with its own Runtime API listener
-function processSandbox({ taskRoot, runtimeScript }: Package): SandboxFactory {
+// Each environment is a child process with its own Runtime API listener. A Python one is handed
+// the file its runtime is described in, once the host has it ready
+function processSandbox({ taskRoot, runtimeScript }: Package, pythonRuntime?: () => Promise<string>): SandboxFactory {
   return (env, events) => {
     let child: ChildProcess | undefined;
     // Present exactly while the environment is idle
@@ -86,10 +92,17 @@ function processSandbox({ taskRoot, runtimeScript }: Package): SandboxFactory {
       respondJson(res, 404, { errorMessage: `No such runtime route: ${req.method} ${route}` });
     }
 
-    server.listen(0, '127.0.0.1', () => {
+    server.listen(0, '127.0.0.1', async () => {
+      const args = [runtimeScript];
+      try {
+        if (pythonRuntime) args.push(await pythonRuntime());
+      } catch (error) {
+        initError = { errorType: 'Runtime.InitError', errorMessage: (error as Error).message };
+        return exited((error as Error).message);
+      }
       if (killed) return exited('killed before it started');
       const { port } = server.address() as { port: number };
-      child = spawn(process.execPath, [runtimeScript], {
+      child = spawn(process.execPath, args, {
         cwd: taskRoot,
         // Not the parent's environment: a handler sees only what Lambda would give it
         env: {
@@ -156,12 +169,29 @@ async function nearestNodeModules() {
   }
 }
 
+// A wheel is fetched once per machine and checked against the manifest's checksum
+async function cachedWheel({ file, url, sha256 }: PythonWheel, cacheDir: string) {
+  const target = path.join(cacheDir, file);
+  if (await stat(target).then(() => true, () => false)) return target;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Could not download ${url}: ${response.status} ${response.statusText}`);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  const digest = createHash('sha256').update(bytes).digest('hex');
+  if (digest !== sha256) throw new Error(`${file} from ${url} has SHA-256 ${digest}, not ${sha256}`);
+  // Renamed into place whole: another region fetching the same wheel never reads half of it
+  const pending = `${target}.${process.pid}.part`;
+  await writeFile(pending, bytes);
+  await rename(pending, target);
+  return target;
+}
+
 // Packages are unpacked into a temp directory by code hash, the runtime beside them. The
 // region is served on its port from the first environment on, since a handler's SDK calls
 // arrive from another process, and queue URLs name that port
-export function createProcessHost({ port, dispatch, lambda }: RegionHostOptions): LambdaExecutor {
+export function createProcessHost({ port, dispatch, lambda, python }: RegionHostOptions & { python: PythonInstall }): LambdaExecutor {
   let root: Promise<string> | undefined;
   let served: Promise<RegionServer | undefined> | undefined;
+  let pythonReady: Promise<string> | undefined;
 
   async function serveRegion() {
     try {
@@ -186,6 +216,23 @@ export function createProcessHost({ port, dispatch, lambda }: RegionHostOptions)
       return directory;
     }));
 
+  // Once per host, on the first Python environment; a failed fetch is tried again by the next one
+  const pythonRuntime = () =>
+    (pythonReady ??= (async () => {
+      await mkdir(python.cacheDir, { recursive: true });
+      const [directory, wheels] = await Promise.all([
+        workspace(),
+        Promise.all(python.wheels.map((wheel) => cachedWheel(wheel, python.cacheDir))),
+      ]);
+      const runtime: PythonRuntime = { indexURL: python.indexURL, wheels, source: PYTHON_RUNTIME_SOURCE };
+      const runtimeFile = path.join(directory, 'python.json');
+      await writeFile(runtimeFile, JSON.stringify(runtime));
+      return runtimeFile;
+    })().catch((error) => {
+      pythonReady = undefined;
+      throw error;
+    }));
+
   return createLambdaHost<Package>(
     {
       async pack(codeSha256: string, entries: CodeEntry[]) {
@@ -204,7 +251,7 @@ export function createProcessHost({ port, dispatch, lambda }: RegionHostOptions)
         );
         return { taskRoot, runtimeScript: path.join(directory, 'runtime.mjs') };
       },
-      spawn: processSandbox,
+      spawn: (pkg, family) => processSandbox(pkg, family === 'python' ? pythonRuntime : undefined),
       async dispose() {
         await (await served)?.close();
         if (root) await rm(await root, { recursive: true, force: true });

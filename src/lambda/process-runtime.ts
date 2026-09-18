@@ -1,9 +1,11 @@
 // Shipped as a string (scripts/embed-runtime.mjs), so it may import only Node's own modules
 import http from 'node:http';
 import path from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { text } from 'node:stream/consumers';
 import { pathToFileURL } from 'node:url';
+import type { PyodideInterface } from 'pyodide';
+import type { Invoker, LambdaError, PythonRuntime } from './pool.ts';
 
 const [host, apiPort] = (process.env.AWS_LAMBDA_RUNTIME_API ?? '').split(':');
 if (!host || !apiPort) throw new Error('AWS_LAMBDA_RUNTIME_API is not set');
@@ -30,7 +32,7 @@ function request(method: string, route: string, body?: string): Promise<Reply> {
   });
 }
 
-const errorPayload = (error: unknown) => {
+const errorPayload = (error: unknown): LambdaError => {
   const { name, message, stack } = (error ?? {}) as Partial<Error>;
   return {
     errorType: name ?? 'Error',
@@ -38,6 +40,9 @@ const errorPayload = (error: unknown) => {
     stackTrace: typeof stack === 'string' ? stack.split('\n') : [],
   };
 };
+
+// A handler ready to invoke, or the init error its runtime already logged
+type Loaded = Invoker | { error: LambdaError };
 
 // Lambda's handler setting: a file path without its extension, a dot, an export name
 function locateHandler(setting: string) {
@@ -53,20 +58,66 @@ function locateHandler(setting: string) {
 
 type Handler = (event: unknown, context: object) => unknown;
 
-let handler: Handler;
-try {
+async function loadNodeHandler(): Promise<Invoker> {
   const { file, name } = locateHandler(process.env._HANDLER || 'index.handler');
   const module = await import(pathToFileURL(file).href);
   // A CommonJS handler's exports arrive under default
-  handler = module[name] ?? module.default?.[name];
+  const handler: Handler = module[name] ?? module.default?.[name];
   if (typeof handler !== 'function') {
     throw new Error(`${path.basename(file)} does not export a function named "${name}"`);
   }
+  return async (event, requestId, deadline, arn) => {
+    const context = {
+      awsRequestId: requestId,
+      functionName: process.env.AWS_LAMBDA_FUNCTION_NAME,
+      functionVersion: process.env.AWS_LAMBDA_FUNCTION_VERSION,
+      memoryLimitInMB: process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE,
+      invokedFunctionArn: arn,
+      logStreamName: process.env.AWS_LAMBDA_LOG_STREAM_NAME,
+      getRemainingTimeInMillis: () => Math.max(0, deadline - Date.now()),
+    };
+    try {
+      return { result: JSON.stringify((await handler(JSON.parse(event), context)) ?? null) };
+    } catch (error) {
+      console.error(`${requestId}\tERROR\tInvoke Error\t${(error as Error)?.stack ?? error}`);
+      return { error: errorPayload(error) };
+    }
+  };
+}
+
+// Where Lambda keeps the package, so a handler's paths hold
+const TASK_ROOT = '/var/task';
+
+// A Python handler runs under an interpreter of its own, its errors reported by the runtime's Python.
+// The host wrote the runtime beside this script
+async function loadPythonHandler(runtimeFile: string): Promise<Loaded> {
+  const { indexURL, wheels, source }: PythonRuntime = JSON.parse(readFileSync(runtimeFile, 'utf8'));
+  const { loadPyodide }: typeof import('pyodide') = await import(pathToFileURL(path.join(indexURL, 'pyodide.mjs')).href);
+  const py: PyodideInterface = await loadPyodide({
+    indexURL,
+    env: { ...(process.env as Record<string, string>), LAMBDA_TASK_ROOT: TASK_ROOT },
+    stdout: console.log,
+    stderr: console.error,
+  });
+  py.mountNodeFS(TASK_ROOT, process.env.LAMBDA_TASK_ROOT!);
+  await py.loadPackage(wheels, { messageCallback() {} });
+  py.runPython(source);
+  const failure: LambdaError | undefined = await py.globals.get('load')(process.env._HANDLER || 'lambda_function.lambda_handler');
+  return failure ? { error: failure } : py.globals.get('invoke');
+}
+
+let loaded: Loaded;
+try {
+  loaded = await (process.argv[2] ? loadPythonHandler(process.argv[2]) : loadNodeHandler());
 } catch (error) {
   console.error(`Could not load the handler: ${(error as Error)?.stack ?? error}`);
-  await request('POST', 'init/error', JSON.stringify(errorPayload(error)));
+  loaded = { error: errorPayload(error) };
+}
+if ('error' in loaded) {
+  await request('POST', 'init/error', JSON.stringify(loaded.error));
   process.exit(1);
 }
+const invoke = loaded;
 
 for (;;) {
   const next = await request('GET', 'invocation/next');
@@ -75,21 +126,8 @@ for (;;) {
 
   const requestId = String(next.headers['lambda-runtime-aws-request-id']);
   const deadline = Number(next.headers['lambda-runtime-deadline-ms']);
-  const context = {
-    awsRequestId: requestId,
-    functionName: process.env.AWS_LAMBDA_FUNCTION_NAME,
-    functionVersion: process.env.AWS_LAMBDA_FUNCTION_VERSION,
-    memoryLimitInMB: process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE,
-    invokedFunctionArn: next.headers['lambda-runtime-invoked-function-arn'],
-    logStreamName: process.env.AWS_LAMBDA_LOG_STREAM_NAME,
-    getRemainingTimeInMillis: () => Math.max(0, deadline - Date.now()),
-  };
-
-  try {
-    const result = await handler(JSON.parse(next.body), context);
-    await request('POST', `invocation/${requestId}/response`, JSON.stringify(result ?? null));
-  } catch (error) {
-    console.error(`${requestId}\tERROR\tInvoke Error\t${(error as Error)?.stack ?? error}`);
-    await request('POST', `invocation/${requestId}/error`, JSON.stringify(errorPayload(error)));
-  }
+  const arn = String(next.headers['lambda-runtime-invoked-function-arn']);
+  const outcome = await invoke(next.body, requestId, deadline, arn);
+  if ('error' in outcome) await request('POST', `invocation/${requestId}/error`, JSON.stringify(outcome.error));
+  else await request('POST', `invocation/${requestId}/response`, outcome.result);
 }

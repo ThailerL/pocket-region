@@ -36,7 +36,13 @@ async function boot({ type: _, assets, port: regionPort, hasStore, listening }: 
   return bootRegion(
     { ...assets, loadPyodide: (options) => runtime.then(({ loadPyodide }) => loadPyodide(options)) },
     settings,
-    (region) => createWorkerHost({ ...region, lambda: hostObserver(settings), resolveAll: resolveOnPage }),
+    (region) =>
+      createWorkerHost({
+        ...region,
+        lambda: hostObserver(settings),
+        resolveAll: resolveOnPage,
+        python: { indexURL: assets.indexURL, wheels: assets.pythonRuntime },
+      }),
   );
 }
 

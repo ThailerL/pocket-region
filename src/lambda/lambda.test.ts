@@ -35,8 +35,44 @@ export const handler = async (event, context) => {
     const response = await fetch(url, { method: 'PUT', headers: { authorization: ${JSON.stringify(authorization('s3'))} } });
     return { created: response.status };
   }
-  return { calls, functionName: context.functionName, remaining: context.getRemainingTimeInMillis() > 0, event };
+  return { calls, functionName: context.functionName, remaining: context.getRemainingTimeInMillis() > 0, runtime: process.env.AWS_EXECUTION_ENV, event };
 };
+`;
+
+const PYTHON_HANDLER = `
+import json
+import os
+
+calls = 0
+
+
+def handler(event, context):
+    global calls
+    calls += 1
+    print("handling " + json.dumps(event))
+    if event.get("raise"):
+        raise ValueError("handler failed")
+    return {
+        "calls": calls,
+        "functionName": context.function_name,
+        "requestId": context.aws_request_id,
+        "remaining": context.get_remaining_time_in_millis() > 0,
+        "runtime": os.environ["AWS_EXECUTION_ENV"],
+        "event": event,
+    }
+`;
+
+// boto3 as a handler uses it: a client made at init with no options
+const BOTO3_HANDLER = `
+import boto3
+
+s3 = boto3.client("s3")
+
+
+def handler(event, context):
+    s3.create_bucket(Bucket=event["bucket"])
+    s3.put_object(Bucket=event["bucket"], Key="greeting.txt", Body="hello from boto3")
+    return {"body": s3.get_object(Bucket=event["bucket"], Key="greeting.txt")["Body"].read().decode()}
 `;
 
 // Each record's body names a bucket to create, then optionally "fail" to throw after it
@@ -143,7 +179,7 @@ describe('Lambda', () => {
     const first = await invoke('echo', { hello: 'world' });
     expect(first.status).toBe(200);
     expect(first.error).toBeUndefined();
-    expect(first.payload).toEqual({ calls: 1, functionName: 'echo', remaining: true, event: { hello: 'world' } });
+    expect(first.payload).toEqual({ calls: 1, functionName: 'echo', remaining: true, runtime: 'AWS_Lambda_nodejs22.x', event: { hello: 'world' } });
     expect((await invoke('echo', {})).payload.calls).toBe(2);
   }, 30_000);
 
@@ -439,12 +475,60 @@ export const handler = async (event) => {
     await expect.poll(() => bucketExists('made-by-a-table'), { timeout: 15_000 }).toBe(true);
   }, 30_000);
 
-  it('refuses a runtime it cannot run', async () => {
-    await createFunction('snake', { Runtime: 'python3.12', Handler: 'index.handler' }, 'def handler(e, c): return 1');
-    const refused = await invoke('snake', {});
-    expect(refused.error).toBe('Unhandled');
-    expect(refused.payload.errorMessage).toContain('python3.12');
-  });
+  const createPythonFunction = (FunctionName: string, code = PYTHON_HANDLER, extra: object = {}) =>
+    createFunction(FunctionName, { Runtime: 'python3.13', Handler: 'index.handler', Code: { ZipFile: zipOf('index.py', code) }, ...extra });
+
+  it("runs a Python function, warm on the second call, with Lambda's context and its prints in the log", async () => {
+    await createPythonFunction('snake');
+    const first = await invoke('snake', { hello: 'world' }, { LogType: 'Tail' });
+    expect(first.error).toBeUndefined();
+    expect(first.payload).toEqual({
+      calls: 1,
+      functionName: 'snake',
+      requestId: expect.any(String),
+      remaining: true,
+      runtime: 'AWS_Lambda_python3.13',
+      event: { hello: 'world' },
+    });
+    expect(first.log).toContain('handling {"hello": "world"}');
+    expect((await invoke('snake', {})).payload.calls).toBe(2);
+  }, 30_000);
+
+  it('gives a Python handler boto3, pointed at the region', async () => {
+    await createPythonFunction('boto', BOTO3_HANDLER);
+    const { error, payload } = await invoke('boto', { bucket: 'made-by-boto3' });
+    expect(error).toBeUndefined();
+    expect(payload).toEqual({ body: 'hello from boto3' });
+    expect(await bucketExists('made-by-boto3')).toBe(true);
+  }, 30_000);
+
+  it('reports a raised Python exception as an unhandled function error, with the traceback logged', async () => {
+    const thrown = await invoke('snake', { raise: true }, { LogType: 'Tail' });
+    expect(thrown.error).toBe('Unhandled');
+    expect(thrown.payload).toEqual({ errorType: 'Runtime.HandlerError', errorMessage: 'handler failed' });
+    expect(thrown.log).toContain('[ERROR] ValueError: handler failed');
+    expect(thrown.log).toContain('raise ValueError("handler failed")');
+  }, 30_000);
+
+  it('runs a Python handler named by a path, which imports from the package root', async () => {
+    const files = {
+      'src/app.py': 'from helpers import greet\n\n\ndef handler(event, context):\n    return {"greeting": greet(event["name"])}\n',
+      'helpers.py': 'def greet(name):\n    return f"hello {name}!"\n',
+    };
+    await createPythonFunction('snake-neighbours', '', { Handler: 'src/app.handler', Code: { ZipFile: zipOfFiles(files) } });
+    const { error, payload } = await invoke('snake-neighbours', { name: 'world' });
+    expect(error).toBeUndefined();
+    expect(payload).toEqual({ greeting: 'hello world!' });
+  }, 30_000);
+
+  it("fails an invocation whose Python handler cannot load, in Lambda's words", async () => {
+    await createPythonFunction('snake-import', 'import nothing_here\n');
+    const failed = await invoke('snake-import', {});
+    expect(failed.error).toBe('Unhandled');
+    expect(failed.payload.errorMessage).toBe("Unable to import module 'index': No module named 'nothing_here'");
+    await createPythonFunction('snake-missing', 'x = 1\n');
+    expect((await invoke('snake-missing', {})).payload.errorMessage).toBe("Handler 'handler' missing on module 'index'");
+  }, 60_000);
 
   it('refuses a custom runtime, whose bootstrap MiniStack would spawn', async () => {
     await createFunction('custom', { Runtime: 'provided.al2023', Handler: 'bootstrap', Code: { ZipFile: zipOf('bootstrap', '#!/bin/sh') } });

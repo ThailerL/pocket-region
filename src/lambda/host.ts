@@ -1,5 +1,5 @@
 import type { CodeEntry, Dispatcher, LambdaExecutor, LambdaObserver } from '../core.ts';
-import { failure, FunctionPool, type SandboxFactory } from './pool.ts';
+import { failure, FunctionPool, RUNTIME_FAMILIES, type RuntimeFamily, type SandboxFactory } from './pool.ts';
 
 // What either host takes: the region it runs beside, and where its handlers' output goes
 export type RegionHostOptions = Dispatcher & {
@@ -10,7 +10,7 @@ export type RegionHostOptions = Dispatcher & {
 // What a host adds to the pool: where a package goes and how an environment runs it
 export type HostPackaging<Package> = {
   pack(codeSha256: string, entries: CodeEntry[]): Promise<Package>;
-  spawn(pkg: Package): SandboxFactory;
+  spawn(pkg: Package, family: RuntimeFamily): SandboxFactory;
   dispose(): Promise<void>;
 };
 
@@ -39,8 +39,9 @@ export function createLambdaHost<Package>(
     async execute(invocation) {
       const { config, code } = invocation;
       const { Runtime, CodeSha256, FunctionName, RevisionId } = config;
-      if (!Runtime.startsWith('nodejs')) {
-        return failure(`Pocket Region runs nodejs functions only; this one is ${Runtime || 'a container image'}`);
+      const family = RUNTIME_FAMILIES.find((prefix) => Runtime.startsWith(prefix));
+      if (!family) {
+        return failure(`Pocket Region runs nodejs and python functions only; this one is ${Runtime || 'a container image'}`);
       }
       if (code && !packed.has(CodeSha256)) packed.set(CodeSha256, packaging.pack(CodeSha256, code));
       const pkg = await packed.get(CodeSha256);
@@ -52,7 +53,7 @@ export function createLambdaHost<Package>(
       let pool = pools.get(key);
       if (!pool) {
         // No await between get and set, or two first invocations each make a pool
-        pool = new FunctionPool({ spawn: packaging.spawn(pkg), endpoint, lambda });
+        pool = new FunctionPool({ spawn: packaging.spawn(pkg, family), endpoint, lambda });
         pools.set(key, pool);
       }
       return pool.invoke(invocation);

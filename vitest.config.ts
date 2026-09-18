@@ -2,11 +2,12 @@ import { fileURLToPath } from 'node:url';
 import { playwright } from '@vitest/browser-playwright';
 import { defineConfig, type Plugin } from 'vitest/config';
 
-// Vitest routes import() through a page-only global; workers started Vite's way get this stub, ours don't
+// Vitest routes import() through a page-only global; workers started Vite's way get this stub, ours
+// don't, nor does Pyodide when a Lambda environment's worker loads it from Vite's server
 const workerRunnerStub = (): Plugin => ({
   name: 'pocket-region:worker-runner-stub',
   transform(code, id) {
-    if (!/\/src\/.+\/[\w-]*worker\.ts$/.test(id)) return;
+    if (!/\/src\/.+\/[\w-]*worker\.ts$/.test(id) && !/\/node_modules\/pyodide\/pyodide\.mjs(\?|$)/.test(id)) return;
     return { code: `globalThis.__vitest_browser_runner__ ??= { wrapDynamicImport: (f) => f() };\n${code}`, map: null };
   },
 });

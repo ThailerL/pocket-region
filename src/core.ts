@@ -161,8 +161,11 @@ export type LambdaObserver = {
 // Built during boot, around the dispatch a handler's own calls come back through
 export type LambdaHostFactory = (region: Dispatcher & { port: number }) => LambdaExecutor;
 
+// A wheel a Python function's environment preinstalls, as Lambda's runtime preinstalls boto3
+export type PythonWheel = { file: string; url: string; sha256: string };
+
 // What scripts/vendor.mjs writes beside the wheels
-export type VendorManifest = { wheels: string[]; stdlib: string; pyodideVersion: string };
+export type VendorManifest = { wheels: string[]; stdlib: string; pyodideVersion: string; pythonRuntime: PythonWheel[] };
 
 export type RegionSettings = {
   // The port minted queue URLs name, since the AWS SDK dials the URL it is given

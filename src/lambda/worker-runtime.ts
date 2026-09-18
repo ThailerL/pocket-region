@@ -1,7 +1,8 @@
 // Shipped as a string (scripts/embed-runtime.mjs) and run as a module worker from a Blob URL,
 // so it may import nothing but types: web globals only
-import type { LambdaError } from './pool.ts';
-import type { FetchReply, FromWorker, ToWorker } from './worker-protocol.ts';
+import type { PyodideInterface } from 'pyodide';
+import type { Invoker, LambdaError } from './pool.ts';
+import type { FetchReply, FromWorker, NodeInit, PythonInit, ToWorker } from './worker-protocol.ts';
 
 // DedicatedWorkerGlobalScope, without the lib that names it
 const port = self as unknown as {
@@ -46,6 +47,9 @@ const errorPayload = (error: unknown): LambdaError => {
     stackTrace: typeof stack === 'string' ? stack.split('\n') : [],
   };
 };
+
+// A handler ready to invoke, or the init error its runtime already logged
+type Loaded = Invoker | { error: LambdaError };
 
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]']);
 
@@ -112,77 +116,112 @@ function defaulted(module: Module, Base: ClientClass, defaults: object): Module 
 
 type Handler = (event: unknown, context: object) => unknown;
 
-const { env, files, preload, importer, handler: handlerPath, exportName, defaults, xmldom } = await receive('init');
+const { env, runtime } = await receive('init');
 // What a handler reads its configuration from, as it does on Lambda
 (globalThis as { process?: unknown }).process = { env };
 interceptFetch(env.AWS_ENDPOINT_URL!);
 
-const modules = new Map<string, Promise<Module>>();
+async function loadNodeHandler({ files, importer, handler: handlerPath, exportName, preload, defaults, xmldom }: NodeInit): Promise<Invoker> {
+  const modules = new Map<string, Promise<Module>>();
 
-async function polyfillDom() {
-  if ('DOMParser' in globalThis) return;
-  const { DOMParser, Node } = await import(xmldom);
-  Object.assign(globalThis, { DOMParser, Node });
-}
-
-// An SDK client package comes with what its browser build expects of a page
-async function fromUrl(url: string) {
-  const module: Module = await import(url);
-  if (typeof module.__Client !== 'function') return module;
-  await polyfillDom();
-  return defaulted(module, module.__Client as ClientClass, defaults);
-}
-
-// Answers the calls the host rewrote imports into: a path in the package, or a URL
-function loadModule(specifier: string): Promise<Module> {
-  let loading = modules.get(specifier);
-  if (!loading) {
-    const source = files.get(specifier);
-    if (source) loading = importModule(source);
-    else if (URL.canParse(specifier)) loading = fromUrl(specifier);
-    else loading = Promise.reject(new Error(`The package has no ${specifier}`));
-    modules.set(specifier, loading);
-    // A failure is not the answer for the rest of the environment
-    loading.catch(() => modules.delete(specifier));
+  async function polyfillDom() {
+    if ('DOMParser' in globalThis) return;
+    const { DOMParser, Node } = await import(xmldom);
+    Object.assign(globalThis, { DOMParser, Node });
   }
-  return loading;
-}
-(globalThis as Record<string, unknown>)[importer] = loadModule;
 
-// Rejections are seen where the handler imports them
-for (const url of preload) loadModule(url).catch(() => {});
+  // An SDK client package comes with what its browser build expects of a page
+  async function fromUrl(url: string) {
+    const module: Module = await import(url);
+    if (typeof module.__Client !== 'function') return module;
+    await polyfillDom();
+    return defaulted(module, module.__Client as ClientClass, defaults);
+  }
 
-let handler: Handler;
-try {
-  handler = (await loadModule(handlerPath))[exportName] as Handler;
+  // Answers the calls the host rewrote imports into: a path in the package, or a URL
+  function loadModule(specifier: string): Promise<Module> {
+    let loading = modules.get(specifier);
+    if (!loading) {
+      const source = files.get(specifier);
+      if (source) loading = importModule(source);
+      else if (URL.canParse(specifier)) loading = fromUrl(specifier);
+      else loading = Promise.reject(new Error(`The package has no ${specifier}`));
+      modules.set(specifier, loading);
+      // A failure is not the answer for the rest of the environment
+      loading.catch(() => modules.delete(specifier));
+    }
+    return loading;
+  }
+  (globalThis as Record<string, unknown>)[importer] = loadModule;
+
+  // Rejections are seen where the handler imports them
+  for (const url of preload) loadModule(url).catch(() => {});
+
+  const handler = (await loadModule(handlerPath))[exportName] as Handler;
   if (typeof handler !== 'function') {
     throw new Error(`The handler module does not export a function named "${exportName}"`);
   }
-} catch (error) {
-  console.error(`Could not load the handler: ${(error as Error)?.stack ?? error}`);
-  port.postMessage({ type: 'init-error', error: errorPayload(error) });
-  port.close();
-  throw error;
+  return async (event, requestId, deadline, arn) => {
+    const context = {
+      awsRequestId: requestId,
+      functionName: env.AWS_LAMBDA_FUNCTION_NAME,
+      functionVersion: env.AWS_LAMBDA_FUNCTION_VERSION,
+      memoryLimitInMB: env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE,
+      invokedFunctionArn: arn,
+      logStreamName: env.AWS_LAMBDA_LOG_STREAM_NAME,
+      getRemainingTimeInMillis: () => Math.max(0, deadline - Date.now()),
+    };
+    try {
+      return { result: JSON.stringify((await handler(JSON.parse(event), context)) ?? null) };
+    } catch (error) {
+      console.error(`${requestId}\tERROR\tInvoke Error\t${(error as Error)?.stack ?? error}`);
+      return { error: errorPayload(error) };
+    }
+  };
 }
 
-for (;;) {
-  port.postMessage({ type: 'next' });
-  const { requestId, deadline, arn, event } = await receive('invocation');
-  const context = {
-    awsRequestId: requestId,
-    functionName: env.AWS_LAMBDA_FUNCTION_NAME,
-    functionVersion: env.AWS_LAMBDA_FUNCTION_VERSION,
-    memoryLimitInMB: env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE,
-    invokedFunctionArn: arn,
-    logStreamName: env.AWS_LAMBDA_LOG_STREAM_NAME,
-    getRemainingTimeInMillis: () => Math.max(0, deadline - Date.now()),
-  };
+// Where Lambda keeps the package, so a handler's paths hold
+const TASK_ROOT = '/var/task';
 
-  try {
-    const result = await handler(JSON.parse(event), context);
-    port.postMessage({ type: 'response', requestId, result: JSON.stringify(result ?? null) });
-  } catch (error) {
-    console.error(`${requestId}\tERROR\tInvoke Error\t${(error as Error)?.stack ?? error}`);
-    port.postMessage({ type: 'error', requestId, error: errorPayload(error) });
+// A Python handler runs under an interpreter of its own, its errors reported by the runtime's Python
+async function loadPythonHandler({ files, indexURL, wheels, source }: PythonInit): Promise<Loaded> {
+  const { loadPyodide }: typeof import('pyodide') = await import(`${indexURL}pyodide.mjs`);
+  const py: PyodideInterface = await loadPyodide({
+    indexURL,
+    env: { ...env, LAMBDA_TASK_ROOT: TASK_ROOT },
+    stdout: console.log,
+    stderr: console.error,
+  });
+  for (const [file, contents] of files) {
+    const target = `${TASK_ROOT}/${file}`;
+    py.FS.mkdirTree(target.slice(0, target.lastIndexOf('/')));
+    py.FS.writeFile(target, contents);
+  }
+  // Pyodide holds its own copy now
+  files.clear();
+  await py.loadPackage(wheels, { messageCallback() {} });
+  py.runPython(source);
+  const failure: LambdaError | undefined = await py.globals.get('load')(env._HANDLER || 'lambda_function.lambda_handler');
+  return failure ? { error: failure } : py.globals.get('invoke');
+}
+
+let loaded: Loaded;
+try {
+  loaded = await (runtime.family === 'python' ? loadPythonHandler(runtime) : loadNodeHandler(runtime));
+} catch (error) {
+  console.error(`Could not load the handler: ${(error as Error)?.stack ?? error}`);
+  loaded = { error: errorPayload(error) };
+}
+
+if ('error' in loaded) {
+  port.postMessage({ type: 'init-error', error: loaded.error });
+  port.close();
+} else {
+  for (;;) {
+    port.postMessage({ type: 'next' });
+    const { requestId, deadline, arn, event } = await receive('invocation');
+    const outcome = await loaded(event, requestId, deadline, arn);
+    if ('error' in outcome) port.postMessage({ type: 'error', requestId, error: outcome.error });
+    else port.postMessage({ type: 'response', requestId, result: outcome.result });
   }
 }

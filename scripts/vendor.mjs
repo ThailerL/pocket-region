@@ -6,6 +6,10 @@
 // stamps a format version on each service's state file and starts that service empty when
 // the stamps disagree, so a bump can cost user data. Never let these pins drift.
 //
+// PYTHON_RUNTIME_SPEC is what a Python function's environment preinstalls, as Lambda's runtime
+// does. Its set is resolved the same way but only named in meta.json, by URL and checksum:
+// botocore alone is 16 MB, so a host fetches it the first time a Python function runs.
+//
 // Requires network and an up-to-date npm install. Idempotent - a no-op unless the pins
 // changed or --force is passed.
 
@@ -23,6 +27,8 @@ const PYODIDE_VERSION = require('../package.json').dependencies.pyodide;
 const PYODIDE_DIRECTORY = path.dirname(require.resolve('pyodide/package.json'));
 const EMULATOR_SPEC = 'ministack==1.5.12';
 const EMULATOR_NAME = EMULATOR_SPEC.split('==')[0];
+const PYTHON_RUNTIME_SPEC = 'boto3==1.43.97';
+const PYODIDE_CDN = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`;
 
 // Resolved as the emulator's dependency but left out of the tree. botocore is half the
 // payload and the slowest wheel to install, and nothing we serve imports it: it is lazy,
@@ -59,9 +65,10 @@ if (!force && fs.existsSync(METADATA_FILE)) {
 	if (
 		metadata.pyodideVersion === PYODIDE_VERSION &&
 		metadata.emulatorSpec === EMULATOR_SPEC &&
+		metadata.pythonRuntimeSpec === PYTHON_RUNTIME_SPEC &&
 		metadata.stdlib === STDLIB_FILE
 	) {
-		log(`up to date - pyodide ${PYODIDE_VERSION}, ${EMULATOR_SPEC} (--force to rebuild)`);
+		log(`up to date - pyodide ${PYODIDE_VERSION}, ${EMULATOR_SPEC}, ${PYTHON_RUNTIME_SPEC} (--force to rebuild)`);
 		process.exit(0);
 	}
 	log(`pins changed: regenerating`);
@@ -147,9 +154,10 @@ await asgi_request("POST", "/_ministack/reset", {"host": "localhost:4566"}, b"")
 }
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'pocket-region-vendor-'));
-try {
 
-	// Wheel-loading noise goes to stdout, so the child writes its result to a file instead
+// Installs a spec under the pinned Pyodide in a child, since wheel-loading noise goes to
+// stdout. list() names what is actually installed; freeze() knows each PyPI wheel's URL
+function resolve(spec) {
 	const listScript = path.join(work, 'list.mjs');
 	const listFile = path.join(work, 'installed.json');
 	fs.writeFileSync(
@@ -160,7 +168,7 @@ const py = await loadPyodide({ packageCacheDir: ${JSON.stringify(work)} });
 await py.loadPackage('micropip');
 const result = await py.runPythonAsync(\`
 import json, micropip
-await micropip.install(${JSON.stringify(EMULATOR_SPEC)})
+await micropip.install(${JSON.stringify(spec)})
 json.dumps({
     "installed": [{"name": p.name, "version": p.version, "source": p.source}
                   for p in micropip.list().values()],
@@ -170,17 +178,21 @@ json.dumps({
 fs.writeFileSync(${JSON.stringify(listFile)}, result);
 `
 	);
-	log(`resolving the wheel set for ${EMULATOR_SPEC}`);
+	log(`resolving the wheel set for ${spec}`);
 	execFileSync(process.execPath, [listScript], {
 		cwd: work,
 		stdio: ['ignore', 'ignore', 'inherit']
 	});
-	// list() names what is actually installed; freeze() knows each PyPI wheel's URL
-	const { installed: packages, lock } = JSON.parse(fs.readFileSync(listFile, 'utf8'));
+	return JSON.parse(fs.readFileSync(listFile, 'utf8'));
+}
+
+const indexByName = (entries) =>
+	new Map(Object.values(entries ?? {}).map((entry) => [canonical(entry.name), entry]));
+
+try {
+	const { installed: packages, lock } = resolve(EMULATOR_SPEC);
 	const emulator = packages.find((entry) => entry.name === EMULATOR_NAME);
 	if (!emulator) fail(`install did not include ${EMULATOR_NAME}`);
-	const indexByName = (entries) =>
-		new Map(Object.values(entries ?? {}).map((entry) => [canonical(entry.name), entry]));
 	const frozenEntries = indexByName(lock.packages);
 
 	// Distribution packages report source 'pyodide'; their wheel names and checksums come
@@ -189,6 +201,27 @@ fs.writeFileSync(${JSON.stringify(listFile)}, result);
 		fs.readFileSync(path.join(PYODIDE_DIRECTORY, 'pyodide-lock.json'), 'utf8')
 	);
 	const distEntries = indexByName(distributionLock.packages);
+
+	// Where each of the Python runtime's wheels is served from: Pyodide's CDN for a
+	// distribution package, PyPI for the rest, with the checksum a host verifies
+	const { installed: runtimePackages, lock: runtimeLock } = resolve(PYTHON_RUNTIME_SPEC);
+	const runtimeFrozen = indexByName(runtimeLock.packages);
+	const pythonRuntime = runtimePackages
+		.filter((entry) => canonical(entry.name) !== 'micropip')
+		.map((entry) => {
+			if (entry.source === 'pyodide') {
+				const dist = distEntries.get(canonical(entry.name));
+				if (!dist?.sha256) fail(`${entry.name} is not in the distribution lockfile with a checksum`);
+				const file = path.basename(dist.file_name);
+				return { file, url: PYODIDE_CDN + file, sha256: dist.sha256 };
+			}
+			const frozen = runtimeFrozen.get(canonical(entry.name));
+			if (!frozen?.sha256 || !/^https?:/.test(frozen.file_name)) {
+				fail(`no download URL with a checksum for ${entry.name} (source: ${entry.source})`);
+			}
+			return { file: decodeURIComponent(frozen.file_name.split('/').pop()), url: frozen.file_name, sha256: frozen.sha256 };
+		})
+		.sort((a, b) => a.file.localeCompare(b.file));
 
 	fs.rmSync(OUTPUT_DIRECTORY, { recursive: true, force: true });
 	fs.mkdirSync(OUTPUT_DIRECTORY, { recursive: true });
@@ -243,7 +276,9 @@ fs.writeFileSync(${JSON.stringify(listFile)}, result);
 				pyodideVersion: PYODIDE_VERSION,
 				emulatorSpec: EMULATOR_SPEC,
 				wheels,
-				stdlib: STDLIB_FILE
+				stdlib: STDLIB_FILE,
+				pythonRuntimeSpec: PYTHON_RUNTIME_SPEC,
+				pythonRuntime
 			},
 			null,
 			2
@@ -252,7 +287,8 @@ fs.writeFileSync(${JSON.stringify(listFile)}, result);
 	log(
 		`wrote ${wheels.length} wheels and the stdlib zip - ${megabytes} MB, ${EMULATOR_NAME} ${emulator.version}, ` +
 			`${compiled} modules precompiled` +
-			(wheels.length < packages.length ? ` (excluded ${EXCLUDED_PACKAGES.join(', ')})` : '')
+			(wheels.length < packages.length ? ` (excluded ${EXCLUDED_PACKAGES.join(', ')})` : '') +
+			`; named ${pythonRuntime.length} wheels for ${PYTHON_RUNTIME_SPEC}`
 	);
 } finally {
 	fs.rmSync(work, { recursive: true, force: true });

@@ -13,6 +13,19 @@ const INIT_TIMEOUT_MS = 30_000;
 
 export type LambdaError = { errorType: string; errorMessage: string; stackTrace?: string[] };
 
+// The Lambda runtimes Pocket Region runs, as the prefix of a function's Runtime
+export const RUNTIME_FAMILIES = ['nodejs', 'python'] as const;
+export type RuntimeFamily = (typeof RUNTIME_FAMILIES)[number];
+
+// What a Python environment boots: Pyodide from indexURL, the wheels Lambda would preinstall, and the Python that runs a handler
+export type PythonRuntime = { indexURL: string; wheels: string[]; source: string };
+
+// One invocation's answer: the result as JSON text, or the error payload
+export type Outcome = { result: string } | { error: LambdaError };
+
+// A loaded handler, as either runtime's Runtime API loop calls it
+export type Invoker = (event: string, requestId: string, deadline: number, arn: string) => Promise<Outcome>;
+
 // One execution environment as the pool sees it, whichever host runs it
 export type Sandbox = {
   // Only while the environment is idle: it asked for work and has not been given any
@@ -96,7 +109,9 @@ const environmentVariables = (config: FunctionConfig, logStream: string, endpoin
   AWS_LAMBDA_FUNCTION_NAME: config.FunctionName,
   AWS_LAMBDA_FUNCTION_VERSION: config.Version,
   AWS_LAMBDA_FUNCTION_MEMORY_SIZE: String(config.MemorySize),
+  AWS_LAMBDA_LOG_GROUP_NAME: `/aws/lambda/${config.FunctionName}`,
   AWS_LAMBDA_LOG_STREAM_NAME: logStream,
+  AWS_EXECUTION_ENV: `AWS_Lambda_${config.Runtime}`,
   _HANDLER: config.Handler,
   ...awsEnvironment({ region: 'us-east-1', credentials: { accessKeyId: 'test', secretAccessKey: 'test' } }),
   AWS_ENDPOINT_URL: endpoint,

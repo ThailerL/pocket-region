@@ -1,6 +1,6 @@
 // The messages between worker-host.ts and worker-runtime.ts. Types only: the runtime ships
 // as a string and may import no value
-import type { LambdaError } from './pool.ts';
+import type { LambdaError, PythonRuntime } from './pool.ts';
 
 export type FetchRequest = {
   type: 'fetch';
@@ -19,10 +19,9 @@ export type FetchReply = {
   body: Uint8Array;
 };
 
-export type Init = {
-  type: 'init';
-  env: Record<string, string>;
-  // Every module in the package by path, its imports rewritten into calls of the global named importer
+export type NodeInit = {
+  family: 'nodejs';
+  // The package's modules by path, their imports rewritten into calls of the global named importer
   files: Map<string, Uint8Array>;
   importer: string;
   handler: string;
@@ -34,6 +33,11 @@ export type Init = {
   // The DOM parser the SDK's browser build reads XML with, which a worker lacks
   xmldom: string;
 };
+
+// Every file in the package by path, as written
+export type PythonInit = { family: 'python'; files: Map<string, Uint8Array> } & PythonRuntime;
+
+export type Init = { type: 'init'; env: Record<string, string>; runtime: NodeInit | PythonInit };
 
 export type ToWorker =
   | Init

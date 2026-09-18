@@ -3,7 +3,7 @@
 Pocket Region runs AWS services like S3, DynamoDB, and Lambda inside your Node process or a
 browser tab, and you call them with the ordinary AWS SDK. Your SDK calls reach the emulator as
 function calls, without a socket, so there's no container to start and no server to reach.
-Lambda handlers run in child processes or Web Workers.
+Lambda handlers, Node or Python, run in child processes or Web Workers.
 
 ```js
 import { clientConfig, createRegion } from 'pocket-region/node';
@@ -37,8 +37,8 @@ and run the examples in your browser tab, or try the [demo](https://pocket-regio
   EventBridge, Kinesis, KMS, S3, Secrets Manager, SNS, SQS, and SSM Parameter Store behave as
   they do in MiniStack, with a runnable example for each. Others, such as RDS and ECS, answer as
   stubs with nothing running behind them, or are untested here.
-- **[Lambda](https://pocket-region.dev/docs/lambda/):** Node functions run from a zipped
-  deployment package, in child processes or Web Workers, with event source mappings.
+- **[Lambda](https://pocket-region.dev/docs/lambda/):** Node and Python functions run from a
+  zipped deployment package, in child processes or Web Workers, with event source mappings.
 - **[Resets and saves](https://pocket-region.dev/docs/region/):** empty a region between tests,
   or save its state to a store and boot from it later.
 - **[Clients](https://pocket-region.dev/docs/clients/):** `requestHandler` for AWS SDK clients,

@@ -5,9 +5,10 @@ description: Where Pocket Region's Lambda differs from AWS, what a handler sees,
 
 import Runnable from '../../../components/Runnable.astro';
 
-MiniStack stores functions and answers the Lambda API. Each invocation runs a Node handler in an
-**execution environment**: a child process in Node, or a module Web Worker in a page. Create and
-invoke functions with the ordinary SDK. What isn't covered here behaves as it does on AWS.
+MiniStack stores functions and answers the Lambda API. Each invocation runs a Node or Python
+handler in an **execution environment**: a child process in Node, or a module Web Worker in a
+page. Create and invoke functions with the ordinary SDK. What isn't covered here behaves as it
+does on AWS.
 
 <Runnable page>
 
@@ -40,22 +41,42 @@ The deployment package is any zip. This one is built with [fflate](https://githu
 
 ## Runtimes and packages
 
-Only `nodejs*` runtimes run. `python*` and `provided.*` functions fail each invocation with a
+`nodejs*` and `python*` runtimes run. `provided.*` functions fail each invocation with a
 `Runtime.HandlerError` naming the runtime. Java, .NET, and Ruby functions answer MiniStack's own
 200 "Mock response" without running.
 
 | | Node | Page |
 | --- | --- | --- |
-| `Handler: 'index.handler'` loads | `index.mjs`, `index.js`, or `index.cjs` | `index.mjs` or `index.js` |
+| `Handler: 'index.handler'` loads | `index.mjs`, `index.js`, `index.cjs`, or `index.py` | `index.mjs`, `index.js`, or `index.py` |
 | CommonJS | Works, with exports read from `default` | Doesn't work |
 | Relative imports | Work | Work, between the package's ES modules. `export … from` and circular imports don't |
 | Bare imports, such as `@aws-sdk/client-s3` | Resolve from your project's `node_modules`, the nearest one above the working directory | Load from where the region's [`resolve`](/docs/region/#options) says: by default the page's import map, else jsDelivr. SDK clients get the region as their defaults |
 | Imports from a full URL | Work | Work |
 | Parent environment variables | Only `PATH` | None |
 
-Lambda preinstalls the AWS SDK. A page loads it for the handler, and Node finds it in your
+Lambda preinstalls the AWS SDK. A page loads it for a Node handler, and Node finds it in your
 project, so a handler that imports it bare and creates a client with no options runs in either as
 written.
+
+### Python
+
+Every `python*` runtime runs Python 3.14, no matter what version the runtime's name gives.
+[Pyodide](https://github.com/pyodide/pyodide) ships a single Python version with each release,
+and Pocket Region pins the release with 3.14. Each execution environment boots its own
+interpreter, separate from the one that runs the region. The
+handler is Lambda's: `Handler: 'src/app.handler'` loads `src/app.py` with the package root on
+`sys.path`, `context` has `aws_request_id`, `function_name`, and
+`get_remaining_time_in_millis()`, an exception is logged as `[ERROR] ValueError: ...` with its
+traceback, and a handler that can't be imported fails with Lambda's own message.
+
+The environment preinstalls boto3 at the version this release was built with. Its wheels are
+fetched from PyPI and Pyodide's CDN the first time a Python function runs: 16 MB, which Node keeps
+under `~/.cache/pocket-region` (or `$XDG_CACHE_HOME/pocket-region`) and a page leaves to the
+browser's cache. A cold start is about 2.3 s in Node, as the `Init Duration` of a first
+invocation. Other packages go in the deployment package, as on Lambda, and must be pure Python:
+Pyodide can't load a wheel built for Linux. boto3 reaches the region through `fetch`, with
+buckets in the path, and nothing else reaches anywhere: `requests`, `urllib`, and sockets don't
+work.
 
 ## What a handler sees
 
@@ -67,11 +88,12 @@ Lambda's standard `AWS_LAMBDA_*` variables are set, along with the function's ow
 | `AWS_ENDPOINT_URL` | The region: `http://127.0.0.1:<port>` in Node, `http://localhost:<port>` in a page |
 | `AWS_REGION`, `AWS_DEFAULT_REGION` | `us-east-1` |
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | `test` |
+| `AWS_EXECUTION_ENV` | `AWS_Lambda_` and the runtime, such as `AWS_Lambda_python3.13` |
 
 So an SDK client created inside a handler with no options reaches the region, as it would on
-Lambda. In a page, `process.env` is provided for these, and `fetch` calls to the region's port on
-`localhost`, `127.0.0.1`, or `[::1]` are routed to the region. Every other `fetch` goes out as
-normal. One exception: the SDK's browser build reads no environment, so a page handler that
+Lambda, and so does a boto3 client. In a page, `process.env` is provided for these, and `fetch`
+calls to the region's port on `localhost`, `127.0.0.1`, or `[::1]` are routed to the region.
+Every other `fetch` goes out as normal. One exception: the SDK's browser build reads no environment, so a page handler that
 bundles the SDK rather than importing it bare must pass `region`, `endpoint`, `credentials`, and
 `forcePathStyle` from `process.env` itself.
 

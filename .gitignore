@@ -7,4 +7,5 @@ src/runner/python.generated.ts
 src/version.generated.ts
 src/lambda/process-runtime.generated.ts
 src/lambda/worker-runtime.generated.ts
+src/lambda/python-runtime.generated.ts
 src/runner/sucrase.generated.ts

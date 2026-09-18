@@ -3,15 +3,18 @@ import type { CodeEntry, Dispatch, LambdaExecutor } from '../core.ts';
 import { IMPORT, rewriteImports } from '../runner/imports.ts';
 import { startWorker } from '../start-worker.ts';
 import { createLambdaHost, type RegionHostOptions } from './host.ts';
-import type { LambdaError, SandboxFactory } from './pool.ts';
-import type { FetchRequest, FromWorker, ToWorker } from './worker-protocol.ts';
+import type { LambdaError, PythonRuntime, RuntimeFamily, SandboxFactory } from './pool.ts';
+import { PYTHON_RUNTIME_SOURCE } from './python-runtime.generated.ts';
+import type { FetchRequest, FromWorker, Init, ToWorker } from './worker-protocol.ts';
 import { WORKER_RUNTIME_SOURCE } from './worker-runtime.generated.ts';
 
 // The URL each bare specifier loads from
 type ResolveAll = (specifiers: string[]) => Promise<Record<string, string>>;
 
-// The package's modules, and the URLs their imports load from
-type Package = { files: Map<string, Uint8Array>; preload: string[]; xmldom: string };
+export type PythonHost = Omit<PythonRuntime, 'source'>;
+
+// Every file as written, for a Python environment; the modules rewritten, and the URLs their imports load from, for a Node one
+type Package = { files: Map<string, Uint8Array>; modules: Map<string, Uint8Array>; preload: string[]; xmldom: string };
 
 const MODULE = /\.m?js$/;
 const RELATIVE = /^\.\.?\//;
@@ -39,23 +42,24 @@ const resolverFrom = (path: string, urls: Record<string, string>) => (specifier:
 // A module loaded from memory cannot import its neighbours, so imports become calls the runtime
 // answers. A file the rewrite cannot read is kept as written: only loading it is the failure
 async function rewritePackage(entries: CodeEntry[], resolveAll: ResolveAll): Promise<Package> {
-  const modules = entries.filter(([path]) => MODULE.test(path)).map(([path, contents]) => ({ path, contents, source: decoder.decode(contents) }));
-  const bare = [...new Set([XMLDOM, ...modules.flatMap(({ source }) => importsOf(source)).filter(isBare)])];
+  const sources = entries.filter(([path]) => MODULE.test(path)).map(([path, contents]) => ({ path, contents, source: decoder.decode(contents) }));
+  const bare = [...new Set([XMLDOM, ...sources.flatMap(({ source }) => importsOf(source)).filter(isBare)])];
   const urls = await resolveAll(bare);
 
-  const files = new Map<string, Uint8Array>();
+  const modules = new Map<string, Uint8Array>();
   const preload = new Set<string>();
-  for (const { path, contents, source } of modules) {
+  for (const { path, contents, source } of sources) {
     try {
       const resolve = resolverFrom(path, urls);
       const { code, specifiers } = rewriteImports(source, resolve);
       for (const url of specifiers.map(resolve).filter((resolved) => URL.canParse(resolved))) preload.add(url);
-      files.set(path, specifiers.length === 0 ? contents : encoder.encode(code));
+      modules.set(path, specifiers.length === 0 ? contents : encoder.encode(code));
     } catch {
-      files.set(path, contents);
+      modules.set(path, contents);
     }
   }
-  return { files, preload: [...preload], xmldom: urls[XMLDOM] };
+  const files = new Map(entries.map(([path, contents]) => [path, contents]));
+  return { files, modules, preload: [...preload], xmldom: urls[XMLDOM] };
 }
 
 // Lambda's handler setting: a file path without its extension, a dot, an export name
@@ -68,12 +72,19 @@ function locateHandler(setting: string, files: Map<string, Uint8Array>) {
   return { handler: found, exportName: setting.slice(dot + 1) };
 }
 
+// What a worker is told to run the function with
+function runtimeFor(family: RuntimeFamily, { files, modules, preload, xmldom }: Package, env: Record<string, string>, python: PythonHost): Init['runtime'] {
+  if (family === 'python') return { family, files, ...python, source: PYTHON_RUNTIME_SOURCE };
+  const handler = locateHandler(env._HANDLER || 'index.handler', modules);
+  return { family, files: modules, importer: IMPORT, ...handler, preload, defaults: clientConfigFrom(env), xmldom };
+}
+
 // Each environment is a module worker, the Runtime API a message channel
-function workerSandbox({ files, preload, xmldom }: Package, dispatch: Dispatch): SandboxFactory {
+function workerSandbox(pkg: Package, family: RuntimeFamily, dispatch: Dispatch, python: PythonHost): SandboxFactory {
   return (env, events) => {
-    let handler: ReturnType<typeof locateHandler>;
+    let runtime: Init['runtime'];
     try {
-      handler = locateHandler(env._HANDLER || 'index.handler', files);
+      runtime = runtimeFor(family, pkg, env, python);
     } catch (error) {
       // No worker to start: the failure is reported once the pool has recorded the environment
       queueMicrotask(() => events.exited('failed to initialize', initError(error as Error)));
@@ -125,7 +136,7 @@ function workerSandbox({ files, preload, xmldom }: Package, dispatch: Dispatch):
       event.preventDefault?.();
       exited(`uncaught ${event.message}`);
     };
-    post({ type: 'init', env, files, preload, importer: IMPORT, defaults: clientConfigFrom(env), xmldom, ...handler });
+    post({ type: 'init', env, runtime });
 
     return {
       invoke({ requestId, config, event }, deadline) {
@@ -139,11 +150,11 @@ function workerSandbox({ files, preload, xmldom }: Package, dispatch: Dispatch):
 const initError = (error: Error): LambdaError => ({ errorType: 'Runtime.InitError', errorMessage: error.message });
 
 // Packages stay in memory, rewritten once; each environment gets a copy
-export function createWorkerHost({ port, dispatch, lambda, resolveAll }: RegionHostOptions & { resolveAll: ResolveAll }): LambdaExecutor {
+export function createWorkerHost({ port, dispatch, lambda, resolveAll, python }: RegionHostOptions & { resolveAll: ResolveAll; python: PythonHost }): LambdaExecutor {
   return createLambdaHost<Package>(
     {
       pack: (_codeSha256, entries) => rewritePackage(entries, resolveAll),
-      spawn: (files) => workerSandbox(files, dispatch),
+      spawn: (pkg, family) => workerSandbox(pkg, family, dispatch, python),
       dispose: async () => {},
     },
     // The host ministack mints queue URLs on, so a handler following one is answered too

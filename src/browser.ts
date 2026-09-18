@@ -125,5 +125,6 @@ async function locateAssets(options: BrowserRegionOptions): Promise<BootAssets> 
     indexURL: pyodideIndexUrl(options.indexURL, manifest.pyodideVersion),
     stdLib: new URL(manifest.stdlib, base).href,
     wheels: manifest.wheels.map((file) => new URL(file, base).href),
+    pythonRuntime: manifest.pythonRuntime.map(({ url }) => url),
   };
 }
