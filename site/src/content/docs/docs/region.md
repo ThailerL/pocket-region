@@ -68,8 +68,9 @@ way of reaching a region is built on it. See [Connecting clients](/docs/clients/
 
 ### `reset()`
 
-Empties every service, not only the ones [listed as running here](/docs/services/), using MiniStack's own reset. It takes under a
-millisecond for a typical test and about 3.5 ms with 20 resources, measured in Node. It rejects
+Empties every service, not only the ones [listed as running here](/docs/services/), using MiniStack's own reset. It takes about a
+millisecond for a typical test and under 4 ms with a thousand items and 200 objects, measured in
+Node. It rejects
 if the emulator answers with anything but `200`.
 
 Lambda functions are deleted with everything else, and every execution environment is stopped.
