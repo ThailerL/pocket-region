@@ -39,10 +39,8 @@ def _patch_lambda(lambda_svc):
         if outcome["status"] != "error":
             payload = None if outcome["payload"] is None else json.loads(outcome["payload"])
             return {"body": payload, "log": outcome["log"]}
-        # As ministack's warm executor shapes a worker's error
-        message = outcome["message"]
-        error_type = "Runtime.ExitError" if "timed out" in message.lower() else "Runtime.HandlerError"
-        return {"body": {"errorMessage": message, "errorType": error_type}, "error": True, "log": outcome["log"]}
+        # The runtime's own payload, as Lambda answers it: this executor replaces MiniStack's, so nothing upstream shapes it
+        return {"body": outcome["error"], "error": True, "log": outcome["log"]}
 
     lambda_runtime = sys.modules["ministack.core.lambda_runtime"]
     original_reset = lambda_runtime.reset

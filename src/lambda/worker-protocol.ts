@@ -1,6 +1,7 @@
 // The messages between worker-host.ts and worker-runtime.ts. Types only: the runtime ships
 // as a string and may import no value
-import type { LambdaError, PythonRuntime } from './pool.ts';
+import type { LambdaError } from '../core.ts';
+import type { PythonRuntime } from './pool.ts';
 
 export type FetchRequest = {
   type: 'fetch';

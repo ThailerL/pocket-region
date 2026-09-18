@@ -5,7 +5,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { text } from 'node:stream/consumers';
 import { pathToFileURL } from 'node:url';
 import type { PyodideInterface } from 'pyodide';
-import type { Invoker, LambdaError, PythonRuntime } from './pool.ts';
+import type { LambdaError } from '../core.ts';
+import type { Invoker, PythonRuntime } from './pool.ts';
 
 const [host, apiPort] = (process.env.AWS_LAMBDA_RUNTIME_API ?? '').split(':');
 if (!host || !apiPort) throw new Error('AWS_LAMBDA_RUNTIME_API is not set');

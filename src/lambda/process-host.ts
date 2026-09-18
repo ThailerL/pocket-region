@@ -5,10 +5,10 @@ import http from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { buffer } from 'node:stream/consumers';
-import type { CodeEntry, Invocation, LambdaExecutor, PythonWheel } from '../core.ts';
+import type { CodeEntry, Invocation, LambdaError, LambdaExecutor, PythonWheel } from '../core.ts';
 import { serve, type RegionServer } from '../server.ts';
 import { createLambdaHost, type RegionHostOptions } from './host.ts';
-import { parseError, type LambdaError, type PythonRuntime, type SandboxFactory } from './pool.ts';
+import { parseError, type PythonRuntime, type SandboxFactory } from './pool.ts';
 import { PROCESS_RUNTIME_SOURCE } from './process-runtime.generated.ts';
 import { PYTHON_RUNTIME_SOURCE } from './python-runtime.generated.ts';
 

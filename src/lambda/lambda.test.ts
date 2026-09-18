@@ -249,11 +249,13 @@ export const handler = async (event) => {
     await expect(s3.send(new HeadBucketCommand({ Bucket: 'made-by-lambda' }))).resolves.toBeDefined();
   });
 
-  it('reports a thrown handler as an unhandled function error', async () => {
+  it("reports a thrown handler as an unhandled function error, with the handler's own error type and stack", async () => {
     const thrown = await invoke('echo', { throw: true });
     expect(thrown.status).toBe(200);
     expect(thrown.error).toBe('Unhandled');
-    expect(thrown.payload).toEqual({ errorType: 'Runtime.HandlerError', errorMessage: 'handler failed' });
+    expect(thrown.payload).toEqual({ errorType: 'Error', errorMessage: 'handler failed', stackTrace: expect.any(Array) });
+    // V8 starts a stack with the message and Firefox doesn't, but both name the throwing function
+    expect(thrown.payload.stackTrace).toContainEqual(expect.stringContaining('handler'));
   });
 
   it("returns the handler's log with LogType Tail", async () => {
@@ -502,10 +504,11 @@ export const handler = async (event) => {
     expect(await bucketExists('made-by-boto3')).toBe(true);
   }, 30_000);
 
-  it('reports a raised Python exception as an unhandled function error, with the traceback logged', async () => {
+  it('reports a raised Python exception as an unhandled function error, with its type and traceback', async () => {
     const thrown = await invoke('snake', { raise: true }, { LogType: 'Tail' });
     expect(thrown.error).toBe('Unhandled');
-    expect(thrown.payload).toEqual({ errorType: 'Runtime.HandlerError', errorMessage: 'handler failed' });
+    expect(thrown.payload).toEqual({ errorType: 'ValueError', errorMessage: 'handler failed', stackTrace: expect.any(Array) });
+    expect(thrown.payload.stackTrace.join('')).toContain('raise ValueError("handler failed")');
     expect(thrown.log).toContain('[ERROR] ValueError: handler failed');
     expect(thrown.log).toContain('raise ValueError("handler failed")');
   }, 30_000);

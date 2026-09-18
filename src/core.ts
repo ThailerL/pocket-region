@@ -124,10 +124,13 @@ export type Invocation = {
   code?: CodeEntry[];
 };
 
-// payload is the handler's result as JSON text. An error carries only its message, as MiniStack's warm workers do
+// A function error as Lambda's Invoke answers it
+export type LambdaError = { errorType: string; errorMessage: string; stackTrace?: string[] };
+
+// payload is the handler's result as JSON text
 export type InvocationOutcome = (
   | { status: 'ok'; payload: string | null }
-  | { status: 'error'; message: string }
+  | { status: 'error'; error: LambdaError }
 ) & {
   // What the function wrote, which the emulator frames for CloudWatch Logs
   log: string;

@@ -1,9 +1,9 @@
 import { clientConfigFrom } from '../client-config.ts';
-import type { CodeEntry, Dispatch, LambdaExecutor } from '../core.ts';
+import type { CodeEntry, Dispatch, LambdaError, LambdaExecutor } from '../core.ts';
 import { IMPORT, rewriteImports } from '../runner/imports.ts';
 import { startWorker } from '../start-worker.ts';
 import { createLambdaHost, type RegionHostOptions } from './host.ts';
-import type { LambdaError, PythonRuntime, RuntimeFamily, SandboxFactory } from './pool.ts';
+import type { PythonRuntime, RuntimeFamily, SandboxFactory } from './pool.ts';
 import { PYTHON_RUNTIME_SOURCE } from './python-runtime.generated.ts';
 import type { FetchRequest, FromWorker, Init, ToWorker } from './worker-protocol.ts';
 import { WORKER_RUNTIME_SOURCE } from './worker-runtime.generated.ts';

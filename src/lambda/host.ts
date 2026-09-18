@@ -1,5 +1,5 @@
 import type { CodeEntry, Dispatcher, LambdaExecutor, LambdaObserver } from '../core.ts';
-import { failure, FunctionPool, RUNTIME_FAMILIES, type RuntimeFamily, type SandboxFactory } from './pool.ts';
+import { failure, FunctionPool, hostError, RUNTIME_FAMILIES, type RuntimeFamily, type SandboxFactory } from './pool.ts';
 
 // What either host takes: the region it runs beside, and where its handlers' output goes
 export type RegionHostOptions = Dispatcher & {
@@ -41,12 +41,12 @@ export function createLambdaHost<Package>(
       const { Runtime, CodeSha256, FunctionName, RevisionId } = config;
       const family = RUNTIME_FAMILIES.find((prefix) => Runtime.startsWith(prefix));
       if (!family) {
-        return failure(`Pocket Region runs nodejs and python functions only; this one is ${Runtime || 'a container image'}`);
+        return failure(hostError(`Pocket Region runs nodejs and python functions only; this one is ${Runtime || 'a container image'}`));
       }
       if (code && !packed.has(CodeSha256)) packed.set(CodeSha256, packaging.pack(CodeSha256, code));
       const pkg = await packed.get(CodeSha256);
       if (pkg === undefined) {
-        return failure('The function has no code');
+        return failure(hostError('The function has no code'));
       }
       // Updated code or configuration gets fresh environments while the old ones drain
       const key = `${FunctionName}:${RevisionId}`;

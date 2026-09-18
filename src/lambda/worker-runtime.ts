@@ -1,7 +1,8 @@
 // Shipped as a string (scripts/embed-runtime.mjs) and run as a module worker from a Blob URL,
 // so it may import nothing but types: web globals only
 import type { PyodideInterface } from 'pyodide';
-import type { Invoker, LambdaError } from './pool.ts';
+import type { LambdaError } from '../core.ts';
+import type { Invoker } from './pool.ts';
 import type { FetchReply, FromWorker, NodeInit, PythonInit, ToWorker } from './worker-protocol.ts';
 
 // DedicatedWorkerGlobalScope, without the lib that names it

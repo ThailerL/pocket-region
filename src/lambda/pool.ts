@@ -4,6 +4,7 @@ import {
   type FunctionConfig,
   type Invocation,
   type InvocationOutcome,
+  type LambdaError,
   type LambdaEvent,
   type LambdaObserver,
 } from '../core.ts';
@@ -11,7 +12,6 @@ import {
 const IDLE_MS = 60_000;
 const INIT_TIMEOUT_MS = 30_000;
 
-export type LambdaError = { errorType: string; errorMessage: string; stackTrace?: string[] };
 
 // The Lambda runtimes Pocket Region runs, as the prefix of a function's Runtime
 export const RUNTIME_FAMILIES = ['nodejs', 'python'] as const;
@@ -86,7 +86,10 @@ type Environment = {
   onExit?: () => void;
 };
 
-export const failure = (message: string, log = ''): InvocationOutcome => ({ status: 'error', message, log });
+export const failure = (error: LambdaError, log = ''): InvocationOutcome => ({ status: 'error', error, log });
+
+// An error the host or pool reports itself, not the handler; the types are MiniStack's, not yet checked against AWS
+export const hostError = (errorMessage: string, errorType = 'Runtime.HandlerError'): LambdaError => ({ errorType, errorMessage });
 
 // Eight hex characters; not randomUUID, which a page served over plain http lacks
 const environmentId = () => Array.from(crypto.getRandomValues(new Uint8Array(4)), (byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -137,7 +140,7 @@ export class FunctionPool {
   // The emulator has already counted the invocation against its concurrency
   invoke(invocation: Invocation): Promise<InvocationOutcome> {
     return new Promise((resolve) => {
-      if (this.stoppedBy !== undefined) return resolve(failure(exitMessage(this.stoppedBy)));
+      if (this.stoppedBy !== undefined) return resolve(failure(hostError(exitMessage(this.stoppedBy))));
       this.pending.push({ invocation, resolve });
       this.dispatch();
     });
@@ -169,7 +172,7 @@ export class FunctionPool {
       sandbox: this.settings.spawn(environmentVariables(config, id, this.settings.endpoint), {
         ready: () => this.ready(env),
         responded: (requestId, result) => this.complete(this.owned(env, requestId), undefined, result),
-        failed: (requestId, error) => this.complete(this.owned(env, requestId), error.errorMessage),
+        failed: (requestId, error) => this.complete(this.owned(env, requestId), error),
         exited: (reason, initError) => this.exited(env, reason, initError),
         output: (line) => this.output(env, line),
       }),
@@ -211,23 +214,20 @@ export class FunctionPool {
     if (!this.environments.delete(env.id)) return;
     this.emit({ kind: 'environment', functionName: env.functionName, environment: env.id, phase: 'stopped', reason });
     if (env.state === 'starting') {
-      this.failStartup(
-        env,
-        initError?.errorMessage ?? 'The execution environment stopped before it asked for an invocation',
-      );
+      this.failStartup(env, initError ?? hostError('The execution environment stopped before it asked for an invocation'));
     }
     if (env.running) {
-      this.complete(env.running, exitMessage(reason));
+      this.complete(env.running, hostError(exitMessage(reason)));
     }
     env.onExit?.();
     this.dispatch();
   }
 
   // One invocation fails per broken environment, rather than waiting on a respawn loop
-  private failStartup(env: Environment, message: string) {
+  private failStartup(env: Environment, error: LambdaError) {
     if (env.startupFailed) return;
     env.startupFailed = true;
-    this.pending.shift()?.resolve(failure(message, env.log.join('\n')));
+    this.pending.shift()?.resolve(failure(error, env.log.join('\n')));
   }
 
   private reap(env: Environment, reason: string) {
@@ -270,11 +270,11 @@ export class FunctionPool {
   // Never reused: the handler may still be running in it
   private timeOut(running: Running) {
     const seconds = running.invocation.config.Timeout.toFixed(2);
-    this.complete(running, `Task timed out after ${seconds} seconds`);
+    this.complete(running, hostError(`Task timed out after ${seconds} seconds`, 'Runtime.ExitError'));
     this.reap(running.environment, `timed out after ${seconds} seconds`);
   }
 
-  private complete(running: Running | undefined, error?: string, result?: string) {
+  private complete(running: Running | undefined, error?: LambdaError, result?: string) {
     if (!running || !this.inFlight.delete(running.invocation.requestId)) return;
     clearTimeout(running.timer);
     const env = running.environment;
@@ -307,7 +307,7 @@ export class FunctionPool {
 
   async stop(reason: string) {
     this.stoppedBy = reason;
-    for (const { resolve } of this.pending.splice(0)) resolve(failure(exitMessage(reason)));
+    for (const { resolve } of this.pending.splice(0)) resolve(failure(hostError(exitMessage(reason))));
     const exits = [...this.environments.values()].map(
       (env) =>
         new Promise<void>((done) => {
