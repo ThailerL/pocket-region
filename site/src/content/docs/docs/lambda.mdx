@@ -49,12 +49,13 @@ Only `nodejs*` runtimes run. `python*` and `provided.*` functions fail each invo
 | `Handler: 'index.handler'` loads | `index.mjs`, `index.js`, or `index.cjs` | `index.mjs` or `index.js` |
 | CommonJS | Works, with exports read from `default` | Doesn't work |
 | Relative imports | Work | Work, between the package's ES modules. `export … from` and circular imports don't |
-| Bare imports, such as `@aws-sdk/client-s3` | Need the package in `node_modules` or bundled in | Load from jsDelivr, or from the page's import map when it names them. SDK clients get the region as their defaults |
+| Bare imports, such as `@aws-sdk/client-s3` | Resolve from your project's `node_modules`, the nearest one above the working directory | Load from jsDelivr, or from the page's import map when it names them. SDK clients get the region as their defaults |
 | Imports from a full URL | Work | Work |
 | Parent environment variables | Only `PATH` | None |
 
-Lambda preinstalls the AWS SDK, and so does the page: a handler that imports it bare and creates a
-client with no options runs there as written. In Node, bundle the SDK with your code.
+Lambda preinstalls the AWS SDK. A page loads it for the handler, and Node finds it in your
+project, so a handler that imports it bare and creates a client with no options runs in either as
+written.
 
 ## What a handler sees
 

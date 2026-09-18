@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -146,6 +146,16 @@ function forwardLines(stream: NodeJS.ReadableStream | null, output: (line: strin
 const respondJson = (res: http.ServerResponse, status: number, value: unknown) =>
   res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(value));
 
+async function nearestNodeModules() {
+  for (let directory = process.cwd(); ; ) {
+    const candidate = path.join(directory, 'node_modules');
+    if (await stat(candidate).then((entry) => entry.isDirectory(), () => false)) return candidate;
+    const parent = path.dirname(directory);
+    if (parent === directory) return undefined;
+    directory = parent;
+  }
+}
+
 // Packages are unpacked into a temp directory by code hash, the runtime beside them. The
 // region is served on its port from the first environment on, since a handler's SDK calls
 // arrive from another process, and queue URLs name that port
@@ -167,7 +177,12 @@ export function createProcessHost({ port, dispatch, lambda }: RegionHostOptions)
 
   const workspace = () =>
     (root ??= mkdtemp(path.join(tmpdir(), 'pocket-region-lambda-')).then(async (directory) => {
-      await writeFile(path.join(directory, 'runtime.mjs'), PROCESS_RUNTIME_SOURCE);
+      const nodeModules = await nearestNodeModules();
+      await Promise.all([
+        writeFile(path.join(directory, 'runtime.mjs'), PROCESS_RUNTIME_SOURCE),
+        // A handler's bare imports reach the project's packages, as Lambda's reach its SDK
+        nodeModules && symlink(nodeModules, path.join(directory, 'node_modules'), 'junction'),
+      ]);
       return directory;
     }));
 

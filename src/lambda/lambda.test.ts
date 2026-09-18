@@ -184,17 +184,22 @@ describe('Lambda', () => {
     expect(payload).toEqual({ greeting: 'hello world!' });
   }, 30_000);
 
-  // Lambda's runtime has the SDK installed; the page host fetches it, the Node host has none to offer
-  it.skipIf(typeof document === 'undefined')('gives a handler the SDK it imports bare, pointed at the region', async () => {
-    const code = `import { S3Client, CreateBucketCommand, ListBucketsCommand } from '@aws-sdk/client-s3';
+  // DynamoDB, since a client made with no options can't be told S3's path-style addressing
+  it('gives a handler the SDK it imports bare, pointed at the region', async () => {
+    const code = `import { DynamoDBClient, CreateTableCommand, ListTablesCommand } from '@aws-sdk/client-dynamodb';
 export const handler = async (event) => {
-  const s3 = new S3Client({});
-  await s3.send(new CreateBucketCommand({ Bucket: event.bucket }));
-  const { Buckets } = await s3.send(new ListBucketsCommand({}));
-  return Buckets.map((bucket) => bucket.Name);
+  const dynamodb = new DynamoDBClient({});
+  await dynamodb.send(new CreateTableCommand({
+    TableName: event.table,
+    AttributeDefinitions: [{ AttributeName: 'id', AttributeType: 'S' }],
+    KeySchema: [{ AttributeName: 'id', KeyType: 'HASH' }],
+    BillingMode: 'PAY_PER_REQUEST',
+  }));
+  const { TableNames } = await dynamodb.send(new ListTablesCommand({}));
+  return TableNames;
 };`;
     await createFunction('bare-sdk', {}, code);
-    const { error, payload } = await invoke('bare-sdk', { bucket: 'from-a-bare-client' });
+    const { error, payload } = await invoke('bare-sdk', { table: 'from-a-bare-client' });
     expect(error).toBeUndefined();
     expect(payload).toContain('from-a-bare-client');
   }, 30_000);
