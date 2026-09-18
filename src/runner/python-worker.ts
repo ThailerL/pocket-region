@@ -15,30 +15,29 @@ const bridge = {
   environment: undefined as Record<string, string> | undefined,
   output: (stream: OutputStream, text: string, line: number | undefined) => post({ type: 'output', output: { language: 'python', stream, text, line } }),
 };
-let booting: Promise<Run> | undefined;
 
-async function boot({ indexURL, packageBaseUrl, packages, environment }: PythonBoot): Promise<Run> {
+async function boot({ indexURL, pythonRuntime, environment }: PythonBoot): Promise<Run> {
   const { loadPyodide }: typeof import('pyodide') = await import(/* @vite-ignore */ `${indexURL}pyodide.mjs`);
-  // micropip downloads while Pyodide bootstraps; the packages need micropip first
-  const py: PyodideInterface = await loadPyodide({ indexURL, packageBaseUrl, packages: ['micropip'] });
-  const micropip = py.pyimport('micropip');
-  await micropip.install(packages);
-  micropip.destroy();
+  // The wheels download while Pyodide bootstraps
+  const py: PyodideInterface = await loadPyodide({ indexURL, packages: pythonRuntime });
   bridge.environment = environment;
   py.registerJsModule('_pocket_region', bridge);
-  // Takes over stdout and stderr after the install: what Pyodide printed while loading packages is not the snippet's output
+  // Takes over stdout and stderr after the load: what Pyodide printed while loading packages is not the snippet's output
   py.runPython(SNIPPET_PYTHON);
   return py.globals.get('run') as Run;
 }
 
+// The first run can arrive first: the page posts boot once it has the region's assets
+let booted: (python: PythonBoot) => void;
+const booting = new Promise<PythonBoot>((resolve) => (booted = resolve)).then(boot);
+
 async function run({ code, fresh, echo = false }: RunMessage, attached: Promise<Region>) {
-  if (!booting) throw new Error('the Python worker was not told where Pyodide is');
-  // Pyodide and the packages load while the region boots on the page
+  // Pyodide and the wheels load while the region boots on the page
   const [execute, region] = await Promise.all([booting, attached]);
   bridge.dispatch = region.dispatch;
   return execute(code, echo, fresh);
 }
 
 serveRuns(run, (data) => {
-  if (data.type === 'boot') booting = boot(data.python);
+  if (data.type === 'boot') booted(data.python);
 });

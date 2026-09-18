@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { createRunner, type JavaScriptOutput, type Language, type PythonOutput, type RunnerOutput, type RunnerPhase } from './browser.ts';
+import type { VendorManifest } from './core.ts';
 import { s3 } from './test-clients.ts';
 import { assetsBaseUrl, createTestRegion, indexURL } from './test-region.browser.ts';
 
@@ -287,6 +288,16 @@ describe('createRunner with Python', () => {
     // The names too, as one session continued across fences
     expect((await python('print(s3.list_buckets()["Buckets"][0]["Name"])', chained)).text).toEqual(['photos']);
     await chained.stop();
+  }, 120_000);
+
+  it("runs the boto3 a region's Python functions get, from a region it was handed", async () => {
+    const manifest: VendorManifest = await (await fetch(`${assetsBaseUrl}/meta.json`)).json();
+    const pinned = manifest.pythonRuntimeSpec.split('==')[1];
+    const made = await createTestRegion();
+    const against = createRunner({ region: made });
+    expect((await python('import boto3\nprint(boto3.__version__)', against)).text).toEqual([pinned]);
+    await against.stop();
+    await made.stop();
   }, 120_000);
 
   it('echoes as the interpreter would when asked, with the lines as given', async () => {

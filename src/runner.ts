@@ -1,12 +1,11 @@
-import { createRegion, type BrowserRegionOptions } from './browser.ts';
+import type { BrowserRegionOptions } from './browser.ts';
 import { AWS_DEFAULTS, awsEnvironment } from './client-config.ts';
 import { jspiSupported, type Region } from './core.ts';
-import { pyodideIndexUrl, regionResolve } from './import-map.ts';
+import { bootRegion, type RegionBooting } from './region/boot.ts';
 import { answer, pendingCalls, toWire } from './region/protocol.ts';
-import { portFor, resolverFor } from './region/proxy.ts';
+import { bootOf, portFor, type RegionBoot } from './region/proxy.ts';
 import type { FromRunnerWorker, Language, PythonBoot, RunnerOutput, ToRunnerWorker } from './runner/protocol.ts';
 import { importing, onFailure, siblingUrl, startWorker } from './start-worker.ts';
-import { PYODIDE_VERSION } from './version.generated.ts';
 
 export type { ConsoleMethod, JavaScriptOutput, Language, PythonOutput, RunnerOutput } from './runner/protocol.ts';
 export type Snippet = { language: Language; code: string };
@@ -32,10 +31,6 @@ export type RunnerOptions = {
   reset?: RunnerReset;
   // Run on the region whenever it's empty: code, JavaScript unless it says which language, or a function of the region
   setup?: string | Snippet | SetupFunction;
-  python?: {
-    // What micropip installs before the first Python run, by default boto3
-    packages?: string[];
-  };
 } & (
   // A region to run against, never stopped by the runner
   | { region: Region; boot?: never }
@@ -55,17 +50,16 @@ export type Runner = {
 const asSnippet = (code: string | Snippet): Snippet => (typeof code === 'string' ? { language: 'javascript', code } : code);
 
 export function createRunner(options: RunnerOptions = {}): Runner {
-  // A snippet's imports load as its region's handlers' do; asked before the region boots
-  const resolve = (specifier: string) => (options.region ? resolverFor(options.region) : regionResolve(options.boot))(specifier);
   const reset = options.reset ?? (options.region ? 'never' : 'each-run');
-  let own: Promise<Region> | undefined;
+  let own: RegionBooting | undefined;
+  // What the region booted from, which its snippets share: its handlers' imports and its Python
+  const boot = (): RegionBoot => (options.region ? bootOf(options.region) : own!);
   // Whether the region was set up in full since it was last booted, passed in, or emptied
   let prepared = false;
   // A setup that failed partway leaves the region to be emptied before it runs again
   let spoiled = false;
   const workers = new Map<Language, Worker>();
   let active: Language | undefined;
-  let pythonBoot: PythonBoot | undefined;
   let current: RunOptions | undefined;
   const runs = pendingCalls<void>();
   // One snippet at a time: they share the region
@@ -75,12 +69,12 @@ export function createRunner(options: RunnerOptions = {}): Runner {
   function regionFor(onStatus: (status: RunnerStatus) => void, wanted: RunnerReset): { region: Promise<Region>; fresh: boolean } {
     if (!options.region && !own) {
       onStatus({ phase: 'booting' });
-      own = createRegion(options.boot);
-      own.catch(() => (own = undefined));
+      own = bootRegion(options.boot);
+      own.region.catch(() => (own = undefined));
       prepared = spoiled = false;
-      return { region: own, fresh: true };
+      return { region: own.region, fresh: true };
     }
-    const held = options.region ? Promise.resolve(options.region) : own!;
+    const held = options.region ? Promise.resolve(options.region) : own!.region;
     if (wanted === 'each-run' || spoiled) {
       onStatus({ phase: 'resetting' });
       const emptied = held.then(async (region) => {
@@ -99,16 +93,18 @@ export function createRunner(options: RunnerOptions = {}): Runner {
     runs.fail(error);
   };
 
-  // Pyodide for a snippet comes from where the region's does, or the CDN; micropip lives only on Pyodide's own CDN
-  const bootPython = (worker: Worker) => {
-    pythonBoot ??= {
-      indexURL: pyodideIndexUrl(options.boot?.indexURL, PYODIDE_VERSION),
-      packageBaseUrl: `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`,
-      packages: options.python?.packages ?? ['boto3'],
-      environment: awsEnvironment(AWS_DEFAULTS),
-    };
-    worker.postMessage({ type: 'boot', python: pythonBoot } satisfies ToRunnerWorker);
-  };
+  // A snippet's Pyodide and boto3 are the ones the region's Python functions get
+  const bootPython = (worker: Worker) =>
+    Promise.resolve().then(() => boot().assets).then(
+      ({ indexURL, pythonRuntime }) => {
+        const python: PythonBoot = { indexURL, pythonRuntime, environment: awsEnvironment(AWS_DEFAULTS) };
+        worker.postMessage({ type: 'boot', python } satisfies ToRunnerWorker);
+      },
+      // A worker never booted would hold every later run
+      (error) => {
+        if (workers.get('python') === worker) abort(error, 'python');
+      },
+    );
 
   function workerFor(language: Language) {
     const running = workers.get(language);
@@ -118,7 +114,7 @@ export function createRunner(options: RunnerOptions = {}): Runner {
     started.onmessage = ({ data }: MessageEvent<FromRunnerWorker>) => {
       switch (data.type) {
         case 'resolve':
-          answer(async () => resolve(data.specifier), (url, error) => started.postMessage({ type: 'resolved', id: data.id, url, error }));
+          answer(async () => boot().resolve(data.specifier), (url, error) => started.postMessage({ type: 'resolved', id: data.id, url, error }));
           return;
         case 'output':
           return current?.onOutput?.(data.output);
@@ -217,7 +213,7 @@ export function createRunner(options: RunnerOptions = {}): Runner {
       await queue;
       const booted = own;
       own = undefined;
-      await (await booted?.catch(() => undefined))?.stop();
+      await (await booted?.region.catch(() => undefined))?.stop();
     },
   };
 }

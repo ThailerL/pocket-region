@@ -1,6 +1,6 @@
 // The messages between createRunner on the page and the worker a snippet runs in
 import type { RegionOutput } from '../core.ts';
-import type { WireError } from '../region/protocol.ts';
+import type { BootAssets, WireError } from '../region/protocol.ts';
 
 export type Language = 'javascript' | 'python';
 export type ConsoleMethod = 'log' | 'info' | 'debug' | 'warn' | 'error' | 'table' | 'dir';
@@ -12,11 +12,11 @@ export type JavaScriptOutput = Output & { language: 'javascript'; method: Consol
 export type PythonOutput = Output & { language: 'python' };
 export type RunnerOutput = JavaScriptOutput | PythonOutput;
 
-// Where a Python snippet's interpreter and packages come from, and what its environment holds
-export type PythonBoot = { indexURL: string; packageBaseUrl: string; packages: string[]; environment: Record<string, string> };
+// The region's own interpreter and wheels, and what the snippet's environment holds
+export type PythonBoot = Pick<BootAssets, 'indexURL' | 'pythonRuntime'> & { environment: Record<string, string> };
 
 export type ToRunnerWorker =
-  // Once, to the Python worker, before its first run
+  // Once, to the Python worker, whenever the region's assets are located
   | { type: 'boot'; python: PythonBoot }
   // A port to the region follows under the same id, once the run may start. fresh says the
   // region was just booted or emptied, so the run starts with no state left by earlier ones.

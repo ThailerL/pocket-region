@@ -1,8 +1,6 @@
-import { lockedLoad, requireJspi, type Region, type RegionSettings, type StateStore, type VendorManifest } from './core.ts';
-import type { BootAssets } from './region/protocol.ts';
-import { regionOver } from './region/proxy.ts';
-import { importing, siblingUrl, startWorker } from './start-worker.ts';
-import { defaultAssetsBaseUrl, pyodideIndexUrl, regionResolve, type Resolve } from './import-map.ts';
+import { lockedLoad, type Region, type RegionSettings, type StateStore } from './core.ts';
+import type { Resolve } from './import-map.ts';
+import { bootRegion } from './region/boot.ts';
 
 export type {
   Dispatch,
@@ -105,26 +103,6 @@ export function indexedDbStore(name: string): StateStore {
   };
 }
 
-// The region runs in a worker; the assets are located here, since a worker has no import map
 export async function createRegion(options: BrowserRegionOptions = {}): Promise<Region> {
-  requireJspi();
-  // Loads while meta.json is fetched
-  const worker = startWorker(importing(siblingUrl('region/worker')), 'pocket-region');
-  return regionOver(worker, options, { assets: locateAssets(options), resolve: regionResolve(options) });
-}
-
-async function locateAssets(options: BrowserRegionOptions): Promise<BootAssets> {
-  const assetsBaseUrl = options.assetsBaseUrl ?? defaultAssetsBaseUrl();
-  const base = new URL(assetsBaseUrl.endsWith('/') ? assetsBaseUrl : `${assetsBaseUrl}/`, globalThis.location?.href);
-  const response = await fetch(new URL('meta.json', base));
-  if (!response.ok) {
-    throw new Error(`no region assets at ${base.href} (meta.json answered ${response.status})`);
-  }
-  const manifest: VendorManifest = await response.json();
-  return {
-    indexURL: pyodideIndexUrl(options.indexURL, manifest.pyodideVersion),
-    stdLib: new URL(manifest.stdlib, base).href,
-    wheels: manifest.wheels.map((file) => new URL(file, base).href),
-    pythonRuntime: manifest.pythonRuntime.map(({ url }) => url),
-  };
+  return bootRegion(options).region;
 }

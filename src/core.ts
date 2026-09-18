@@ -168,7 +168,7 @@ export type LambdaHostFactory = (region: Dispatcher & { port: number }) => Lambd
 export type PythonWheel = { file: string; url: string; sha256: string };
 
 // What scripts/vendor.mjs writes beside the wheels
-export type VendorManifest = { wheels: string[]; stdlib: string; pyodideVersion: string; pythonRuntime: PythonWheel[] };
+export type VendorManifest = { wheels: string[]; stdlib: string; pyodideVersion: string; pythonRuntimeSpec: string; pythonRuntime: PythonWheel[] };
 
 export type RegionSettings = {
   // The port minted queue URLs name, since the AWS SDK dials the URL it is given

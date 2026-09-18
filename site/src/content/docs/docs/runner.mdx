@@ -85,18 +85,18 @@ dropping it, so every line keeps its number, runs the session below as one snipp
 </Runnable>
 
 The first Python run downloads Pyodide again for the snippet's own interpreter, which keeps a
-snippet that never ends out of the region, and installs boto3 from PyPI. Name what else a
-snippet imports in [`python.packages`](#options).
+snippet that never ends out of the region. It loads the same boto3 wheels, at the same pinned
+version, as the region's [Python functions](/docs/lambda/), and nothing else beyond Pyodide's
+standard library.
 
 ## Options
 
 | Option | Type | Default | |
 | --- | --- | --- | --- |
-| `region` | `Region` | none | A region from `createRegion` to run every snippet against. The runner never stops it, and empties it only when `reset` says so, so your page can set it up before a run and look at it after. It can't be combined with `boot`. A snippet's imports load from where that region's [`resolve`](/docs/region/#options) says. See [Setting up a region](#setting-up-a-region). |
+| `region` | `Region` | none | A region from `createRegion` to run every snippet against. The runner never stops it, and empties it only when `reset` says so, so your page can set it up before a run and look at it after. It can't be combined with `boot`. A snippet's imports load from where that region's [`resolve`](/docs/region/#options) says, and a Python snippet's Pyodide from where the region's own came from. See [Setting up a region](#setting-up-a-region). |
 | `boot` | `BrowserRegionOptions` | none | Without `region`, options for the region the runner boots itself. See [The region](/docs/region/#options). A Python snippet's own Pyodide comes from its `indexURL` too, and a JavaScript snippet's imports of anything but `pocket-region` from its `resolve`, as the region's Lambda handlers' do. |
 | `reset` | `'each-run' \| 'never'` | `'each-run'`, or `'never'` with `region` | When the runner empties the region. `'each-run'` empties it before every run, so each example starts clean. The runner's own region is empty when it boots, so its first run skips the reset. `'never'` keeps what earlier runs made, for examples that build on each other, such as a tutorial whose second step writes to the bucket its first step created: the region's state, a Python run's names, and what a JavaScript run put on `globalThis`. A run after a reset starts with none of them. |
 | `setup` | `string \| { language, code } \| (region) => Promise<void>` | none | What runs on the region whenever it's empty: after a boot, after each reset, and on the first run against a region you passed in. Code in the same form as a snippet, JavaScript when a string, or a function of the region for a setup the reader isn't shown. See [Setting up a region](#setting-up-a-region). |
-| `python` | `{ packages?: string[] }` | `{ packages: ['boto3'] }` | What micropip installs from PyPI before the first Python run: the packages the snippets import, as pure-Python wheels. |
 
 ## Setting up a region
 

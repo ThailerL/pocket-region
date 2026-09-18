@@ -19,10 +19,10 @@ export type RegionPort = Endpoint<ToRegionWorker, FromRegionWorker> & {
   terminate?(): void;
 };
 
-// What the side that boots a region's worker gives it
-type RegionBoot = { assets: Promise<BootAssets>; resolve: Resolve };
+// What the side that boots a region's worker gives it, and a runner of snippets against it shares
+export type RegionBoot = { assets: Promise<BootAssets>; resolve: Resolve };
 
-type Link = { connect: () => MessagePort; resolve: Resolve };
+type Link = { connect: () => MessagePort } & RegionBoot;
 
 const links = new WeakMap<Region, Link>();
 
@@ -35,8 +35,7 @@ function linkOf(region: Region) {
 // A port to the region's worker for another worker, such as a snippet's
 export const portFor = (region: Region) => linkOf(region).connect();
 
-// Where the region's handlers get their packages, for a snippet run against it
-export const resolverFor = (region: Region) => linkOf(region).resolve;
+export const bootOf = (region: Region): RegionBoot => linkOf(region);
 
 // Given a boot, this side boots the far side; otherwise that side reports booted by itself
 export function regionOver(port: RegionPort, settings: RegionSettings, boot?: RegionBoot): Promise<Region> {
@@ -103,7 +102,7 @@ export function regionOver(port: RegionPort, settings: RegionSettings, boot?: Re
                 port.postMessage({ type: 'connect', port: port1 }, [port1]);
                 return port2;
               },
-              resolve: boot.resolve,
+              ...boot,
             });
           }
           return booted(region);
