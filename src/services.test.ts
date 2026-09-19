@@ -7,6 +7,14 @@ import {
 } from '@aws-sdk/client-cloudwatch-logs';
 import { EventBridgeClient, PutEventsCommand, PutRuleCommand, PutTargetsCommand } from '@aws-sdk/client-eventbridge';
 import {
+  CreateAccessKeyCommand,
+  CreateRoleCommand,
+  CreateUserCommand,
+  IAMClient,
+  PutRolePolicyCommand,
+  PutUserPolicyCommand,
+} from '@aws-sdk/client-iam';
+import {
   CreateStreamCommand,
   GetRecordsCommand,
   GetShardIteratorCommand,
@@ -32,6 +40,7 @@ import { CreateTopicCommand, PublishCommand, SNSClient, SubscribeCommand } from 
 import { CreateActivityCommand, GetActivityTaskCommand, SendTaskSuccessCommand, SFNClient } from '@aws-sdk/client-sfn';
 import { SQSClient } from '@aws-sdk/client-sqs';
 import { GetParameterCommand, GetParametersByPathCommand, PutParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
+import { AssumeRoleCommand, STSClient } from '@aws-sdk/client-sts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Region } from './core.ts';
 import { requestHandler } from './request-handler.ts';
@@ -244,5 +253,75 @@ describe('services through the SDK', () => {
     await expect
       .poll(() => bodies(sqs, QueueUrl), { timeout: 5_000 })
       .toEqual([expect.objectContaining({ source: 'shop', 'detail-type': 'order placed', detail: { total: 250 } })]);
+  });
+});
+
+const allow = (Action: string, Resource = '*') =>
+  JSON.stringify({ Version: '2012-10-17', Statement: [{ Effect: 'Allow', Action, Resource }] });
+
+type Keys = { AccessKeyId?: string; SecretAccessKey?: string; SessionToken?: string };
+
+// A client of target acting as whoever the keys belong to, or as the root user without them
+const configOf = (target: Region, keys?: Keys) =>
+  clientConfig({
+    requestHandler: requestHandler(target),
+    ...(keys && { credentials: { accessKeyId: keys.AccessKeyId!, secretAccessKey: keys.SecretAccessKey!, sessionToken: keys.SessionToken } }),
+  });
+
+// A client acting as a new IAM user whose only policy is the one given
+async function userConfig(target: Region, name: string, policy: string) {
+  const iam = new IAMClient(configOf(target));
+  await iam.send(new CreateUserCommand({ UserName: name }));
+  await iam.send(new PutUserPolicyCommand({ UserName: name, PolicyName: 'only', PolicyDocument: policy }));
+  const { AccessKey } = await iam.send(new CreateAccessKeyCommand({ UserName: name }));
+  return configOf(target, AccessKey);
+}
+
+describe('IAM', () => {
+  let enforcing: Region;
+
+  beforeAll(async () => {
+    enforcing = await createTestRegion({ enforceIam: true });
+  }, 30_000);
+
+  afterAll(async () => {
+    await enforcing?.stop();
+  });
+
+  it('lets a default client do anything', async () => {
+    await new S3Client(configOf(enforcing)).send(new CreateBucketCommand({ Bucket: 'root-bucket' }));
+    await new IAMClient(configOf(enforcing)).send(new CreateUserCommand({ UserName: 'made-by-root' }));
+  });
+
+  it('denies an IAM user what its policy does not allow', async () => {
+    await new S3Client(configOf(enforcing)).send(new CreateBucketCommand({ Bucket: 'uploads' }));
+    const s3 = new S3Client(await userConfig(enforcing, 'uploader', allow('s3:PutObject', 'arn:aws:s3:::uploads/*')));
+    await s3.send(new PutObjectCommand({ Bucket: 'uploads', Key: 'a.txt', Body: 'a' }));
+    await expect(s3.send(new CreateBucketCommand({ Bucket: 'not-allowed' }))).rejects.toThrow(
+      expect.objectContaining({ name: 'AccessDenied' }),
+    );
+  });
+
+  it('denies an assumed role what its policy does not allow', async () => {
+    const iam = new IAMClient(configOf(enforcing));
+    const trust = JSON.stringify({
+      Version: '2012-10-17',
+      Statement: [{ Effect: 'Allow', Principal: { AWS: 'arn:aws:iam::000000000000:root' }, Action: 'sts:AssumeRole' }],
+    });
+    await iam.send(new CreateRoleCommand({ RoleName: 'storage', AssumeRolePolicyDocument: trust }));
+    await iam.send(new PutRolePolicyCommand({ RoleName: 'storage', PolicyName: 'only', PolicyDocument: allow('s3:*') }));
+    const { Credentials } = await new STSClient(configOf(enforcing)).send(
+      new AssumeRoleCommand({ RoleArn: 'arn:aws:iam::000000000000:role/storage', RoleSessionName: 'test' }),
+    );
+    const session = configOf(enforcing, Credentials);
+    await new S3Client(session).send(new CreateBucketCommand({ Bucket: 'role-bucket' }));
+    await expect(new IAMClient(session).send(new CreateUserCommand({ UserName: 'not-allowed' }))).rejects.toThrow(
+      expect.objectContaining({ name: 'AccessDenied' }),
+    );
+  });
+
+  it('enforces nothing in a region without the option', async () => {
+    const s3 = new S3Client(await userConfig(region, 'unchecked', allow('s3:PutObject', 'arn:aws:s3:::uploads/*')));
+    await s3.send(new CreateBucketCommand({ Bucket: 'allowed-anyway' }));
   });
 });

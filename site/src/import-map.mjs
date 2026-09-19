@@ -16,6 +16,7 @@ export const importMap = {
     '@aws-sdk/client-cloudwatch-logs': 'https://cdn.jsdelivr.net/npm/@aws-sdk/client-cloudwatch-logs@3.1131.0/+esm',
     '@aws-sdk/client-kinesis': 'https://cdn.jsdelivr.net/npm/@aws-sdk/client-kinesis@3.1131.0/+esm',
     '@aws-sdk/client-sfn': 'https://cdn.jsdelivr.net/npm/@aws-sdk/client-sfn@3.1131.0/+esm',
+    '@aws-sdk/client-iam': 'https://cdn.jsdelivr.net/npm/@aws-sdk/client-iam@3.1131.0/+esm',
     fflate: 'https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js',
     // The runner loads it for snippets: the SDK parses XML with the DOM, which a worker lacks
     '@xmldom/xmldom': 'https://cdn.jsdelivr.net/npm/@xmldom/xmldom@0.9.12/+esm',

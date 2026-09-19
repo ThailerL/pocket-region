@@ -31,7 +31,8 @@ const region = await createRegion();
 const s3 = new S3Client(clientConfig(region));
 ```
 
-The region name is `us-east-1` and the credentials are throwaway, since nothing checks them.
+The region name is `us-east-1` and the credentials are `test`/`test`, the account's root user,
+which is allowed everything even in a region that [enforces IAM](/docs/services/#iam-and-sts).
 Spread it to add settings of your own, such as `{ ...clientConfig(region), maxAttempts: 1 }`.
 A client made this way is what a [runner](/docs/runner/) snippet's clients get.
 
@@ -54,7 +55,8 @@ const s3 = new S3Client({ requestHandler: requestHandler(region) });
 ```
 
 A region and credentials are still required, because the SDK refuses to build a request without
-them, but any values do. The emulator routes a request by the credential scope in its
+them, but any values do unless the region [enforces IAM](/docs/services/#iam-and-sts), where a key
+it doesn't know is refused. The emulator routes a request by the credential scope in its
 `Authorization` header and never checks the signature. A page has no environment to take them
 from, so it passes them itself, which is all `clientConfig` does.
 

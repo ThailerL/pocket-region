@@ -175,9 +175,14 @@ export type PythonWheel = { file: string; url: string; sha256: string };
 // What scripts/vendor.mjs writes beside the wheels
 export type VendorManifest = { wheels: string[]; stdlib: string; pyodideVersion: string; pythonRuntimeSpec: string; pythonRuntime: PythonWheel[] };
 
-export type RegionSettings = {
+// The settings a page posts to its region's worker, so plain data only
+export type RegionConfig = {
   // The port minted queue URLs name, since the AWS SDK dials the URL it is given
   port?: number;
+  enforceIam?: boolean;
+};
+
+export type RegionSettings = RegionConfig & {
   onOutput?: (output: RegionOutput) => void;
   lambda?: LambdaObserver;
   // In memory only when absent
@@ -277,6 +282,7 @@ async function startRegion(
 
   py.globals.set('STATE_ROOT', STATE_ROOT);
   py.globals.set('REGION_PORT', port);
+  py.globals.set('ENFORCE_IAM', settings.enforceIam ?? false);
   py.globals.set('LAMBDA_EXECUTOR', executor ?? null);
   // A worker's sleeps, owned here: a cancelled Pyodide timer would hold Node for its full delay
   const wakes = new Set<() => void>();

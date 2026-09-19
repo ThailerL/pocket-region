@@ -92,3 +92,10 @@ exports[`runnable docs examples > services.mdx example 11 prints what it did 1`]
   "SUCCEEDED {"item":"tea","price":4,"quantity":2,"total":8}",
 ]
 `;
+
+exports[`runnable docs examples > services.mdx example 12 prints what it did 1`] = `
+[
+  "put uploads/cat.txt",
+  "AccessDenied User: arn:aws:iam::000000000000:user/uploader is not authorized to perform: s3:CreateBucket because no identity-based policy allows the s3:CreateBucket action",
+]
+`;

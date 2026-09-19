@@ -4,7 +4,7 @@ import { requestHandler } from './request-handler.ts';
 // What code written for AWS gets from its environment, in any language that reaches a region
 export const AWS_DEFAULTS = {
   region: 'us-east-1',
-  credentials: { accessKeyId: 'pocket-region', secretAccessKey: 'pocket-region' },
+  credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
 };
 
 type AwsDefaults = typeof AWS_DEFAULTS;

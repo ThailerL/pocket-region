@@ -71,7 +71,7 @@ export function regionOver(port: RegionPort, settings: RegionSettings, boot?: Re
         port.postMessage({
           type: 'boot',
           assets: ready,
-          port: settings.port,
+          config: { port: settings.port, enforceIam: settings.enforceIam },
           hasStore: store !== undefined,
           listening: { output: !!onOutput, lambdaOutput: !!lambda?.onOutput, lambdaEvents: !!lambda?.onEvent },
         }),

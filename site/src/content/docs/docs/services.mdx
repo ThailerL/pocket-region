@@ -19,6 +19,7 @@ says so.
 - [CloudWatch Logs](#cloudwatch-logs)
 - [DynamoDB](#dynamodb)
 - [EventBridge](#eventbridge)
+- [IAM and STS](#iam-and-sts)
 - [Kinesis](#kinesis)
 - [KMS](#kms)
 - [S3](#s3)
@@ -596,6 +597,56 @@ print(execution['status'], json.loads(execution['output']))
 
 </Runnable>
 
+
+### IAM and STS
+
+A region keeps IAM users, roles, and policies, but by default it allows every request. Create it
+with `enforceIam: true` and each request is checked against the caller's policies, as MiniStack
+checks them with `AUTH=true`. Enforcement is chosen when a region is created, so this example
+creates its own rather than using the page's.
+[MiniStack's IAM page](https://ministack.org/docs/services/iam) lists what it supports.
+
+<Runnable page>
+
+```js
+import { clientConfig, createRegion } from 'pocket-region/browser';
+import { IAMClient, CreateUserCommand, PutUserPolicyCommand, CreateAccessKeyCommand } from '@aws-sdk/client-iam';
+import { S3Client, CreateBucketCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+
+const region = await createRegion({ enforceIam: true });
+const iam = new IAMClient(clientConfig(region));
+await new S3Client(clientConfig(region)).send(new CreateBucketCommand({ Bucket: 'uploads' }));
+
+await iam.send(new CreateUserCommand({ UserName: 'uploader' }));
+await iam.send(new PutUserPolicyCommand({
+  UserName: 'uploader',
+  PolicyName: 'put-uploads',
+  PolicyDocument: JSON.stringify({
+    Version: '2012-10-17',
+    Statement: [{ Effect: 'Allow', Action: 's3:PutObject', Resource: 'arn:aws:s3:::uploads/*' }],
+  }),
+}));
+const { AccessKey } = await iam.send(new CreateAccessKeyCommand({ UserName: 'uploader' }));
+const uploader = new S3Client({
+  ...clientConfig(region),
+  credentials: { accessKeyId: AccessKey.AccessKeyId, secretAccessKey: AccessKey.SecretAccessKey },
+});
+
+await uploader.send(new PutObjectCommand({ Bucket: 'uploads', Key: 'cat.txt', Body: 'meow' }));
+console.log('put uploads/cat.txt');
+try {
+  await uploader.send(new CreateBucketCommand({ Bucket: 'photos' }));
+} catch (error) {
+  console.log(error.name, error.message);
+}
+
+await region.stop();
+```
+
+</Runnable>
+
+`test`, the key [`clientConfig`](/docs/clients/#clientconfig) uses, is the account's root user and
+is allowed everything, so a denial needs a user or a role.
 
 ## Scheduled work
 

@@ -25,6 +25,8 @@ os.environ.update(
     S3_PERSIST="1",
     S3_DATA_DIR=S3_DATA_DIR,
     GATEWAY_PORT=str(REGION_PORT),
+    # Read once, as ministack.app imports
+    AUTH="true" if ENFORCE_IAM else "false",
 )
 
 from ministack.core.persistence import load_state

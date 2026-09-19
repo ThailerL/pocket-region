@@ -127,6 +127,7 @@ async function precompile(wheels) {
 	);
 	py.globals.set('STATE_ROOT', '/state');
 	py.globals.set('REGION_PORT', 4566);
+	py.globals.set('ENFORCE_IAM', false);
 	for (const file of ['threads.py', 'helpers.py']) {
 		await py.runPythonAsync(fs.readFileSync(path.join(ROOT, 'python', file), 'utf8'));
 	}

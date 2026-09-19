@@ -34,12 +34,13 @@ moves the file's URL.
 | `store` | `StateStore` | both | none | Where state is restored from at boot, and written to on `save` and `stop`. See [Stores](#stores). Without it, state lives in memory only. |
 | `onOutput` | `(output: { text: string; stream: 'stdout' \| 'stderr' }) => void` | both | none | Every line the emulator prints while loading and running, and every line a Lambda handler writes, as `stdout`. The object is exported as `RegionOutput`. |
 | `lambda` | `LambdaObserver` | both | none | Hooks for watching functions run. See [Lambda](/docs/lambda/#watching-functions-run). |
+| `enforceIam` | `boolean` | both | `false` | Deny each request that the caller's IAM policies don't allow. See [IAM and STS](/docs/services/#iam-and-sts). |
 | `assetsBaseUrl` | `string` | browser | jsDelivr | The URL `vendor/` is served from: `meta.json`, the wheels, and the Python standard library. By default, what the page's import map maps `pocket-region/vendor/` to, and without a mapping, jsDelivr's copy of the installed release. Set either to serve `vendor/` from your own site, for example under a Content Security Policy. A relative URL resolves against the page. |
 | `assetsDir` | `string` | Node | the package's `vendor/` | The directory holding `meta.json`, the wheels, and the Python standard library: Node's counterpart of `assetsBaseUrl`. |
 | `indexURL` | `string` | both | see text | Where Pyodide's own runtime loads from. A page defaults to jsDelivr, at the Pyodide version the package was built with. In Node, set it only where Pyodide can't find itself from `import.meta.url`. |
 | `resolve` | `(specifier: string) => string` | browser | the import map, else jsDelivr | The URL a bare import loads from, for a Lambda handler and for a [runner](/docs/runner/)'s snippets run against this region. By default, what the page's import map says, and for a specifier it doesn't map, jsDelivr's `+esm` build of the latest version, such as `https://cdn.jsdelivr.net/npm/@aws-sdk/client-s3/+esm`. Map or resolve `@xmldom/xmldom` too: the SDK's browser build parses XML with the DOM, which a worker lacks, so the region loads that package for it. In Node, a handler's imports resolve from your project's `node_modules`. |
 
-`port`, `store`, `onOutput`, and `lambda` are exported from both entries as `RegionSettings`, for
+`port`, `store`, `onOutput`, `lambda`, and `enforceIam` are exported from both entries as `RegionSettings`, for
 code that builds options for either.
 
 A page that can't fetch `meta.json` rejects with

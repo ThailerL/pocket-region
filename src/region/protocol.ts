@@ -1,5 +1,5 @@
 // The messages between a page's region proxy and its worker
-import type { LambdaEvent, LambdaOutput, RegionOutput, RegionRequest, RegionResponse, StateFiles } from '../core.ts';
+import type { LambdaEvent, LambdaOutput, RegionConfig, RegionOutput, RegionRequest, RegionResponse, StateFiles } from '../core.ts';
 
 // line is where in a snippet the error came from, when a runner's worker could tell
 export type WireError = { name: string; message: string; stack?: string; line?: number };
@@ -14,7 +14,7 @@ export type BootAssets = { indexURL: string; pyodideVersion: string; stdLib: str
 export type Listening = { output: boolean; lambdaOutput: boolean; lambdaEvents: boolean };
 
 export type ToRegionWorker =
-  | { type: 'boot'; assets: BootAssets; port?: number; hasStore: boolean; listening: Listening }
+  | { type: 'boot'; assets: BootAssets; config: RegionConfig; hasStore: boolean; listening: Listening }
   | ({ type: 'call'; id: number } & RegionCall)
   | { type: 'stored'; id: number; files?: StateFiles; error?: WireError }
   | { type: 'resolved'; id: number; urls?: Record<string, string>; error?: WireError }

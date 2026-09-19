@@ -19,13 +19,13 @@ const bridgedStore: StateStore = {
   close: () => askStore({ method: 'close' }).then(() => {}),
 };
 
-async function boot({ type: _, assets, port: regionPort, hasStore, listening }: ToRegionWorker & { type: 'boot' }): Promise<Region> {
+async function boot({ type: _, assets, config, hasStore, listening }: ToRegionWorker & { type: 'boot' }): Promise<Region> {
   // Fetched while bootRegion loads the store
   const runtime: Promise<typeof import('pyodide')> = import(/* @vite-ignore */ `${assets.indexURL}pyodide.mjs`);
   return bootRegion(
     { ...assets, loadPyodide: (options) => runtime.then(({ loadPyodide }) => loadPyodide(options)) },
     {
-      port: regionPort,
+      ...config,
       store: hasStore ? bridgedStore : undefined,
       onOutput: listening.output ? (output) => post({ type: 'output', output }) : undefined,
       lambda: {
