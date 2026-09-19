@@ -3,22 +3,17 @@ import ast
 import os
 import sys
 import traceback
-from io import BytesIO
 from urllib.parse import urlsplit
 
-import botocore.session
-import js
-from botocore.awsrequest import AWSResponse
 from pyodide.code import CodeRunner
 from pyodide.ffi import run_sync, to_js
 
 import _pocket_region
 
 # What code written for AWS gets from its environment, as the runner's JavaScript clients get it
-os.environ.update(_pocket_region.environment.to_py(), AWS_EC2_METADATA_DISABLED="true")
+os.environ.update(_pocket_region.environment.to_py())
 
 FILENAME = "<snippet>"
-_FROM_ENTRIES = js.Object.fromEntries
 
 
 def _snippet_line():
@@ -56,46 +51,17 @@ sys.stdout = _stdout = _Stream("stdout")
 sys.stderr = _stderr = _Stream("stderr")
 
 
-class _Body(BytesIO):
-    def stream(self, **kwargs):
-        yield self.getvalue()
-
-
-def _bytes_of(body):
-    if body is None:
-        return b""
-    if isinstance(body, bytes):
-        return body
-    if isinstance(body, str):
-        return body.encode()
-    return body.read()
-
-
 # Every request reaches the region as a call, so no socket and no endpoint is needed
-def _send(request, **kwargs):
-    url = urlsplit(request.url)
-    headers = {key: value.decode() if isinstance(value, bytes) else value for key, value in request.headers.items()}
-    headers["host"] = url.netloc
-    region_request = {
-        "method": request.method,
-        "path": url.path + ("?" + url.query if url.query else ""),
-        "headers": headers,
-        "body": _bytes_of(request.body),
-    }
+def _dispatch(method, url, headers, body):
+    parts = urlsplit(url)
+    headers["host"] = parts.netloc
+    path = parts.path + ("?" + parts.query if parts.query else "")
+    region_request = {"method": method, "path": path, "headers": headers, "body": body}
     response = run_sync(_pocket_region.dispatch(to_js(region_request, dict_converter=_FROM_ENTRIES)))
-    return AWSResponse(request.url, response.status, response.headers.to_py(), _Body(response.body.to_bytes()))
+    return response.status, response.headers.to_py(), response.body.to_bytes()
 
 
-# Every session, including the default one boto3.client() builds
-_init = botocore.session.Session.__init__
-
-
-def _hooked(self, *args, **kwargs):
-    _init(self, *args, **kwargs)
-    self.register("before-send.*", _send)
-
-
-botocore.session.Session.__init__ = _hooked
+bridge_boto3(_dispatch)
 
 
 # As the interpreter's single mode: every expression statement, into compound statements but not into a def or class

@@ -7,63 +7,26 @@ import os
 import sys
 import time
 import traceback
-from io import BytesIO
 
-import botocore.session
 import js
-from botocore.awsrequest import AWSResponse
 from botocore.config import Config
 from pyodide.ffi import run_sync, to_js
 
-# botocore would ask the instance metadata service for a region otherwise, and there is no socket
-os.environ.setdefault("AWS_EC2_METADATA_DISABLED", "true")
 # The task root is the host's directory or a copy of the package; bytecode beside it would be too
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.environ["LAMBDA_TASK_ROOT"])
 
-_FROM_ENTRIES = js.Object.fromEntries
-
-
-class _Body(BytesIO):
-    def stream(self, **kwargs):
-        yield self.getvalue()
-
-
-def _bytes_of(body):
-    if body is None:
-        return b""
-    if isinstance(body, bytes):
-        return body
-    if isinstance(body, str):
-        return body.encode()
-    return body.read()
-
-
 # Every request goes out through fetch, as a Node handler's would. fetch cannot wait for a 100
 # Continue, and Node's refuses the header botocore puts on uploads to ask for one
-def _send(request, **kwargs):
-    headers = {key: value.decode() if isinstance(value, bytes) else value for key, value in request.headers.items()}
+def _fetch(method, url, headers, body):
     headers.pop("Expect", None)
-    body = _bytes_of(request.body)
-    init = {"method": request.method, "headers": headers, "body": to_js(body) if body else None}
-    response = run_sync(js.fetch(request.url, to_js(init, dict_converter=_FROM_ENTRIES)))
-    raw = run_sync(response.arrayBuffer()).to_bytes()
-    return AWSResponse(request.url, response.status, dict(response.headers.entries()), _Body(raw))
+    init = {"method": method, "headers": headers, "body": to_js(body) if body else None}
+    response = run_sync(js.fetch(url, to_js(init, dict_converter=_FROM_ENTRIES)))
+    return response.status, dict(response.headers.entries()), run_sync(response.arrayBuffer()).to_bytes()
 
 
-# Every session, including the default one boto3.client() builds. The region's S3 answers on one
-# host, so buckets go in the path, as the JavaScript runtime's clients put them
-_session_init = botocore.session.Session.__init__
-_PATH_STYLE = Config(s3={"addressing_style": "path"})
-
-
-def _hooked(self, *args, **kwargs):
-    _session_init(self, *args, **kwargs)
-    self.register("before-send.*", _send)
-    self.set_default_client_config(_PATH_STYLE)
-
-
-botocore.session.Session.__init__ = _hooked
+# The region's S3 answers on one host, so buckets go in the path, as the JavaScript runtime's clients put them
+bridge_boto3(_fetch, Config(s3={"addressing_style": "path"}))
 
 
 # The handler's own frames: the first is this runtime's

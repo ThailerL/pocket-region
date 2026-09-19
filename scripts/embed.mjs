@@ -40,11 +40,18 @@ ${REGION_PYTHON.map((file) => `  ${JSON.stringify(readPython(file))},`).join('\n
 ];
 `,
 );
-write(path.join(SRC, 'runner', 'python.generated.ts'), 'python/runner/snippet.py', stringConstant('SNIPPET_PYTHON', readPython('runner/snippet.py')));
+// Each runs as one string in an interpreter of its own, so the shared bridge goes in front
+const BRIDGE = 'common/boto3_bridge.py';
+const bridged = (file) => `${readPython(BRIDGE)}\n\n${readPython(file)}`;
+write(
+  path.join(SRC, 'runner', 'python.generated.ts'),
+  `python/${BRIDGE} and python/runner/snippet.py`,
+  stringConstant('SNIPPET_PYTHON', bridged('runner/snippet.py')),
+);
 write(
   path.join(SRC, 'lambda', 'python-runtime.generated.ts'),
-  'python/lambda/runtime.py',
-  stringConstant('PYTHON_RUNTIME_SOURCE', readPython('lambda/runtime.py')),
+  `python/${BRIDGE} and python/lambda/runtime.py`,
+  stringConstant('PYTHON_RUNTIME_SOURCE', bridged('lambda/runtime.py')),
 );
 
 // A page finds this release's vendor/ on jsDelivr by version, since import.meta.url may name a bundle
