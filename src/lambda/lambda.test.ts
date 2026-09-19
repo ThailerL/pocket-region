@@ -146,9 +146,6 @@ async function nextMessage(QueueUrl: string) {
 const invocationsOf = (functionName: string, phase: 'started' | 'completed') =>
   eventsOf(functionName).filter((event) => event.kind === 'invocation' && event.phase === phase);
 
-// A first retry's 1 s backoff, with margin
-const pastFirstRetry = () => new Promise((resolve) => setTimeout(resolve, 2_500));
-
 const bucketExists = (Bucket: string) => s3.send(new HeadBucketCommand({ Bucket })).then(() => true, () => false);
 
 async function messagesLeft(QueueUrl: string) {
@@ -571,11 +568,11 @@ export const handler = async (event) => {
   // Last in the block: the reset empties the region the tests above share
   it('still retries an Event invocation that was waiting when the region reset, as MiniStack does', async () => {
     await createFunction('remembered');
+    await lambda.send(new PutFunctionEventInvokeConfigCommand({ FunctionName: 'remembered', MaximumRetryAttempts: 1 }));
     await invoke('remembered', { throw: true }, { InvocationType: 'Event' });
     await expect.poll(() => invocationsOf('remembered', 'completed').length, { timeout: 10_000 }).toBe(1);
     await region.reset();
-    await pastFirstRetry();
-    expect(invocationsOf('remembered', 'completed')).toHaveLength(2);
+    await expect.poll(() => invocationsOf('remembered', 'completed').length, { timeout: 10_000 }).toBe(2);
   }, 30_000);
 
   it('fails an invocation running when the region resets, and cold-starts the next', async () => {

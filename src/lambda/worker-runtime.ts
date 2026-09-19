@@ -1,4 +1,4 @@
-// Bundled into a string (scripts/embed-runtime.mjs) and run as a module worker from a Blob URL,
+// Bundled into a string (scripts/embed.mjs) and run as a module worker from a Blob URL,
 // so what it imports must need only web globals
 import { withClientConfig } from '../client-classes.ts';
 import { promiseCache } from '../promise-cache.ts';

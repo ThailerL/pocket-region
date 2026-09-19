@@ -1,4 +1,4 @@
-// Bundled into a string (scripts/embed-runtime.mjs) and run by a child Node, which resolves only
+// Bundled into a string (scripts/embed.mjs) and run by a child Node, which resolves only
 // Node's own modules
 import http from 'node:http';
 import path from 'node:path';
