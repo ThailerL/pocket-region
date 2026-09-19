@@ -1,6 +1,6 @@
-# Publishes the site/ Astro site to GitHub Pages. The library's dist/ and vendor/ are gitignored
+# Publishes the site/ Astro site to Cloudflare Workers. The library's dist/ and vendor/ are gitignored
 # and rebuilt here, then copied into the site, so it always demonstrates the commit it was built from.
-name: demo
+name: site
 
 on:
   push:
@@ -9,16 +9,14 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
-# A queued run deploys the newer commit; cancelling mid-deploy would leave Pages half-updated
+# A queued run deploys the newer commit; cancelling mid-deploy would leave the site half-updated
 concurrency:
-  group: pages
+  group: site
   cancel-in-progress: false
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -39,18 +37,10 @@ jobs:
       # Pyodide cold starts compete for the runner's 4 cores
       - run: npm test -- --maxWorkers=2
       - run: npm run check --prefix site
-      # site/public/CNAME is in the artifact; without it, a deploy clears the custom domain
       - run: npm run build --prefix site
-      - uses: actions/upload-pages-artifact@v3
+      - uses: cloudflare/wrangler-action@v4
         with:
-          path: site/dist
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: site
+          wranglerVersion: 4.135.0
