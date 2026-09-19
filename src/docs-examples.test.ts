@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { afterAll, describe, expect, it } from 'vitest';
+import { importMap } from '../site/src/import-map.mjs';
 import type { Region } from './core.ts';
 import { createRegion } from './node.ts';
 import { AsyncFunction, IMPORT, rewriteImports } from './runner/imports.ts';
@@ -8,23 +9,15 @@ import { withRegion } from './with-region.ts';
 
 const DOCS = new URL('../site/src/content/docs/docs/', import.meta.url);
 
-// What the docs' import map serves in a page, with the library's Node entry standing in
-const modules: Record<string, () => Promise<unknown>> = {
-  'pocket-region/browser': () => import('./index.ts'),
-  fflate: () => import('fflate'),
-  '@aws-sdk/client-cloudwatch-logs': () => import('@aws-sdk/client-cloudwatch-logs'),
-  '@aws-sdk/client-dynamodb': () => import('@aws-sdk/client-dynamodb'),
-  '@aws-sdk/client-eventbridge': () => import('@aws-sdk/client-eventbridge'),
-  '@aws-sdk/client-kinesis': () => import('@aws-sdk/client-kinesis'),
-  '@aws-sdk/client-kms': () => import('@aws-sdk/client-kms'),
-  '@aws-sdk/client-lambda': () => import('@aws-sdk/client-lambda'),
-  '@aws-sdk/client-s3': () => import('@aws-sdk/client-s3'),
-  '@aws-sdk/client-secrets-manager': () => import('@aws-sdk/client-secrets-manager'),
-  '@aws-sdk/client-sfn': () => import('@aws-sdk/client-sfn'),
-  '@aws-sdk/client-sns': () => import('@aws-sdk/client-sns'),
-  '@aws-sdk/client-sqs': () => import('@aws-sdk/client-sqs'),
-  '@aws-sdk/client-ssm': () => import('@aws-sdk/client-ssm'),
-};
+// What the docs' import map serves in a page, from the installed packages, with the library's Node entry standing in
+const modules = new Map(
+  Object.keys(importMap.imports)
+    .filter((specifier) => !specifier.endsWith('/'))
+    .map((specifier) => [
+      specifier,
+      specifier === 'pocket-region/browser' ? () => import('./index.ts') : () => import(/* @vite-ignore */ specifier),
+    ]),
+);
 
 // A Python fence beside one runs in docs-python-examples.test.ts
 const examples = readdirSync(DOCS)
@@ -42,8 +35,9 @@ async function run(code: string) {
   const region = specifiers.some((specifier) => specifier.startsWith('pocket-region')) ? undefined : await (shared ??= createRegion());
   await region?.reset();
   const load = async (specifier: string) => {
-    if (!(specifier in modules)) throw new Error(`the docs import ${specifier}: add it to this test and the site's import map`);
-    const module = (await modules[specifier]!()) as object;
+    const loadModule = modules.get(specifier);
+    if (!loadModule) throw new Error(`the docs import ${specifier}: add it to the site's import map`);
+    const module = (await loadModule()) as object;
     return region ? withRegion(module, region) : module;
   };
   await new AsyncFunction(IMPORT, 'console', body)(load, console);
