@@ -34,6 +34,7 @@ jobs:
       - run: npx playwright install --with-deps chromium firefox
       # The tests import site/src/runnable/session.ts, whose tsconfig extends Astro's
       - run: npm ci --prefix site
-      - run: npm test
+      # Pyodide cold starts compete for the runner's 4 cores
+      - run: npm test -- --maxWorkers=2
       # prepack rebuilds vendor/ and dist/, so the tarball is built here rather than uploaded
       - run: npm publish
