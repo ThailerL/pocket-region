@@ -26,6 +26,7 @@ says so.
 - [SNS](#sns)
 - [SQS](#sqs)
 - [SSM Parameter Store](#ssm-parameter-store)
+- [Step Functions](#step-functions)
 
 </Columns>
 
@@ -34,7 +35,6 @@ says so.
 | Service | Status |
 | --- | --- |
 | Lambda | Node functions, run by Pocket Region in Node and in a page. See [Lambda](/docs/lambda/) |
-| Step Functions | `Pass` and `Map` state machines are tested. The rest works as it does in MiniStack, untested here |
 | RDS, ElastiCache, ECS, EKS, Batch, OpenSearch, Athena | Stubs: they answer, but nothing runs behind them. Databases, caches, and clusters report ready with no endpoint, tasks and jobs report running or done, and Athena returns made-up rows |
 | The rest of [MiniStack's services](https://ministack.org/docs/services/) | Not run here yet. They may work, but nothing here checks them |
 
@@ -509,6 +509,111 @@ shard_iterator = kinesis.get_shard_iterator(
 )['ShardIterator']
 records = kinesis.get_records(ShardIterator=shard_iterator)['Records']
 print([record['Data'].decode() for record in records])
+```
+
+</Runnable>
+
+### Step Functions
+
+A `Map` state prices each order with a Lambda function. Pocket Region runs the function as
+[Lambda](/docs/lambda/) describes, and MiniStack runs the state machine.
+[MiniStack's Step Functions page](https://ministack.org/docs/services/stepfunctions) lists what it
+supports.
+
+<Runnable>
+
+```js
+import { LambdaClient, CreateFunctionCommand, waitUntilFunctionActiveV2 } from '@aws-sdk/client-lambda';
+import { SFNClient, CreateStateMachineCommand, StartExecutionCommand, DescribeExecutionCommand } from '@aws-sdk/client-sfn';
+import { strToU8, zipSync } from 'fflate';
+
+const lambda = new LambdaClient({});
+const sfn = new SFNClient({});
+
+const code = 'export const handler = async (order) => ({ ...order, total: order.price * order.quantity });';
+const { FunctionArn } = await lambda.send(new CreateFunctionCommand({
+  FunctionName: 'price',
+  Runtime: 'nodejs22.x',
+  Handler: 'index.handler',
+  Role: 'arn:aws:iam::000000000000:role/lambda',
+  Code: { ZipFile: zipSync({ 'index.mjs': strToU8(code) }) },
+}));
+await waitUntilFunctionActiveV2({ client: lambda, maxWaitTime: 30 }, { FunctionName: 'price' });
+
+const { stateMachineArn } = await sfn.send(new CreateStateMachineCommand({
+  name: 'price-orders',
+  roleArn: 'arn:aws:iam::000000000000:role/states',
+  definition: JSON.stringify({
+    StartAt: 'PriceEach',
+    States: {
+      PriceEach: {
+        Type: 'Map',
+        ItemsPath: '$.orders',
+        ItemProcessor: { StartAt: 'Price', States: { Price: { Type: 'Task', Resource: FunctionArn, End: true } } },
+        End: true,
+      },
+    },
+  }),
+}));
+const { executionArn } = await sfn.send(new StartExecutionCommand({
+  stateMachineArn,
+  input: JSON.stringify({ orders: [{ item: 'tea', price: 4, quantity: 2 }, { item: 'cake', price: 6, quantity: 1 }] }),
+}));
+
+let execution;
+do {
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  execution = await sfn.send(new DescribeExecutionCommand({ executionArn }));
+} while (execution.status === 'RUNNING');
+console.log(execution.status, JSON.parse(execution.output));
+```
+
+```py
+import io
+import json
+import time
+import zipfile
+
+import boto3
+
+lambda_ = boto3.client('lambda')
+sfn = boto3.client('stepfunctions')
+
+package = io.BytesIO()
+with zipfile.ZipFile(package, 'w') as archive:
+    archive.writestr('index.py', "def handler(order, context):\n    return {**order, 'total': order['price'] * order['quantity']}\n")
+function_arn = lambda_.create_function(
+    FunctionName='price',
+    Runtime='python3.13',
+    Handler='index.handler',
+    Role='arn:aws:iam::000000000000:role/lambda',
+    Code={'ZipFile': package.getvalue()},
+)['FunctionArn']
+lambda_.get_waiter('function_active_v2').wait(FunctionName='price')
+
+state_machine_arn = sfn.create_state_machine(
+    name='price-orders',
+    roleArn='arn:aws:iam::000000000000:role/states',
+    definition=json.dumps({
+        'StartAt': 'PriceEach',
+        'States': {
+            'PriceEach': {
+                'Type': 'Map',
+                'ItemsPath': '$.orders',
+                'ItemProcessor': {'StartAt': 'Price', 'States': {'Price': {'Type': 'Task', 'Resource': function_arn, 'End': True}}},
+                'End': True,
+            },
+        },
+    }),
+)['stateMachineArn']
+execution_arn = sfn.start_execution(
+    stateMachineArn=state_machine_arn,
+    input=json.dumps({'orders': [{'item': 'tea', 'price': 4, 'quantity': 2}, {'item': 'cake', 'price': 6, 'quantity': 1}]}),
+)['executionArn']
+
+while (execution := sfn.describe_execution(executionArn=execution_arn))['status'] == 'RUNNING':
+    time.sleep(0.2)
+print(execution['status'], json.loads(execution['output']))
 ```
 
 </Runnable>

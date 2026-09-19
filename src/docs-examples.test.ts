@@ -20,6 +20,7 @@ const modules: Record<string, () => Promise<unknown>> = {
   '@aws-sdk/client-lambda': () => import('@aws-sdk/client-lambda'),
   '@aws-sdk/client-s3': () => import('@aws-sdk/client-s3'),
   '@aws-sdk/client-secrets-manager': () => import('@aws-sdk/client-secrets-manager'),
+  '@aws-sdk/client-sfn': () => import('@aws-sdk/client-sfn'),
   '@aws-sdk/client-sns': () => import('@aws-sdk/client-sns'),
   '@aws-sdk/client-sqs': () => import('@aws-sdk/client-sqs'),
   '@aws-sdk/client-ssm': () => import('@aws-sdk/client-ssm'),

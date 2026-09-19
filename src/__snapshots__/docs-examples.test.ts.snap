@@ -86,3 +86,9 @@ exports[`runnable docs examples > services.mdx example 10 prints what it did 1`]
   "["click"]",
 ]
 `;
+
+exports[`runnable docs examples > services.mdx example 11 prints what it did 1`] = `
+[
+  "SUCCEEDED [{"item":"tea","price":4,"quantity":2,"total":8},{"item":"cake","price":6,"quantity":1,"total":6}]",
+]
+`;
