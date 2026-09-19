@@ -14,11 +14,12 @@ import { CreateTableCommand, DynamoDBClient, PutItemCommand } from '@aws-sdk/cli
 import { EventBridgeClient, PutEventsCommand, PutRuleCommand, PutTargetsCommand } from '@aws-sdk/client-eventbridge';
 import { CreateStreamCommand, DescribeStreamCommand, KinesisClient, PutRecordCommand } from '@aws-sdk/client-kinesis';
 import { HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
+import { SFNClient } from '@aws-sdk/client-sfn';
 import { GetQueueAttributesCommand, SendMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { LambdaEvent, LambdaObserver, LambdaOutput, Region } from '../core.ts';
 import { requestHandler } from '../request-handler.ts';
-import { authorization, bodies, clientConfig, createQueue, zipOf, zipOfFiles } from '../test-clients.ts';
+import { authorization, bodies, clientConfig, createQueue, execute, zipOf, zipOfFiles } from '../test-clients.ts';
 import { createTestRegion, regionPort } from '../test-region.ts';
 
 const decoder = new TextDecoder();
@@ -419,6 +420,26 @@ export const handler = async (event) => {
     await events.send(new PutEventsCommand({ Entries: [{ Source: 'orders', DetailType: 'placed', Detail: '{}' }] }));
     await expect.poll(() => bucketExists('made-by-a-rule'), { timeout: 10_000 }).toBe(true);
   });
+
+  it('runs the function a Step Functions Task names, and catches its error', async () => {
+    const sfn = new SFNClient(clientConfig({ requestHandler: requestHandler(region) }));
+    const { FunctionArn } = await createFunction('stepped');
+    const definition = {
+      StartAt: 'Run',
+      States: {
+        Run: { Type: 'Task', Resource: FunctionArn, Catch: [{ ErrorEquals: ['Error'], Next: 'Caught' }], End: true },
+        Caught: { Type: 'Pass', End: true },
+      },
+    };
+    expect(await execute(sfn, 'stepped', definition, { step: 1 })).toEqual({
+      status: 'SUCCEEDED',
+      output: expect.objectContaining({ functionName: 'stepped', event: { step: 1 } }),
+    });
+    expect(await execute(sfn, 'stepped-throws', definition, { throw: true })).toEqual({
+      status: 'SUCCEEDED',
+      output: { Error: 'Error', Cause: expect.stringContaining('handler failed') },
+    });
+  }, 30_000);
 
   it('runs a function from a Kinesis event source mapping', async () => {
     const kinesis = new KinesisClient(clientConfig({ requestHandler: requestHandler(region) }));

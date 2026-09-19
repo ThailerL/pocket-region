@@ -29,43 +29,30 @@ import {
   SecretsManagerClient,
 } from '@aws-sdk/client-secrets-manager';
 import { CreateTopicCommand, PublishCommand, SNSClient, SubscribeCommand } from '@aws-sdk/client-sns';
+import { CreateActivityCommand, GetActivityTaskCommand, SendTaskSuccessCommand, SFNClient } from '@aws-sdk/client-sfn';
 import { SQSClient } from '@aws-sdk/client-sqs';
 import { GetParameterCommand, GetParametersByPathCommand, PutParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Region } from './core.ts';
 import { requestHandler } from './request-handler.ts';
-import { bodies, clientConfig, createQueue, jsonApi } from './test-clients.ts';
+import { bodies, clientConfig, createQueue, execute, finished, startExecution } from './test-clients.ts';
 import { createTestRegion } from './test-region.ts';
 
 let region: Region;
 let config: ReturnType<typeof clientConfig>;
 let sqs: SQSClient;
+let sfn: SFNClient;
 
 beforeAll(async () => {
   region = await createTestRegion();
   config = clientConfig({ requestHandler: requestHandler(region) });
   sqs = new SQSClient(config);
+  sfn = new SFNClient(config);
 }, 30_000);
 
 afterAll(async () => {
   await region?.stop();
 });
-
-const states = async (operation: string, body: object) => (await jsonApi('states', `AWSStepFunctions.${operation}`, body, region)).body;
-
-async function execute(name: string, definition: object, input: object = {}) {
-  const { stateMachineArn } = await states('CreateStateMachine', {
-    name,
-    roleArn: 'arn:aws:iam::000000000000:role/states',
-    definition: JSON.stringify(definition),
-  });
-  const { executionArn } = await states('StartExecution', { stateMachineArn, input: JSON.stringify(input) });
-  let execution: { status: string; output: string } | undefined;
-  await expect
-    .poll(async () => (execution = await states('DescribeExecution', { executionArn })).status, { timeout: 5_000 })
-    .toBe('SUCCEEDED');
-  return JSON.parse(execution!.output);
-}
 
 describe('services through the SDK', () => {
   it('sends an S3 object-created notification to an SQS queue', async () => {
@@ -172,16 +159,17 @@ describe('services through the SDK', () => {
   });
 
   it('runs a Step Functions execution to completion', async () => {
-    const output = await execute('greeter', {
+    const execution = await execute(sfn, 'greeter', {
       StartAt: 'Greet',
       States: { Greet: { Type: 'Pass', Result: { greeting: 'hello' }, End: true } },
     });
-    expect(output).toEqual({ greeting: 'hello' });
+    expect(execution).toEqual({ status: 'SUCCEEDED', output: { greeting: 'hello' } });
   });
 
   // Map runs its items on a ThreadPoolExecutor, whose idle workers once froze the region
   it('runs a Step Functions Map state over every item', async () => {
-    const output = await execute(
+    const execution = await execute(
+      sfn,
       'labeller',
       {
         StartAt: 'Label',
@@ -196,7 +184,42 @@ describe('services through the SDK', () => {
       },
       { items: ['a', 'b', 'c'] },
     );
-    expect(output).toEqual([{ label: 'a' }, { label: 'b' }, { label: 'c' }]);
+    expect(execution).toEqual({ status: 'SUCCEEDED', output: [{ label: 'a' }, { label: 'b' }, { label: 'c' }] });
+  });
+
+  it('holds a Step Functions execution for its Wait state', async () => {
+    const started = Date.now();
+    const execution = await execute(sfn, 'pause', { StartAt: 'Pause', States: { Pause: { Type: 'Wait', Seconds: 1, End: true } } });
+    expect(execution.status).toBe('SUCCEEDED');
+    expect(Date.now() - started).toBeGreaterThanOrEqual(1_000);
+  });
+
+  it('resumes a Step Functions execution waiting for a task token when the token succeeds', async () => {
+    const { QueueUrl } = await createQueue(sqs, 'approvals');
+    const executionArn = await startExecution(sfn, 'approval', {
+      StartAt: 'Ask',
+      States: {
+        Ask: {
+          Type: 'Task',
+          Resource: 'arn:aws:states:::sqs:sendMessage.waitForTaskToken',
+          Parameters: { QueueUrl, MessageBody: { 'token.$': '$$.Task.Token' } },
+          End: true,
+        },
+      },
+    });
+    let messages: { token: string }[] = [];
+    await expect.poll(async () => (messages = await bodies(sqs, QueueUrl)).length, { timeout: 5_000 }).toBe(1);
+    await sfn.send(new SendTaskSuccessCommand({ taskToken: messages[0]!.token, output: '{"approved":true}' }));
+    expect(await finished(sfn, executionArn)).toEqual({ status: 'SUCCEEDED', output: { approved: true } });
+  });
+
+  it('hands a Step Functions activity task to a worker, and resumes with its result', async () => {
+    const { activityArn } = await sfn.send(new CreateActivityCommand({ name: 'packer' }));
+    const executionArn = await startExecution(sfn, 'pack', { StartAt: 'Pack', States: { Pack: { Type: 'Task', Resource: activityArn, End: true } } }, { box: 7 });
+    const task = await sfn.send(new GetActivityTaskCommand({ activityArn }));
+    expect(JSON.parse(task.input!)).toEqual({ box: 7 });
+    await sfn.send(new SendTaskSuccessCommand({ taskToken: task.taskToken, output: '{"packed":7}' }));
+    expect(await finished(sfn, executionArn)).toEqual({ status: 'SUCCEEDED', output: { packed: 7 } });
   });
 
   it('routes only the EventBridge events a rule matches to its SQS target', async () => {

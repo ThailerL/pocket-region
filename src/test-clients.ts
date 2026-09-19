@@ -1,4 +1,5 @@
 // Test helpers that run in Node and in a page alike, so nothing here may import node:
+import { CreateStateMachineCommand, DescribeExecutionCommand, type SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import { CreateQueueCommand, GetQueueAttributesCommand, ReceiveMessageCommand, type SQSClient } from '@aws-sdk/client-sqs';
 import { strToU8, zipSync } from 'fflate';
 import type { Region } from './core.ts';
@@ -29,7 +30,7 @@ export function s3(method: string, key: string, body: string | undefined, target
   });
 }
 
-export async function jsonApi(service: 'sqs' | 'dynamodb' | 'states', operation: string, body: object, target: Region) {
+export async function jsonApi(service: 'sqs' | 'dynamodb', operation: string, body: object, target: Region) {
   const response = await target.dispatch({
     method: 'POST',
     path: '/',
@@ -60,3 +61,24 @@ export async function bodies(sqs: SQSClient, QueueUrl: string) {
   const { Messages = [] } = await sqs.send(new ReceiveMessageCommand({ QueueUrl, MaxNumberOfMessages: 10 }));
   return Messages.map((message) => JSON.parse(message.Body!));
 }
+
+export async function startExecution(sfn: SFNClient, name: string, definition: object, input: object = {}) {
+  const { stateMachineArn } = await sfn.send(
+    new CreateStateMachineCommand({ name, roleArn: 'arn:aws:iam::000000000000:role/states', definition: JSON.stringify(definition) }),
+  );
+  const { executionArn } = await sfn.send(new StartExecutionCommand({ stateMachineArn, input: JSON.stringify(input) }));
+  return executionArn!;
+}
+
+export async function finished(sfn: SFNClient, executionArn: string, timeout = 10_000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const { status, output } = await sfn.send(new DescribeExecutionCommand({ executionArn }));
+    if (status !== 'RUNNING') return { status, output: output === undefined ? undefined : JSON.parse(output) };
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`${executionArn} still RUNNING after ${timeout} ms`);
+}
+
+export const execute = async (sfn: SFNClient, name: string, definition: object, input?: object) =>
+  finished(sfn, await startExecution(sfn, name, definition, input));
