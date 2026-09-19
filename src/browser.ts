@@ -2,25 +2,7 @@ import { lockedLoad, type Region, type RegionSettings, type StateStore } from '.
 import type { Resolve } from './import-map.ts';
 import { bootRegion } from './region/boot.ts';
 
-export type {
-  Dispatch,
-  Dispatcher,
-  LambdaEnvironment,
-  LambdaEvent,
-  LambdaObserver,
-  LambdaOutput,
-  OutputStream,
-  Region,
-  RegionOutput,
-  RegionRequest,
-  RegionResponse,
-  RegionSettings,
-  StateFiles,
-  StateStore,
-} from './core.ts';
-export * from './cli/index.ts';
-export { clientConfig } from './client-config.ts';
-export * from './request-handler.ts';
+export * from './public.ts';
 export * from './runner.ts';
 
 export type BrowserRegionOptions = RegionSettings & {

@@ -15,22 +15,7 @@ import {
 } from './core.ts';
 import { createProcessHost } from './lambda/process-host.ts';
 
-export type {
-  Dispatch,
-  Dispatcher,
-  LambdaEnvironment,
-  LambdaEvent,
-  LambdaObserver,
-  LambdaOutput,
-  OutputStream,
-  Region,
-  RegionOutput,
-  RegionRequest,
-  RegionResponse,
-  RegionSettings,
-  StateFiles,
-  StateStore,
-} from './core.ts';
+export * from './public.ts';
 
 export type NodeRegionOptions = RegionSettings & {
   // Only for hosts where Pyodide cannot locate itself from import.meta.url
