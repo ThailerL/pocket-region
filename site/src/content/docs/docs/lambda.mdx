@@ -1,14 +1,16 @@
 ---
 title: Lambda
-description: Where Pocket Region's Lambda differs from AWS, what a handler sees, event source mappings, and the observer.
+description: Where Pocket Region's Lambda differs from MiniStack and AWS, what a handler sees, event source mappings, and the observer.
 ---
 
 import Runnable from '../../../components/Runnable.astro';
 
 MiniStack stores functions and answers the Lambda API. Each invocation runs a Node or Python
 handler in an **execution environment**: a child process in Node, or a module Web Worker in a
-page. Create and invoke functions with the ordinary SDK. What isn't covered here behaves as it
-does on AWS.
+page. Create and invoke functions with the ordinary SDK. The API behaves as
+[MiniStack's Lambda page](https://ministack.org/docs/services/lambda) describes, except its Docker
+settings, such as `LAMBDA_STRICT`, which don't apply. Inside an invocation, a handler runs as it
+would on AWS Lambda, except where this page says otherwise.
 
 <Runnable page>
 
