@@ -1,5 +1,6 @@
 import { clientConfig } from '../client-config.ts';
 import type { Dispatcher } from '../core.ts';
+import { promiseCache } from '../promise-cache.ts';
 import { flagCase, type Invocation } from './args.ts';
 import { UsageError } from './errors.ts';
 import type { Files } from './files.ts';
@@ -117,27 +118,16 @@ export function servicesFor(
   region: Dispatcher,
   options: { modules?: Modules; client?: object } = {},
 ): Services {
-  const built = new Map<string, Promise<SdkClient>>();
-  const imported = new Map<string, Promise<SdkModule>>();
+  const built = promiseCache<SdkClient>();
+  const imported = promiseCache<SdkModule>();
   // Every command asks twice - once for the operation's Command class, once for the client -
   // and the resolve and the import behind that are worth doing only the first time
-  const module = (service: string) => {
-    const name = resolve(service);
-    const existing = imported.get(name);
-    if (existing) return existing;
-    const importing = moduleFor(service, options.modules);
-    imported.set(name, importing);
-    // A failure is not the answer for the rest of the session
-    importing.catch(() => imported.delete(name));
-    return importing;
-  };
+  const module = (service: string) => imported(resolve(service), () => moduleFor(service, options.modules));
   return {
     module,
     client(service) {
       const name = resolve(service);
-      const existing = built.get(name);
-      if (existing) return existing;
-      const building = (async () => {
+      return built(name, async () => {
         const Client = clientClass(await module(service), service);
         return new Client({
           ...clientConfig(region),
@@ -147,11 +137,7 @@ export function servicesFor(
           // lose the addressing a service needs
           ...OPTIONS[name],
         });
-      })();
-      built.set(name, building);
-      // A failure is not the answer for the rest of the session
-      building.catch(() => built.delete(name));
-      return building;
+      });
     },
   };
 }

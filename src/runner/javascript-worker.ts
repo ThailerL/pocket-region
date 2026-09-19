@@ -1,5 +1,6 @@
 // Runs one snippet at a time against the runner's region, started by createRunner as a module worker
 import type { Region } from '../core.ts';
+import { promiseCache } from '../promise-cache.ts';
 import { pendingCalls } from '../region/protocol.ts';
 import { withRegion } from '../with-region.ts';
 import { createConsole, format } from './console.ts';
@@ -9,19 +10,11 @@ import { lineIn, snippetLine } from './stack.ts';
 import { stripTypes } from './strip.ts';
 
 const resolutions = pendingCalls<string>();
-const modules = new Map<string, Promise<object>>();
-const load = (specifier: string) => {
-  let loading = modules.get(specifier);
-  if (!loading) {
-    loading = resolutions.start((id) => post({ type: 'resolve', id, specifier })).then(
-      (url) => import(/* @vite-ignore */ url),
-    );
-    modules.set(specifier, loading);
-    // A failure is not the answer for the rest of the session
-    loading.catch(() => modules.delete(specifier));
-  }
-  return loading;
-};
+const modules = promiseCache<object>();
+const load = (specifier: string) =>
+  modules(specifier, () =>
+    resolutions.start((id) => post({ type: 'resolve', id, specifier })).then((url) => import(/* @vite-ignore */ url)),
+  );
 
 // What the worker itself put on the global object; a fresh run removes what snippets added since,
 // as a Python run starts its namespace over

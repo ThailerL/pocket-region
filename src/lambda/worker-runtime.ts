@@ -1,6 +1,7 @@
 // Bundled into a string (scripts/embed-runtime.mjs) and run as a module worker from a Blob URL,
 // so what it imports must need only web globals
 import { withClientConfig } from '../client-classes.ts';
+import { promiseCache } from '../promise-cache.ts';
 import { loadHandler, loadPythonHandler, nodeInvoker, TASK_ROOT, type Module } from './handlers.ts';
 import type { Invoker } from './pool.ts';
 import type { FetchReply, FromWorker, NodeInit, PythonInit, ToWorker } from './worker-protocol.ts';
@@ -90,7 +91,7 @@ const { env, runtime } = await receive('init');
 interceptFetch(env.AWS_ENDPOINT_URL!);
 
 async function loadNodeHandler({ files, importer, file, exportName, preload, defaults, xmldom }: NodeInit): Promise<Invoker> {
-  const modules = new Map<string, Promise<Module>>();
+  const modules = promiseCache<Module>();
 
   async function polyfillDom() {
     if ('DOMParser' in globalThis) return;
@@ -109,17 +110,12 @@ async function loadNodeHandler({ files, importer, file, exportName, preload, def
 
   // Answers the calls the host rewrote imports into: a path in the package, or a URL
   function loadModule(specifier: string): Promise<Module> {
-    let loading = modules.get(specifier);
-    if (!loading) {
+    return modules(specifier, () => {
       const source = files.get(specifier);
-      if (source) loading = importModule(source);
-      else if (URL.canParse(specifier)) loading = fromUrl(specifier);
-      else loading = Promise.reject(new Error(`The package has no ${specifier}`));
-      modules.set(specifier, loading);
-      // A failure is not the answer for the rest of the environment
-      loading.catch(() => modules.delete(specifier));
-    }
-    return loading;
+      if (source) return importModule(source);
+      if (URL.canParse(specifier)) return fromUrl(specifier);
+      return Promise.reject(new Error(`The package has no ${specifier}`));
+    });
   }
   (globalThis as Record<string, unknown>)[importer] = loadModule;
 
