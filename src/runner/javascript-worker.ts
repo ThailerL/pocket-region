@@ -13,7 +13,7 @@ const modules = new Map<string, Promise<object>>();
 const load = (specifier: string) => {
   let loading = modules.get(specifier);
   if (!loading) {
-    loading = (resolutions.start((id) => post({ type: 'resolve', id, specifier })) as Promise<string>).then(
+    loading = resolutions.start((id) => post({ type: 'resolve', id, specifier })).then(
       (url) => import(/* @vite-ignore */ url),
     );
     modules.set(specifier, loading);

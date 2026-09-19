@@ -36,11 +36,16 @@ def _patch_lambda(lambda_svc):
     # ministack's executor for python and nodejs, so its slot, request id, and log framing stay its own
     def execute_function_warm(func, event):
         outcome = suspend(LAMBDA_EXECUTOR.execute(_invocation(func, event))).to_py()
-        if outcome["status"] != "error":
-            payload = None if outcome["payload"] is None else json.loads(outcome["payload"])
-            return {"body": payload, "log": outcome["log"]}
+        if "error" not in outcome:
+            return {"body": json.loads(outcome["result"]), "log": outcome["log"]}
         # The runtime's own payload, as Lambda answers it: this executor replaces MiniStack's, so nothing upstream shapes it
         return {"body": outcome["error"], "error": True, "log": outcome["log"]}
+
+    # Its bootstrap server blocks without suspending and freezes the host
+    def refuse_provided(func, *_):
+        runtime = (func.get("config") or func).get("Runtime")
+        message = f"Pocket Region runs nodejs and python functions only; this one is {runtime}"
+        return {"body": {"errorType": "Runtime.HandlerError", "errorMessage": message}, "error": True, "log": ""}
 
     lambda_runtime = sys.modules["ministack.core.lambda_runtime"]
     original_reset = lambda_runtime.reset
@@ -51,9 +56,8 @@ def _patch_lambda(lambda_svc):
         original_reset()
 
     lambda_svc._execute_function_warm = execute_function_warm
-    # Its bootstrap server blocks without suspending and freezes the host, so the executor refuses it instead
-    lambda_svc._execute_function_provided = execute_function_warm
-    lambda_svc._execute_function_provided_warm = lambda func, event, request_id: execute_function_warm(func, event)
+    lambda_svc._execute_function_provided = refuse_provided
+    lambda_svc._execute_function_provided_warm = refuse_provided
     lambda_runtime.reset = reset
 
 

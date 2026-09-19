@@ -7,6 +7,7 @@ import {
   type LambdaError,
   type LambdaEvent,
   type LambdaObserver,
+  type Outcome,
 } from '../core.ts';
 
 const IDLE_MS = 60_000;
@@ -14,14 +15,10 @@ const INIT_TIMEOUT_MS = 60_000;
 
 
 // The Lambda runtimes Pocket Region runs, as the prefix of a function's Runtime
-export const RUNTIME_FAMILIES = ['nodejs', 'python'] as const;
-export type RuntimeFamily = (typeof RUNTIME_FAMILIES)[number];
+export type RuntimeFamily = 'nodejs' | 'python';
 
 // What a Python environment boots: Pyodide from indexURL, the wheels Lambda would preinstall, and the Python that runs a handler
 export type PythonRuntime = { indexURL: string; wheels: string[]; source: string };
-
-// One invocation's answer: the result as JSON text, or the error payload
-export type Outcome = { result: string } | { error: LambdaError };
 
 // A loaded handler, as either runtime's Runtime API loop calls it
 export type Invoker = (event: string, requestId: string, deadline: number, arn: string) => Promise<Outcome>;
@@ -83,7 +80,7 @@ type Environment = {
   onExit?: () => void;
 };
 
-export const failure = (error: LambdaError, log = ''): InvocationOutcome => ({ status: 'error', error, log });
+export const failure = (error: LambdaError, log = ''): InvocationOutcome => ({ error, log });
 
 // An error the host or pool reports itself, not the handler; the types are MiniStack's, not yet checked against AWS
 export const hostError = (errorMessage: string, errorType = 'Runtime.HandlerError'): LambdaError => ({ errorType, errorMessage });
@@ -167,8 +164,8 @@ export class FunctionPool {
       initTimer: unref(setTimeout(() => this.reap(env, 'never asked for work'), INIT_TIMEOUT_MS)),
       sandbox: this.settings.spawn(environmentVariables(config, id, this.settings.endpoint), {
         ready: () => this.ready(env),
-        responded: (requestId, result) => this.complete(this.owned(env, requestId), undefined, result),
-        failed: (requestId, error) => this.complete(this.owned(env, requestId), error),
+        responded: (requestId, result) => this.complete(this.owned(env, requestId), { result }),
+        failed: (requestId, error) => this.complete(this.owned(env, requestId), { error }),
         exited: (reason, initError) => this.exited(env, reason, initError),
         output: (line) => this.output(env, line),
       }),
@@ -214,7 +211,7 @@ export class FunctionPool {
       this.pending.shift()?.resolve(failure(error, env.log.join('\n')));
     }
     if (env.running) {
-      this.complete(env.running, hostError(exitMessage(reason)));
+      this.complete(env.running, { error: hostError(exitMessage(reason)) });
     }
     env.onExit?.();
     this.dispatch();
@@ -257,11 +254,11 @@ export class FunctionPool {
   // Never reused: the handler may still be running in it
   private timeOut(running: Running) {
     const seconds = running.invocation.config.Timeout.toFixed(2);
-    this.complete(running, hostError(`Task timed out after ${seconds} seconds`, 'Runtime.ExitError'));
+    this.complete(running, { error: hostError(`Task timed out after ${seconds} seconds`, 'Runtime.ExitError') });
     this.reap(running.environment, `timed out after ${seconds} seconds`);
   }
 
-  private complete(running: Running | undefined, error?: LambdaError, result?: string) {
+  private complete(running: Running | undefined, outcome: Outcome) {
     if (!running || running.environment.running !== running) return;
     clearTimeout(running.timer);
     const env = running.environment;
@@ -286,10 +283,9 @@ export class FunctionPool {
       phase: 'completed',
       durationMs,
       initMs,
-      failed: error !== undefined,
+      failed: 'error' in outcome,
     });
-    const output = env.log.splice(0).join('\n');
-    running.resolve(error ? failure(error, output) : { status: 'ok', payload: result ?? null, log: output });
+    running.resolve({ ...outcome, log: env.log.splice(0).join('\n') });
   }
 
   async stop(reason: string) {

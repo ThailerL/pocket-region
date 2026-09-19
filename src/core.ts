@@ -127,11 +127,10 @@ export type Invocation = {
 // A function error as Lambda's Invoke answers it
 export type LambdaError = { errorType: string; errorMessage: string; stackTrace?: string[] };
 
-// payload is the handler's result as JSON text
-export type InvocationOutcome = (
-  | { status: 'ok'; payload: string | null }
-  | { status: 'error'; error: LambdaError }
-) & {
+// One invocation's answer: the result as JSON text, or the error payload
+export type Outcome = { result: string } | { error: LambdaError };
+
+export type InvocationOutcome = Outcome & {
   // What the function wrote, which the emulator frames for CloudWatch Logs
   log: string;
 };
@@ -161,8 +160,14 @@ export type LambdaObserver = {
   onEvent?(event: LambdaEvent): void;
 };
 
+// What either host takes: the region it runs beside, and where its handlers' output goes
+export type RegionHostOptions = Dispatcher & {
+  port: number;
+  lambda: LambdaObserver;
+};
+
 // Built during boot, around the dispatch a handler's own calls come back through
-export type LambdaHostFactory = (region: Dispatcher & { port: number }) => LambdaExecutor;
+export type LambdaHostFactory = (region: RegionHostOptions) => LambdaExecutor;
 
 // A wheel a Python function's environment preinstalls, as Lambda's runtime preinstalls boto3
 export type PythonWheel = { file: string; url: string; sha256: string };
@@ -194,7 +199,7 @@ const garbageCollectors = new WeakMap<Region, () => number>();
 export const collectGarbage = (region: Region) => garbageCollectors.get(region)!();
 
 // A host reports to the observer alone; the region's untagged onOutput hears each line too
-export const hostObserver = ({ onOutput, lambda }: RegionSettings): LambdaObserver => ({
+const hostObserver = ({ onOutput, lambda }: RegionSettings): LambdaObserver => ({
   onEvent: (event) => lambda?.onEvent?.(event),
   onOutput: (output) => {
     lambda?.onOutput?.(output);
@@ -227,25 +232,12 @@ export async function bootRegion(
   const { store } = settings;
   // Before Pyodide loads, so a store in use fails fast
   const files = await store?.load();
-  let region: Region;
   try {
-    region = await startRegion(assets, settings, files, lambda);
+    return await startRegion(assets, settings, files, lambda);
   } catch (error) {
     await store?.close?.();
     throw error;
   }
-  const stored: Region = {
-    ...region,
-    async stop() {
-      try {
-        await region.stop();
-      } finally {
-        await store?.close?.();
-      }
-    },
-  };
-  garbageCollectors.set(stored, garbageCollectors.get(region)!);
-  return stored;
 }
 
 async function startRegion(
@@ -281,7 +273,7 @@ async function startRegion(
       // A plain view: Pyodide's to_bytes rejects Buffer and other subclasses
       new Uint8Array(body.buffer, body.byteOffset, body.byteLength),
     );
-  const executor = lambda?.({ port, dispatch });
+  const executor = lambda?.({ port, dispatch, lambda: hostObserver(settings) });
 
   py.globals.set('STATE_ROOT', STATE_ROOT);
   py.globals.set('REGION_PORT', port);
@@ -334,13 +326,17 @@ async function startRegion(
       await store.replace(readStateFiles(py));
     },
     async stop() {
-      endWorkers();
-      stopped = true;
-      for (const wake of [...wakes]) wake();
-      // Lifespan shutdown writes the state files; the store gets them after
-      await lifespan('shutdown');
-      await store?.replace(readStateFiles(py));
-      await executor?.stop();
+      try {
+        endWorkers();
+        stopped = true;
+        for (const wake of [...wakes]) wake();
+        // Lifespan shutdown writes the state files; the store gets them after
+        await lifespan('shutdown');
+        await store?.replace(readStateFiles(py));
+        await executor?.stop();
+      } finally {
+        await store?.close?.();
+      }
     },
   };
   garbageCollectors.set(region, py.globals.get('collect_garbage'));

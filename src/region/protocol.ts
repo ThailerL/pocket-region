@@ -4,8 +4,8 @@ import type { LambdaEvent, LambdaOutput, RegionOutput, RegionRequest, RegionResp
 // line is where in a snippet the error came from, when a runner's worker could tell
 export type WireError = { name: string; message: string; stack?: string; line?: number };
 
-export type RegionMethod = 'dispatch' | 'reset' | 'save' | 'stop';
-export type StoreMethod = 'load' | 'replace' | 'close';
+export type RegionCall = { method: 'dispatch'; request: RegionRequest } | { method: 'reset' | 'save' | 'stop' };
+export type StoreCall = { method: 'load' } | { method: 'replace'; files: StateFiles } | { method: 'close' };
 
 // pythonRuntime is the wheel URLs a Python function's environment preinstalls
 export type BootAssets = { indexURL: string; pyodideVersion: string; stdLib: string; wheels: string[]; pythonRuntime: string[] };
@@ -15,7 +15,7 @@ export type Listening = { output: boolean; lambdaOutput: boolean; lambdaEvents: 
 
 export type ToRegionWorker =
   | { type: 'boot'; assets: BootAssets; port?: number; hasStore: boolean; listening: Listening }
-  | { type: 'call'; id: number; method: RegionMethod; request?: RegionRequest }
+  | ({ type: 'call'; id: number } & RegionCall)
   | { type: 'stored'; id: number; files?: StateFiles; error?: WireError }
   | { type: 'resolved'; id: number; urls?: Record<string, string>; error?: WireError }
   // Another worker's way in, served like this one and answered with booted
@@ -29,7 +29,7 @@ export type FromRegionWorker =
   | { type: 'output'; output: RegionOutput }
   | { type: 'lambda-output'; output: LambdaOutput }
   | { type: 'lambda-event'; event: LambdaEvent }
-  | { type: 'store'; id: number; method: StoreMethod; files?: StateFiles }
+  | ({ type: 'store'; id: number } & StoreCall)
   // A worker has no import map, so the page resolves a handler's bare imports
   | { type: 'resolve'; id: number; specifiers: string[] };
 
@@ -41,14 +41,15 @@ export type Endpoint<Out, In> = {
 // DedicatedWorkerGlobalScope, without the lib that names it
 export const workerEndpoint = <Out, In>() => self as unknown as Endpoint<Out, In>;
 
-type Settled<T> = { resolve: (value?: T) => void; reject: (error: Error) => void };
+type Settled<T> = { resolve: (value: T) => void; reject: (error: Error) => void };
 
+// A call whose method answers nothing resolves undefined, which its caller discards
 export function pendingCalls<T>() {
   const pending = new Map<number, Settled<T>>();
   let next = 0;
   return {
     start: (send: (id: number) => void) =>
-      new Promise<T | undefined>((resolve, reject) => {
+      new Promise<T>((resolve, reject) => {
         const id = next++;
         pending.set(id, { resolve, reject });
         send(id);
@@ -57,7 +58,7 @@ export function pendingCalls<T>() {
       const settled = pending.get(id);
       pending.delete(id);
       if (error) settled?.reject(fromWire(error));
-      else settled?.resolve(value);
+      else settled?.resolve(value as T);
     },
     fail(error: Error) {
       for (const { reject } of pending.values()) reject(error);

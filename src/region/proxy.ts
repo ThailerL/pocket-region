@@ -1,4 +1,4 @@
-import type { Region, RegionRequest, RegionResponse, RegionSettings, StateFiles } from '../core.ts';
+import type { Region, RegionResponse, RegionSettings, StateFiles } from '../core.ts';
 import type { Resolve } from '../import-map.ts';
 import { onFailure } from '../start-worker.ts';
 import {
@@ -8,8 +8,8 @@ import {
   type BootAssets,
   type Endpoint,
   type FromRegionWorker,
-  type RegionMethod,
-  type StoreMethod,
+  type RegionCall,
+  type StoreCall,
   type ToRegionWorker,
 } from './protocol.ts';
 
@@ -43,15 +43,15 @@ export function regionOver(port: RegionPort, settings: RegionSettings, boot?: Re
   const calls = pendingCalls<RegionResponse>();
   let dead: Error | undefined;
 
-  const call = (method: RegionMethod, request?: RegionRequest) =>
-    dead ? Promise.reject(dead) : calls.start((id) => port.postMessage({ type: 'call', id, method, request }));
-  const voidCall = (method: RegionMethod) => () => call(method).then(() => {});
+  const call = (message: RegionCall) =>
+    dead ? Promise.reject(dead) : calls.start((id) => port.postMessage({ type: 'call', id, ...message }));
+  const voidCall = (method: 'reset' | 'save') => () => call({ method }).then(() => {});
 
-  const serveStore = (id: number, method: StoreMethod, files?: StateFiles) =>
+  const serveStore = (id: number, message: StoreCall) =>
     answer(
       async (): Promise<StateFiles | undefined> => {
-        if (method === 'load') return store!.load();
-        if (method === 'replace') await store!.replace(files!);
+        if (message.method === 'load') return store!.load();
+        if (message.method === 'replace') await store!.replace(message.files);
         else await store!.close?.();
         return undefined;
       },
@@ -83,12 +83,12 @@ export function regionOver(port: RegionPort, settings: RegionSettings, boot?: Re
         case 'booted': {
           const region: Region = {
             port: data.port,
-            dispatch: (request) => call('dispatch', request) as Promise<RegionResponse>,
+            dispatch: (request) => call({ method: 'dispatch', request }),
             reset: voidCall('reset'),
             save: voidCall('save'),
             async stop() {
               try {
-                await call('stop');
+                await call({ method: 'stop' });
               } finally {
                 port.terminate?.();
               }
@@ -120,7 +120,7 @@ export function regionOver(port: RegionPort, settings: RegionSettings, boot?: Re
         case 'lambda-event':
           return lambda?.onEvent?.(data.event);
         case 'store':
-          serveStore(data.id, data.method, data.files);
+          serveStore(data.id, data);
           return;
         // Only the worker this side booted asks
         case 'resolve':

@@ -8,8 +8,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // Executed in this order into one namespace: threads.py must land before helpers.py imports
-// the emulator, api.py names what both define, and lambda.py patches the emulator's service
-const FILES = ['threads.py', 'helpers.py', 'api.py', 'lambda.py'];
+// the emulator, and lambda.py patches the emulator's service
+const FILES = ['threads.py', 'helpers.py', 'lambda.py'];
 
 const ROOT = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
 const SOURCE_DIRECTORY = path.join(ROOT, 'python');

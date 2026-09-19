@@ -4,8 +4,10 @@ import asyncio
 import glob
 import os
 import tempfile
-from collections import namedtuple
 from urllib.parse import unquote
+
+from js import Object
+from pyodide.ffi import to_js
 
 # Temp files stay in MEMFS: under Vivari, writes through a node mount are corrupt
 os.makedirs("/tmp", exist_ok=True)
@@ -86,9 +88,6 @@ async def lifespan(phase):
     await reached.wait()
 
 
-Response = namedtuple("Response", ("status", "headers", "body"))
-
-
 async def asgi_request(method, target, headers, body):
     path, _, query = target.partition("?")
     scope = {
@@ -115,4 +114,12 @@ async def asgi_request(method, target, headers, body):
     await app(scope, receive, send)
     start = next(m for m in sent if m["type"] == "http.response.start")
     payload = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
-    return Response(start["status"], start.get("headers", []), payload)
+    return start["status"], start.get("headers", []), payload
+
+
+# One data-plane request, forwarded verbatim. headers and body arrive as a JS object and
+# Uint8Array; the answer goes back as a plain JS object
+async def region_dispatch(method, target, headers, body):
+    status, raw_headers, payload = await asgi_request(method, target, headers.to_py(), body.to_bytes())
+    kept = {k.decode(): v.decode() for k, v in raw_headers if k.lower() != b"content-length"}
+    return to_js({"status": status, "headers": kept, "body": payload}, dict_converter=Object.fromEntries)

@@ -7,7 +7,6 @@ import { fileURLToPath } from 'node:url';
 import { loadPyodide } from 'pyodide';
 import {
   bootRegion,
-  hostObserver,
   lockedLoad,
   type Region,
   type RegionSettings,
@@ -150,7 +149,6 @@ export function createRegion(options: NodeRegionOptions = {}): Promise<Region> {
     (region) =>
       createProcessHost({
         ...region,
-        lambda: hostObserver(options),
         python: { indexURL: options.indexURL ?? pyodideDirectory(), wheels: manifest.pythonRuntime, cacheDir: cacheDirectory() },
       }),
   );

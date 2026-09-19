@@ -1,11 +1,5 @@
-import type { CodeEntry, Dispatcher, LambdaExecutor, LambdaObserver } from '../core.ts';
-import { failure, FunctionPool, hostError, RUNTIME_FAMILIES, type RuntimeFamily, type SandboxFactory } from './pool.ts';
-
-// What either host takes: the region it runs beside, and where its handlers' output goes
-export type RegionHostOptions = Dispatcher & {
-  port: number;
-  lambda: LambdaObserver;
-};
+import type { CodeEntry, LambdaExecutor, LambdaObserver } from '../core.ts';
+import { failure, FunctionPool, hostError, type RuntimeFamily, type SandboxFactory } from './pool.ts';
 
 // What a host adds to the pool: where a package goes and how an environment runs it
 export type HostPackaging<Package> = {
@@ -39,10 +33,8 @@ export function createLambdaHost<Package>(
     async execute(invocation) {
       const { config, code } = invocation;
       const { Runtime, CodeSha256, FunctionName, RevisionId } = config;
-      const family = RUNTIME_FAMILIES.find((prefix) => Runtime.startsWith(prefix));
-      if (!family) {
-        return failure(hostError(`Pocket Region runs nodejs and python functions only; this one is ${Runtime || 'a container image'}`));
-      }
+      // MiniStack sends only these two here, and refuses provided.* in python/lambda.py
+      const family: RuntimeFamily = Runtime.startsWith('python') ? 'python' : 'nodejs';
       if (code && !packed.has(CodeSha256)) packed.set(CodeSha256, packaging.pack(CodeSha256, code));
       const pkg = await packed.get(CodeSha256);
       if (pkg === undefined) {
