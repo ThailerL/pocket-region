@@ -34,7 +34,7 @@ import { GetParameterCommand, GetParametersByPathCommand, PutParameterCommand, S
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Region } from './core.ts';
 import { requestHandler } from './request-handler.ts';
-import { authorization, bodies, clientConfig, createQueue } from './test-clients.ts';
+import { bodies, clientConfig, createQueue, jsonApi } from './test-clients.ts';
 import { createTestRegion } from './test-region.ts';
 
 let region: Region;
@@ -50,6 +50,22 @@ beforeAll(async () => {
 afterAll(async () => {
   await region?.stop();
 });
+
+const states = async (operation: string, body: object) => (await jsonApi('states', `AWSStepFunctions.${operation}`, body, region)).body;
+
+async function execute(name: string, definition: object, input: object = {}) {
+  const { stateMachineArn } = await states('CreateStateMachine', {
+    name,
+    roleArn: 'arn:aws:iam::000000000000:role/states',
+    definition: JSON.stringify(definition),
+  });
+  const { executionArn } = await states('StartExecution', { stateMachineArn, input: JSON.stringify(input) });
+  let execution: { status: string; output: string } | undefined;
+  await expect
+    .poll(async () => (execution = await states('DescribeExecution', { executionArn })).status, { timeout: 5_000 })
+    .toBe('SUCCEEDED');
+  return JSON.parse(execution!.output);
+}
 
 describe('services through the SDK', () => {
   it('sends an S3 object-created notification to an SQS queue', async () => {
@@ -156,34 +172,31 @@ describe('services through the SDK', () => {
   });
 
   it('runs a Step Functions execution to completion', async () => {
-    const states = async (operation: string, body: object) => {
-      const response = await region.dispatch({
-        method: 'POST',
-        path: '/',
-        headers: {
-          host: 'localhost:4566',
-          authorization: authorization('states'),
-          'content-type': 'application/x-amz-json-1.0',
-          'x-amz-target': `AWSStepFunctions.${operation}`,
-        },
-        body: new TextEncoder().encode(JSON.stringify(body)),
-      });
-      return JSON.parse(new TextDecoder().decode(response.body));
-    };
-    const { stateMachineArn } = await states('CreateStateMachine', {
-      name: 'greeter',
-      roleArn: 'arn:aws:iam::000000000000:role/states',
-      definition: JSON.stringify({
-        StartAt: 'Greet',
-        States: { Greet: { Type: 'Pass', Result: { greeting: 'hello' }, End: true } },
-      }),
+    const output = await execute('greeter', {
+      StartAt: 'Greet',
+      States: { Greet: { Type: 'Pass', Result: { greeting: 'hello' }, End: true } },
     });
-    const { executionArn } = await states('StartExecution', { stateMachineArn, input: '{}' });
-    let execution: { status: string; output: string } | undefined;
-    await expect
-      .poll(async () => (execution = await states('DescribeExecution', { executionArn })).status, { timeout: 5_000 })
-      .toBe('SUCCEEDED');
-    expect(JSON.parse(execution!.output)).toEqual({ greeting: 'hello' });
+    expect(output).toEqual({ greeting: 'hello' });
+  });
+
+  // Map runs its items on a ThreadPoolExecutor, whose idle workers once froze the region
+  it('runs a Step Functions Map state over every item', async () => {
+    const output = await execute(
+      'labeller',
+      {
+        StartAt: 'Label',
+        States: {
+          Label: {
+            Type: 'Map',
+            ItemsPath: '$.items',
+            ItemProcessor: { StartAt: 'Wrap', States: { Wrap: { Type: 'Pass', Parameters: { 'label.$': '$' }, End: true } } },
+            End: true,
+          },
+        },
+      },
+      { items: ['a', 'b', 'c'] },
+    );
+    expect(output).toEqual([{ label: 'a' }, { label: 'b' }, { label: 'c' }]);
   });
 
   it('routes only the EventBridge events a rule matches to its SQS target', async () => {

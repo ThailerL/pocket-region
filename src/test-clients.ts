@@ -29,7 +29,7 @@ export function s3(method: string, key: string, body: string | undefined, target
   });
 }
 
-export async function jsonApi(service: 'sqs' | 'dynamodb', operation: string, body: object, target: Region) {
+export async function jsonApi(service: 'sqs' | 'dynamodb' | 'states', operation: string, body: object, target: Region) {
   const response = await target.dispatch({
     method: 'POST',
     path: '/',

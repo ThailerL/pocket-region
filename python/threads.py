@@ -1,9 +1,11 @@
 # Pyodide has no pthreads. A started thread runs as an event-loop callback instead, and under
 # JSPI its sleeps and waits suspend it rather than the loop. Must run before ministack is imported.
 # REGION_SLEEP is set by bootRegion
+import _thread
 import asyncio
 import contextvars
 import gc
+import queue
 import sys
 import threading
 import time
@@ -63,8 +65,18 @@ def _wait_until(done, timeout):
     return True
 
 
-def _wait(self, timeout=None):
-    return _wait_until(self.is_set, timeout)
+# A Condition's waiter. An untimed acquire of a held lock never returns in Pyodide
+class _PollingLock:
+    def __init__(self):
+        self._lock = _thread.allocate_lock()
+
+    def acquire(self, blocking=True, timeout=-1):
+        if not blocking:
+            return self._lock.acquire(False)
+        return _wait_until(lambda: self._lock.acquire(False), None if timeout < 0 else timeout)
+
+    def release(self):
+        self._lock.release()
 
 
 def _start(self):
@@ -94,7 +106,9 @@ def _join(self, timeout=None):
 
 
 time.sleep = _sleep
-threading.Event.wait = _wait
+threading._allocate_lock = _PollingLock
+# The C one blocks in C. ThreadPoolExecutor's workers wait on one
+queue.SimpleQueue = queue._PySimpleQueue
 # A thread never started counts as done, as the stdlib's is_alive has it
 threading.Thread._region_done = True
 threading.Thread.start = _start
