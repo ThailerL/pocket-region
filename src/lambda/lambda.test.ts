@@ -515,7 +515,7 @@ export const handler = async (event) => {
     });
     expect(first.log).toContain('handling {"hello": "world"}');
     expect((await invoke('snake', {})).payload.calls).toBe(2);
-  }, 30_000);
+  }, 60_000);
 
   it('gives a Python handler boto3, pointed at the region', async () => {
     await createPythonFunction('boto', BOTO3_HANDLER);
@@ -523,7 +523,7 @@ export const handler = async (event) => {
     expect(error).toBeUndefined();
     expect(payload).toEqual({ body: 'hello from boto3' });
     expect(await bucketExists('made-by-boto3')).toBe(true);
-  }, 30_000);
+  }, 60_000);
 
   it('reports a raised Python exception as an unhandled function error, with its type and traceback', async () => {
     const thrown = await invoke('snake', { raise: true }, { LogType: 'Tail' });
@@ -543,7 +543,7 @@ export const handler = async (event) => {
     const { error, payload } = await invoke('snake-neighbours', { name: 'world' });
     expect(error).toBeUndefined();
     expect(payload).toEqual({ greeting: 'hello world!' });
-  }, 30_000);
+  }, 60_000);
 
   it("fails an invocation whose Python handler cannot load, in Lambda's words", async () => {
     await createPythonFunction('snake-import', 'import nothing_here\n');

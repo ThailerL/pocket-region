@@ -10,7 +10,7 @@ import {
 } from '../core.ts';
 
 const IDLE_MS = 60_000;
-const INIT_TIMEOUT_MS = 30_000;
+const INIT_TIMEOUT_MS = 60_000;
 
 
 // The Lambda runtimes Pocket Region runs, as the prefix of a function's Runtime
