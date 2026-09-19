@@ -27,7 +27,7 @@ exports[`runnable Python docs examples > services.mdx example 2 prints what it d
 
 exports[`runnable Python docs examples > services.mdx example 3 prints what it did 1`] = `
 [
-  "sessions: ['alice', 'bob']",
+  "sessions: ['alice']",
 ]
 `;
 
@@ -75,6 +75,6 @@ exports[`runnable Python docs examples > services.mdx example 10 prints what it 
 
 exports[`runnable Python docs examples > services.mdx example 11 prints what it did 1`] = `
 [
-  "SUCCEEDED [{'item': 'tea', 'price': 4, 'quantity': 2, 'total': 8}, {'item': 'cake', 'price': 6, 'quantity': 1, 'total': 6}]",
+  "SUCCEEDED {'item': 'tea', 'price': 4, 'quantity': 2, 'total': 8}",
 ]
 `;

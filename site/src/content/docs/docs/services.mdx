@@ -157,8 +157,8 @@ print([message['Body'] for message in messages])
 
 ### DynamoDB
 
-An item whose TTL has passed is removed within about a minute, when MiniStack's reaper next runs,
-as [scheduled work](#scheduled-work) describes.
+An item put in a table comes back from a scan. An item whose TTL has passed is removed within
+about a minute, as [scheduled work](#scheduled-work) describes.
 [MiniStack's DynamoDB page](https://ministack.org/docs/services/dynamodb) lists what it supports.
 
 <Runnable>
@@ -176,10 +176,9 @@ await dynamodb.send(new CreateTableCommand({
 }));
 
 await dynamodb.send(new PutItemCommand({ TableName: 'sessions', Item: { id: { S: 'alice' } } }));
-await dynamodb.send(new PutItemCommand({ TableName: 'sessions', Item: { id: { S: 'bob' } } }));
 
 const { Items } = await dynamodb.send(new ScanCommand({ TableName: 'sessions' }));
-console.log('sessions:', Items.map((item) => item.id.S).sort());
+console.log('sessions:', Items.map((item) => item.id.S));
 ```
 
 ```py
@@ -195,10 +194,9 @@ dynamodb.create_table(
 )
 
 dynamodb.put_item(TableName='sessions', Item={'id': {'S': 'alice'}})
-dynamodb.put_item(TableName='sessions', Item={'id': {'S': 'bob'}})
 
 items = dynamodb.scan(TableName='sessions')['Items']
-print('sessions:', sorted(item['id']['S'] for item in items))
+print('sessions:', [item['id']['S'] for item in items])
 ```
 
 </Runnable>
@@ -515,7 +513,7 @@ print([record['Data'].decode() for record in records])
 
 ### Step Functions
 
-A `Map` state prices each order with a Lambda function. Pocket Region runs the function as
+A `Task` state prices an order with a Lambda function. Pocket Region runs the function as
 [Lambda](/docs/lambda/) describes, and MiniStack runs the state machine.
 [MiniStack's Step Functions page](https://ministack.org/docs/services/stepfunctions) lists what it
 supports.
@@ -541,23 +539,13 @@ const { FunctionArn } = await lambda.send(new CreateFunctionCommand({
 await waitUntilFunctionActiveV2({ client: lambda, maxWaitTime: 30 }, { FunctionName: 'price' });
 
 const { stateMachineArn } = await sfn.send(new CreateStateMachineCommand({
-  name: 'price-orders',
+  name: 'price-order',
   roleArn: 'arn:aws:iam::000000000000:role/states',
-  definition: JSON.stringify({
-    StartAt: 'PriceEach',
-    States: {
-      PriceEach: {
-        Type: 'Map',
-        ItemsPath: '$.orders',
-        ItemProcessor: { StartAt: 'Price', States: { Price: { Type: 'Task', Resource: FunctionArn, End: true } } },
-        End: true,
-      },
-    },
-  }),
+  definition: JSON.stringify({ StartAt: 'Price', States: { Price: { Type: 'Task', Resource: FunctionArn, End: true } } }),
 }));
 const { executionArn } = await sfn.send(new StartExecutionCommand({
   stateMachineArn,
-  input: JSON.stringify({ orders: [{ item: 'tea', price: 4, quantity: 2 }, { item: 'cake', price: 6, quantity: 1 }] }),
+  input: JSON.stringify({ item: 'tea', price: 4, quantity: 2 }),
 }));
 
 let execution;
@@ -592,23 +580,13 @@ function_arn = lambda_.create_function(
 lambda_.get_waiter('function_active_v2').wait(FunctionName='price')
 
 state_machine_arn = sfn.create_state_machine(
-    name='price-orders',
+    name='price-order',
     roleArn='arn:aws:iam::000000000000:role/states',
-    definition=json.dumps({
-        'StartAt': 'PriceEach',
-        'States': {
-            'PriceEach': {
-                'Type': 'Map',
-                'ItemsPath': '$.orders',
-                'ItemProcessor': {'StartAt': 'Price', 'States': {'Price': {'Type': 'Task', 'Resource': function_arn, 'End': True}}},
-                'End': True,
-            },
-        },
-    }),
+    definition=json.dumps({'StartAt': 'Price', 'States': {'Price': {'Type': 'Task', 'Resource': function_arn, 'End': True}}}),
 )['stateMachineArn']
 execution_arn = sfn.start_execution(
     stateMachineArn=state_machine_arn,
-    input=json.dumps({'orders': [{'item': 'tea', 'price': 4, 'quantity': 2}, {'item': 'cake', 'price': 6, 'quantity': 1}]}),
+    input=json.dumps({'item': 'tea', 'price': 4, 'quantity': 2}),
 )['executionArn']
 
 while (execution := sfn.describe_execution(executionArn=execution_arn))['status'] == 'RUNNING':
