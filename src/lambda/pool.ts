@@ -60,9 +60,6 @@ type Pending = {
 type Running = Pending & {
   environment: Environment;
   timer: ReturnType<typeof setTimeout>;
-  // The environment's init output, then the invocation's own
-  init: string[];
-  log: string[];
   startedAt: number;
   // Only on an environment's first invocation
   initMs?: number;
@@ -77,10 +74,10 @@ type Environment = {
   spawnedAt: number;
   // Set when the runtime first asks for work, and handed to the first invocation with log
   initMs?: number;
+  // Everything since the last invocation completed, init output included
   log: string[];
   idleTimer?: ReturnType<typeof setTimeout>;
   initTimer: ReturnType<typeof setTimeout>;
-  startupFailed?: boolean;
   // Why the pool killed it, which the sandbox's own exit reason can't say
   reapedFor?: string;
   onExit?: () => void;
@@ -124,7 +121,6 @@ const environmentVariables = (config: FunctionConfig, logStream: string, endpoin
 export class FunctionPool {
   private readonly environments = new Map<string, Environment>();
   private readonly pending: Pending[] = [];
-  private readonly inFlight = new Map<string, Running>();
   private stoppedBy: string | undefined;
   private readonly settings: PoolSettings;
 
@@ -190,8 +186,7 @@ export class FunctionPool {
   }
 
   private owned(env: Environment, requestId: string) {
-    const running = this.inFlight.get(requestId);
-    return running?.environment === env ? running : undefined;
+    return env.running?.invocation.requestId === requestId ? env.running : undefined;
   }
 
   private ready(env: Environment) {
@@ -203,7 +198,7 @@ export class FunctionPool {
   }
 
   private output(env: Environment, line: string) {
-    (env.running?.log ?? env.log).push(line);
+    env.log.push(line);
     this.tell(env, line);
   }
 
@@ -213,21 +208,16 @@ export class FunctionPool {
     clearTimeout(env.idleTimer);
     if (!this.environments.delete(env.id)) return;
     this.emit({ kind: 'environment', functionName: env.functionName, environment: env.id, phase: 'stopped', reason });
+    // One invocation fails per broken environment, rather than waiting on a respawn loop
     if (env.state === 'starting') {
-      this.failStartup(env, initError ?? hostError('The execution environment stopped before it asked for an invocation'));
+      const error = initError ?? hostError('The execution environment stopped before it asked for an invocation');
+      this.pending.shift()?.resolve(failure(error, env.log.join('\n')));
     }
     if (env.running) {
       this.complete(env.running, hostError(exitMessage(reason)));
     }
     env.onExit?.();
     this.dispatch();
-  }
-
-  // One invocation fails per broken environment, rather than waiting on a respawn loop
-  private failStartup(env: Environment, error: LambdaError) {
-    if (env.startupFailed) return;
-    env.startupFailed = true;
-    this.pending.shift()?.resolve(failure(error, env.log.join('\n')));
   }
 
   private reap(env: Environment, reason: string) {
@@ -246,14 +236,11 @@ export class FunctionPool {
       resolve,
       environment: env,
       timer: unref(setTimeout(() => this.timeOut(running), budget)),
-      init: env.log.splice(0),
-      log: [],
       startedAt: performance.now(),
       initMs: env.initMs,
     };
     env.initMs = undefined;
     env.running = running;
-    this.inFlight.set(invocation.requestId, running);
     this.emit({
       kind: 'invocation',
       functionName: env.functionName,
@@ -275,10 +262,10 @@ export class FunctionPool {
   }
 
   private complete(running: Running | undefined, error?: LambdaError, result?: string) {
-    if (!running || !this.inFlight.delete(running.invocation.requestId)) return;
+    if (!running || running.environment.running !== running) return;
     clearTimeout(running.timer);
     const env = running.environment;
-    const { invocation, initMs, init, log } = running;
+    const { invocation, initMs } = running;
     const { requestId, config } = invocation;
     const durationMs = performance.now() - running.startedAt;
     const report = [
@@ -301,7 +288,7 @@ export class FunctionPool {
       initMs,
       failed: error !== undefined,
     });
-    const output = [...init, ...log].join('\n');
+    const output = env.log.splice(0).join('\n');
     running.resolve(error ? failure(error, output) : { status: 'ok', payload: result ?? null, log: output });
   }
 

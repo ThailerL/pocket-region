@@ -85,12 +85,9 @@ function workerSandbox(pkg: Package, family: RuntimeFamily, dispatch: Dispatch, 
 
     const worker = startWorker(WORKER_RUNTIME_SOURCE, env.AWS_LAMBDA_LOG_STREAM_NAME);
     const post = (message: ToWorker) => worker.postMessage(message);
-    let gone = false;
 
     // A worker has no exit of its own, so the host ends it and says so
     const exited = (reason: string, error?: LambdaError) => {
-      if (gone) return;
-      gone = true;
       worker.terminate();
       events.exited(reason, error);
     };

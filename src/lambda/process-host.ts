@@ -29,7 +29,6 @@ function processSandbox({ taskRoot, runtimeScript }: Package, pythonRuntime?: ()
     let waiting: http.ServerResponse | undefined;
     let initError: LambdaError | undefined;
     let killed = false;
-    let gone = false;
 
     // Starting or busy environments keep Node running, so every invocation is answered; idle
     // ones must not
@@ -41,8 +40,6 @@ function processSandbox({ taskRoot, runtimeScript }: Package, pythonRuntime?: ()
     };
 
     const exited = (reason: string) => {
-      if (gone) return;
-      gone = true;
       server.close();
       events.exited(reason, initError);
     };
