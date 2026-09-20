@@ -18,8 +18,10 @@ export default defineConfig({
       {
         test: {
           name: 'node',
+          // A test file's name says where it runs: *.browser.test.ts in a page, *.shared.test.ts
+          // in both, anything else here
           include: ['src/**/*.test.ts'],
-          exclude: ['src/browser.test.ts', 'src/docs-python-examples.test.ts', 'src/runner.test.ts'],
+          exclude: ['src/**/*.browser.test.ts'],
         },
       },
       {
@@ -34,16 +36,7 @@ export default defineConfig({
         },
         test: {
           name: 'browser',
-          include: [
-            'src/browser.test.ts',
-            'src/docs-python-examples.test.ts',
-            'src/lambda/lambda.test.ts',
-            'src/region.test.ts',
-            'src/request-handler.test.ts',
-            'src/runner.test.ts',
-            'src/services.test.ts',
-            'src/with-region.test.ts',
-          ],
+          include: ['src/**/*.browser.test.ts', 'src/**/*.shared.test.ts'],
           browser: {
             enabled: true,
             headless: true,
