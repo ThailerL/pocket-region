@@ -20,8 +20,8 @@ import { GetQueueAttributesCommand, SendMessageCommand, SQSClient } from '@aws-s
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { LambdaEvent, LambdaObserver, LambdaOutput, Region } from '../core.ts';
 import { requestHandler } from '../request-handler.ts';
-import { allow, authorization, bodies, clientConfig, createQueue, execute, zipOf, zipOfFiles } from '../test-clients.ts';
-import { createTestRegion, regionPort } from '../test-region.ts';
+import { allow, authorization, bodies, clientConfig, createQueue, execute, zipOf, zipOfFiles } from '../testing/clients.ts';
+import { createTestRegion, regionPort } from '../testing/region.ts';
 
 const decoder = new TextDecoder();
 

@@ -5,8 +5,8 @@ import { describe, expect, it } from 'vitest';
 import { createRegion } from '../node.ts';
 import { requestHandler } from '../request-handler.ts';
 import { serve } from '../server.ts';
-import { authorization, clientConfig, zipOf } from '../test-clients.ts';
-import { freePort } from '../test-support.ts';
+import { authorization, clientConfig, zipOf } from '../testing/clients.ts';
+import { freePort } from '../testing/support.ts';
 
 describe('Lambda in Node', () => {
   // The host serves the region itself, but a caller may already have

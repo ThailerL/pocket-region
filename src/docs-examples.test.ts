@@ -4,7 +4,7 @@ import { importMap } from '../site/src/import-map.mjs';
 import type { Region } from './core.ts';
 import { createRegion } from './node.ts';
 import { AsyncFunction, IMPORT, rewriteImports } from './runner/imports.ts';
-import { runnablesOf } from './test-docs.ts';
+import { runnablesOf } from './testing/docs.ts';
 import { withRegion } from './with-region.ts';
 
 const DOCS = new URL('../site/src/content/docs/docs/', import.meta.url);

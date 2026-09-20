@@ -11,8 +11,8 @@ import {
 import { expect, it } from 'vitest';
 import { collectGarbage } from './core.ts';
 import { requestHandler } from './request-handler.ts';
-import { clientConfig, createQueue, zipOf } from './test-clients.ts';
-import { createTestRegion, regionPort } from './test-region.ts';
+import { clientConfig, createQueue, zipOf } from './testing/clients.ts';
+import { createTestRegion, regionPort } from './testing/region.ts';
 
 const ROUNDS = 200;
 

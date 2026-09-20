@@ -5,7 +5,7 @@ import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { directoryStore } from './node.ts';
-import { describeStore } from './test-stores.ts';
+import { describeStore } from './testing/stores.ts';
 
 const directories: string[] = [];
 

@@ -2,9 +2,9 @@ import { CreateFunctionCommand, InvokeCommand, LambdaClient } from '@aws-sdk/cli
 import { describe, expect, it, vi } from 'vitest';
 import { createRegion, indexedDbStore, requestHandler, type RegionOutput, type StateFiles, type StateStore } from './browser.ts';
 import { fromCdn } from './import-map.ts';
-import { clientConfig, s3, zipOf } from './test-clients.ts';
-import { assetsBaseUrl, createTestRegion } from './test-region.browser.ts';
-import { describeStore } from './test-stores.ts';
+import { clientConfig, s3, zipOf } from './testing/clients.ts';
+import { assetsBaseUrl, createTestRegion } from './testing/region.browser.ts';
+import { describeStore } from './testing/stores.ts';
 
 const decoder = new TextDecoder();
 

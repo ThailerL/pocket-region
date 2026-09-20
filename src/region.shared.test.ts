@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Region } from './core.ts';
-import { authorization, jsonApi, s3 } from './test-clients.ts';
-import { createTestRegion } from './test-region.ts';
+import { authorization, jsonApi, s3 } from './testing/clients.ts';
+import { createTestRegion } from './testing/region.ts';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();

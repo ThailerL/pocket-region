@@ -9,7 +9,7 @@ import { decoded, unresolvable } from './dispatch.ts';
 import { UsageError } from './errors.ts';
 import { paramsFor } from './params.ts';
 import { membersOf } from './schema.ts';
-import { zipOf } from '../test-clients.ts';
+import { zipOf } from '../testing/clients.ts';
 import { awsCli, CliError, type AwsCli, type Files } from './index.ts';
 import { formatBuckets, formatObjects, parseS3Uri } from './s3-verbs.ts';
 

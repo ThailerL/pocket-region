@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createRegion, directoryStore, type StateStore } from './node.ts';
-import { jsonApi, s3 } from './test-clients.ts';
+import { jsonApi, s3 } from './testing/clients.ts';
 
 const decoder = new TextDecoder();
 

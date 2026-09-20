@@ -1,6 +1,6 @@
 // The StateStore contract, run over directoryStore in Node and indexedDbStore in a page
 import { describe, expect, it } from 'vitest';
-import type { StateStore } from './core.ts';
+import type { StateStore } from '../core.ts';
 
 const bytes = (text: string) => new TextEncoder().encode(text);
 const text = (contents?: Uint8Array) => new TextDecoder().decode(contents);

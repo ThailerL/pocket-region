@@ -44,8 +44,8 @@ import { AssumeRoleCommand, STSClient } from '@aws-sdk/client-sts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Region } from './core.ts';
 import { requestHandler } from './request-handler.ts';
-import { allow, bodies, clientConfig, createQueue, execute, finished, startExecution } from './test-clients.ts';
-import { createTestRegion } from './test-region.ts';
+import { allow, bodies, clientConfig, createQueue, execute, finished, startExecution } from './testing/clients.ts';
+import { createTestRegion } from './testing/region.ts';
 
 let region: Region;
 let config: ReturnType<typeof clientConfig>;

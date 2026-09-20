@@ -2,8 +2,8 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { isSession, sessionCode } from '../site/src/runnable/session.ts';
 import { createRunner } from './browser.ts';
-import { runnablesOf } from './test-docs.ts';
-import { assetsBaseUrl, indexURL } from './test-region.browser.ts';
+import { runnablesOf } from './testing/docs.ts';
+import { assetsBaseUrl, indexURL } from './testing/region.browser.ts';
 
 const pages = import.meta.glob('../site/src/content/docs/docs/*.mdx', { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
 

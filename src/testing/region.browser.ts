@@ -1,4 +1,4 @@
-import { createRegion, type BrowserRegionOptions } from './browser.ts';
+import { createRegion, type BrowserRegionOptions } from '../browser.ts';
 
 // Paths on Vite's server over the repo root; new URL(…, import.meta.url) would be rewritten
 export const assetsBaseUrl = '/vendor';

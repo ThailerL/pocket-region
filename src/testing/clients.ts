@@ -2,8 +2,8 @@
 import { CreateStateMachineCommand, DescribeExecutionCommand, type SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import { CreateQueueCommand, GetQueueAttributesCommand, ReceiveMessageCommand, type SQSClient } from '@aws-sdk/client-sqs';
 import { strToU8, zipSync } from 'fflate';
-import { AWS_DEFAULTS } from './client-config.ts';
-import type { Region } from './core.ts';
+import { AWS_DEFAULTS } from '../client-config.ts';
+import type { Region } from '../core.ts';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();

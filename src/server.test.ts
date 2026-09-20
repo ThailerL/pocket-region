@@ -13,8 +13,8 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createRegion, type Region } from './node.ts';
 import { serve, type RegionServer } from './server.ts';
-import { authorization, clientConfig } from './test-clients.ts';
-import { freePort } from './test-support.ts';
+import { authorization, clientConfig } from './testing/clients.ts';
+import { freePort } from './testing/support.ts';
 
 const SIGNED = { authorization: authorization('s3') };
 

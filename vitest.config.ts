@@ -29,8 +29,8 @@ export default defineConfig({
         resolve: {
           alias: [
             {
-              find: /^\.\.?\/test-region\.ts$/,
-              replacement: fileURLToPath(new URL('src/test-region.browser.ts', import.meta.url)),
+              find: /^(\.\.?\/)+testing\/region\.ts$/,
+              replacement: fileURLToPath(new URL('src/testing/region.browser.ts', import.meta.url)),
             },
           ],
         },

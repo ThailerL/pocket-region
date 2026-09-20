@@ -2,7 +2,7 @@ import * as s3Module from '@aws-sdk/client-s3';
 import * as sqsModule from '@aws-sdk/client-sqs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Region } from './core.ts';
-import { createTestRegion } from './test-region.ts';
+import { createTestRegion } from './testing/region.ts';
 import { withRegion } from './with-region.ts';
 
 let region: Region;

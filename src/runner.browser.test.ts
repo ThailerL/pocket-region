@@ -1,8 +1,8 @@
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { createRunner, type JavaScriptOutput, type Language, type PythonOutput, regionSupported, type RunnerOutput, type RunnerPhase } from './browser.ts';
 import type { VendorManifest } from './core.ts';
-import { s3 } from './test-clients.ts';
-import { assetsBaseUrl, createTestRegion, indexURL } from './test-region.browser.ts';
+import { s3 } from './testing/clients.ts';
+import { assetsBaseUrl, createTestRegion, indexURL } from './testing/region.browser.ts';
 
 // A snippet's worker imports by URL, so its modules come from jsDelivr at the site's versions
 const versions: Record<string, string> = {
