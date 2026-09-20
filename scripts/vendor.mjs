@@ -25,7 +25,7 @@ import { loadPyodide } from 'pyodide';
 const require = createRequire(import.meta.url);
 const PYODIDE_VERSION = require('../package.json').dependencies.pyodide;
 const PYODIDE_DIRECTORY = path.dirname(require.resolve('pyodide/package.json'));
-const EMULATOR_SPEC = 'ministack==1.5.12';
+const EMULATOR_SPEC = 'ministack==1.5.13';
 const EMULATOR_NAME = EMULATOR_SPEC.split('==')[0];
 const PYTHON_RUNTIME_SPEC = 'boto3==1.43.97';
 const PYODIDE_CDN = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`;
@@ -132,8 +132,7 @@ async function precompile(wheels) {
 		await py.runPythonAsync(fs.readFileSync(path.join(ROOT, 'python', file), 'utf8'));
 	}
 	await py.runPythonAsync('await lifespan("startup")');
-	// ministack imports CloudFormation on every service's first request and GraphQL on the first
-	// reset: from source, that took 1.4 s on a desktop and timed tests out in CI
+	// A service's own lazy imports compile on its first request: 0.25 MB of bytecode for 130 ms
 	await py.runPythonAsync(`
 await asgi_request("PUT", "/precompile", {"host": "localhost:4566", "authorization": "AWS4-HMAC-SHA256 Credential=test/20260101/us-east-1/s3/aws4_request, SignedHeaders=host, Signature=test"}, b"")
 await asgi_request("POST", "/_ministack/reset", {"host": "localhost:4566"}, b"")

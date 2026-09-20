@@ -43,10 +43,8 @@ def _move_aside(path):
     print(f"state file {os.path.basename(path)} was not loaded; kept as {os.path.basename(kept)}")
 
 
-# A file the emulator refuses leaves that service empty, and the next save would write that
-# emptiness over it. load_state is asked rather than copied, so its rule stays its own; it
-# says why on its own logger, and must run before the import below. Needs PERSIST_STATE
-# set above: without it load_state refuses every file
+# A refused file leaves that service empty and the next save writes the emptiness over it. Runs
+# before lifespan startup restores, and needs the PERSIST_STATE set above
 def _quarantine_refused_state():
     for path in sorted(glob.glob(f"{STATE_DIR}/*.json")):
         if load_state(os.path.basename(path)[: -len(".json")]) is None:
@@ -55,7 +53,6 @@ def _quarantine_refused_state():
 
 _quarantine_refused_state()
 
-# Each service reads its own state file as it imports, so this line is the restore
 from ministack.app import app, _build_persistence_save_dict
 from ministack.core.persistence import save_all
 
