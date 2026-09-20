@@ -26,7 +26,7 @@ const readPython = (file) => fs.readFileSync(path.join(PYTHON, file), 'utf8');
 // the emulator, and lambda.py patches the emulator's service
 const REGION_PYTHON = ['threads.py', 'helpers.py', 'lambda.py'];
 
-const missing = fs.readdirSync(PYTHON).filter((file) => file.endsWith('.py') && !REGION_PYTHON.includes(file));
+const missing = fs.readdirSync(path.join(PYTHON, 'region')).filter((file) => file.endsWith('.py') && !REGION_PYTHON.includes(file));
 if (missing.length > 0) {
   process.stderr.write(`[embed] ${missing.join(', ')} is not in REGION_PYTHON: add it in run order\n`);
   process.exit(1);
@@ -34,9 +34,9 @@ if (missing.length > 0) {
 
 write(
   path.join(SRC, 'python.generated.ts'),
-  'python/',
+  'python/region/',
   `export const PYTHON_SOURCES: readonly string[] = [
-${REGION_PYTHON.map((file) => `  ${JSON.stringify(readPython(file))},`).join('\n')}
+${REGION_PYTHON.map((file) => `  ${JSON.stringify(readPython(`region/${file}`))},`).join('\n')}
 ];
 `,
 );
