@@ -26,6 +26,18 @@ origin in `script-src`; a server that answers `.wasm` files as `application/wasm
 CDN, the plain `dist/browser.js` file rather than a bundled build such as jsDelivr's `+esm`, which
 moves the file's URL.
 
+## `regionSupported`
+
+```ts
+regionSupported(): boolean
+```
+
+Whether `createRegion` can boot here. Both entries export it. It's false in a browser without
+WebAssembly JSPI, and in Node before 24.20, where `createRegion` rejects instead of returning a
+region. It answers without booting anything or fetching anything, so a page can decide what to
+render before it loads the emulator, which is how a page with a
+[runner](/docs/runner/) decides whether to offer a Run button.
+
 ## Options
 
 | Option | Type | Entry | Default | |

@@ -155,7 +155,6 @@ the region under it.
 
 ```ts
 type Runner = {
-  supported: boolean;
   run(code: string, options?: { language?, echo?, reset?, onOutput?, onStatus? }): Promise<RunResult>;
   stop(): Promise<void>;
 };
@@ -163,8 +162,10 @@ type Runner = {
 type RunResult = { ok: true; durationMs: number } | { ok: false; durationMs: number; error: unknown };
 ```
 
-- **`supported`** is false in a browser without WebAssembly JSPI, where no region can boot. Show
-  the code without a Run button there.
+A runner needs a region, so a browser that can't boot one can't run a snippet either. Ask
+[`regionSupported()`](/docs/region/#regionsupported) before you paint a Run button, and show the
+code without one where it's false.
+
 - **`run(code)`** resolves once the code finishes, and never rejects: what the code throws or
   raises comes back as `error`, with its `name`, `message`, `stack`, and the `line` of the snippet
   it came from when that could be told. A Python error's `stack` is its traceback. Runs wait for

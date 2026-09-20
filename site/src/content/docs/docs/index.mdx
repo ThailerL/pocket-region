@@ -15,7 +15,8 @@ The AWS SDK clients aren't dependencies. Install the ones you use, such as
 `@aws-sdk/client-s3`.
 
 Pocket Region needs WebAssembly JSPI, so it runs on Node 24.20 or later, Chrome and Edge 137,
-Firefox 153, and Safari 27. In a browser without JSPI, `createRegion` throws.
+Firefox 153, and Safari 27. In a browser without JSPI, `createRegion` rejects, and
+[`regionSupported()`](/docs/region/#regionsupported) says so before you try.
 
 ## In Node
 

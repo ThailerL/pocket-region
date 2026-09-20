@@ -4,8 +4,11 @@ import { storageKey } from '../snippets.mjs';
 import type { Editor } from './editor.ts';
 import { isSession, PRIMARY, PROMPT, sessionCode } from './session.ts';
 
+let browser: Promise<typeof Browser> | undefined;
+const browserFor = () => (browser ??= load<typeof Browser>('pocket-region/browser'));
+
 let runner: Promise<Browser.Runner> | undefined;
-const runnerFor = () => (runner ??= load<typeof Browser>('pocket-region/browser').then(({ createRunner }) => createRunner()));
+const runnerFor = () => (runner ??= browserFor().then(({ createRunner }) => createRunner()));
 
 const linesOf = (block: HTMLElement) => Array.from(block.querySelectorAll<HTMLElement>('.ec-line'));
 const textsOf = (block: HTMLElement) => linesOf(block).map((line) => line.textContent ?? '');
@@ -103,11 +106,12 @@ const STATUS: Record<Browser.RunnerPhase, string> = {
 async function run(code: string, options: { language: Browser.Language; echo?: boolean }, show: Sink, state: HTMLElement) {
   state.textContent = 'Loading…';
   try {
-    const current = await runnerFor();
-    if (!current.supported) {
+    const { regionSupported } = await browserFor();
+    if (!regionSupported()) {
       state.textContent = "This browser can't run a region: it lacks WebAssembly JSPI";
       return;
     }
+    const current = await runnerFor();
     const result = await current.run(code, {
       ...options,
       onOutput: ({ text, stream, line }) => show(text, stream, line),

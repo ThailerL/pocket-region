@@ -10,11 +10,11 @@ describe('entry points', () => {
 
   it('gives Node everything from one import', async () => {
     const node = await import('./index.ts');
-    expect(Object.keys(node).sort()).toEqual(['CliError', 'awsCli', 'clientConfig', 'createRegion', 'directoryStore', 'requestHandler', 'serve']);
+    expect(Object.keys(node).sort()).toEqual(['CliError', 'awsCli', 'clientConfig', 'createRegion', 'directoryStore', 'regionSupported', 'requestHandler', 'serve']);
   });
 
   it('gives a page everything from one import', async () => {
     const page = await import('./browser.ts');
-    expect(Object.keys(page).sort()).toEqual(['CliError', 'awsCli', 'clientConfig', 'createRegion', 'createRunner', 'indexedDbStore', 'requestHandler']);
+    expect(Object.keys(page).sort()).toEqual(['CliError', 'awsCli', 'clientConfig', 'createRegion', 'createRunner', 'indexedDbStore', 'regionSupported', 'requestHandler']);
   });
 });

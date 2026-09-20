@@ -1,6 +1,6 @@
 import type { BrowserRegionOptions } from './browser.ts';
 import { AWS_DEFAULTS, awsEnvironment } from './client-config.ts';
-import { jspiSupported, type Region } from './core.ts';
+import type { Region } from './core.ts';
 import { bootRegion, type RegionBooting } from './region/boot.ts';
 import { answer, pendingCalls, toWire } from './region/protocol.ts';
 import { bootOf, portFor, type RegionBoot } from './region/proxy.ts';
@@ -46,7 +46,6 @@ export type RunnerOptions = {
 export type RunnerReset = 'each-run' | 'never';
 
 export type Runner = {
-  readonly supported: boolean;
   run(code: string, options?: RunOptions): Promise<RunResult>;
   stop(): Promise<void>;
 };
@@ -198,7 +197,6 @@ export function createRunner(options: RunnerOptions = {}): Runner {
   }
 
   return {
-    supported: jspiSupported(),
     run(code, runOptions = {}) {
       const result = queue.then(async (): Promise<RunResult> => {
         const started = performance.now();

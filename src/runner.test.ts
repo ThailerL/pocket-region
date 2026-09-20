@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it, vi } from 'vitest';
-import { createRunner, type JavaScriptOutput, type Language, type PythonOutput, type RunnerOutput, type RunnerPhase } from './browser.ts';
+import { createRunner, type JavaScriptOutput, type Language, type PythonOutput, regionSupported, type RunnerOutput, type RunnerPhase } from './browser.ts';
 import type { VendorManifest } from './core.ts';
 import { s3 } from './test-clients.ts';
 import { assetsBaseUrl, createTestRegion, indexURL } from './test-region.browser.ts';
@@ -267,9 +267,11 @@ console.log(\`\${out.Buckets!.length} \${Unit.Bucket}s\` satisfies string);`);
     expect(after.statuses).toEqual(['booting', 'running']);
     expect(after.text).toEqual(['back']);
   }, 60_000);
+});
 
-  it('says whether this page can run a region', () => {
-    expect(runner.supported).toBe('Suspending' in WebAssembly);
+describe('regionSupported', () => {
+  it('says whether this page can boot a region', () => {
+    expect(regionSupported()).toBe('Suspending' in WebAssembly);
   });
 });
 
