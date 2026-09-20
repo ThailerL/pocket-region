@@ -102,7 +102,7 @@ export function createRunner(options: RunnerOptions = {}): Runner {
     Promise.resolve().then(() => boot().assets).then(
       ({ indexURL, pyodideVersion, pythonRuntime }) => {
         const packages = options.python?.packages ?? [];
-        const python: PythonBoot = { indexURL, pyodideVersion, pythonRuntime, packages, environment: awsEnvironment(AWS_DEFAULTS) };
+        const python: PythonBoot = { indexURL, pyodideVersion, pythonRuntime, packages, environment: awsEnvironment(AWS_DEFAULTS.credentials) };
         worker.postMessage({ type: 'boot', python } satisfies ToRunnerWorker);
       },
       // A worker never booted would hold every later run

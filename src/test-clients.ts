@@ -16,6 +16,9 @@ export const clientConfig = (extra: object = {}) => ({
   ...extra,
 });
 
+export const allow = (Action: string, Resource = '*') =>
+  JSON.stringify({ Version: '2012-10-17', Statement: [{ Effect: 'Allow', Action, Resource }] });
+
 // SigV4's shape without a signature: the region routes on the credential scope and never
 // verifies one
 export const authorization = (service: string) =>

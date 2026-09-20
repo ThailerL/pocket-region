@@ -89,7 +89,7 @@ Lambda's standard `AWS_LAMBDA_*` variables are set, along with the function's ow
 | --- | --- |
 | `AWS_ENDPOINT_URL` | The region: `http://127.0.0.1:<port>` in Node, `http://localhost:<port>` in a page |
 | `AWS_REGION`, `AWS_DEFAULT_REGION` | `us-east-1` |
-| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | `test`, the account's root user, so a handler's own calls are not limited by the function's execution role, even where the region [enforces IAM](/docs/services/#iam-and-sts) |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` | The function's execution role, as a session of it. Where the region [enforces IAM](/docs/services/#iam-and-sts), a handler's own calls are limited by that role's policies; otherwise they are the account's root user, allowed everything |
 | `AWS_EXECUTION_ENV` | `AWS_Lambda_` and the runtime, such as `AWS_Lambda_python3.13` |
 
 So an SDK client created inside a handler with no options reaches the region, as it would on

@@ -11,6 +11,7 @@ import {
   UpdateFunctionConfigurationCommand,
 } from '@aws-sdk/client-lambda';
 import { CreateTableCommand, DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
+import { CreateRoleCommand, IAMClient, PutRolePolicyCommand } from '@aws-sdk/client-iam';
 import { EventBridgeClient, PutEventsCommand, PutRuleCommand, PutTargetsCommand } from '@aws-sdk/client-eventbridge';
 import { CreateStreamCommand, DescribeStreamCommand, KinesisClient, PutRecordCommand } from '@aws-sdk/client-kinesis';
 import { HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
@@ -19,7 +20,7 @@ import { GetQueueAttributesCommand, SendMessageCommand, SQSClient } from '@aws-s
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { LambdaEvent, LambdaObserver, LambdaOutput, Region } from '../core.ts';
 import { requestHandler } from '../request-handler.ts';
-import { authorization, bodies, clientConfig, createQueue, execute, zipOf, zipOfFiles } from '../test-clients.ts';
+import { allow, authorization, bodies, clientConfig, createQueue, execute, zipOf, zipOfFiles } from '../test-clients.ts';
 import { createTestRegion, regionPort } from '../test-region.ts';
 
 const decoder = new TextDecoder();
@@ -100,8 +101,8 @@ const observer: LambdaObserver = {
 };
 const eventsOf = (functionName: string) => observed.filter((event) => event.functionName === functionName);
 
-const createFunction = (FunctionName: string, extra: object = {}, code = HANDLER) =>
-  lambda.send(
+const createFunction = (FunctionName: string, extra: object = {}, code = HANDLER, client = lambda) =>
+  client.send(
     new CreateFunctionCommand({
       FunctionName,
       Runtime: 'nodejs22.x',
@@ -112,8 +113,8 @@ const createFunction = (FunctionName: string, extra: object = {}, code = HANDLER
     }),
   );
 
-async function invoke(FunctionName: string, event: object, extra: object = {}) {
-  const response = await lambda.send(
+async function invoke(FunctionName: string, event: object, extra: object = {}, client = lambda) {
+  const response = await client.send(
     new InvokeCommand({ FunctionName, Payload: JSON.stringify(event), ...extra }),
   );
   return {
@@ -604,4 +605,48 @@ export const handler = async (event) => {
     expect(eventsOf('late-writer')).toContainEqual(expect.objectContaining({ phase: 'stopped', reason: 'the region reset' }));
     await expect(s3.send(new HeadBucketCommand({ Bucket: 'written-after-reset' }))).rejects.toThrow();
   }, 30_000);
+});
+
+describe('Lambda with IAM enforced', () => {
+  let enforcing: Region;
+  let enforcingLambda: LambdaClient;
+  let iam: IAMClient;
+
+  const TRUST = JSON.stringify({
+    Version: '2012-10-17',
+    Statement: [{ Effect: 'Allow', Principal: { Service: 'lambda.amazonaws.com' }, Action: 'sts:AssumeRole' }],
+  });
+
+  // A bare client, so it signs with the credentials the environment gave the handler
+  const LISTER = `import { DynamoDBClient, ListTablesCommand } from '@aws-sdk/client-dynamodb';
+export const handler = async () => {
+  try {
+    return { tables: (await new DynamoDBClient({}).send(new ListTablesCommand({}))).TableNames };
+  } catch (error) {
+    return { denied: error.name };
+  }
+};`;
+
+  beforeAll(async () => {
+    enforcing = await createTestRegion({ port: await regionPort(), enforceIam: true });
+    const config = clientConfig({ requestHandler: requestHandler(enforcing) });
+    enforcingLambda = new LambdaClient(config);
+    iam = new IAMClient(config);
+  }, 60_000);
+
+  afterAll(async () => {
+    await enforcing?.stop();
+  });
+
+  it('runs a function as its execution role rather than as the root user', async () => {
+    await iam.send(new CreateRoleCommand({ RoleName: 'lister', AssumeRolePolicyDocument: TRUST }));
+    const role = { Role: 'arn:aws:iam::000000000000:role/lister' };
+    await createFunction('lister', role, LISTER, enforcingLambda);
+    const call = async () => (await invoke('lister', {}, {}, enforcingLambda)).payload;
+    expect(await call()).toEqual({ denied: 'AccessDeniedException' });
+    await iam.send(
+      new PutRolePolicyCommand({ RoleName: 'lister', PolicyName: 'only', PolicyDocument: allow('dynamodb:ListTables') }),
+    );
+    expect(await call()).toEqual({ tables: [] });
+  }, 60_000);
 });

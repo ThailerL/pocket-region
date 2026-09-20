@@ -22,9 +22,28 @@ def _code_entries(code_zip):
     return entries
 
 
+def _credentials(config):
+    # What ministack's own executors give a function: a role session under AUTH, root keys without it
+    from ministack.core.lambda_runtime import execution_credentials
+
+    environment = execution_credentials(config)
+    credentials = {
+        "accessKeyId": environment["AWS_ACCESS_KEY_ID"],
+        "secretAccessKey": environment["AWS_SECRET_ACCESS_KEY"],
+    }
+    if environment.get("AWS_SESSION_TOKEN"):
+        credentials["sessionToken"] = environment["AWS_SESSION_TOKEN"]
+    return credentials
+
+
 def _invocation(func, event):
     config = func.get("config") or func
-    invocation = {"requestId": str(uuid.uuid4()), "config": config, "event": json.dumps(event)}
+    invocation = {
+        "requestId": str(uuid.uuid4()),
+        "config": config,
+        "event": json.dumps(event),
+        "credentials": _credentials(config),
+    }
     # The zip crosses to JS once per code hash
     if func.get("code_zip") and LAMBDA_EXECUTOR.needsCode(config.get("CodeSha256", "")):
         invocation["code"] = _code_entries(func["code_zip"])

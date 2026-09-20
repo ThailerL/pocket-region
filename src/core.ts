@@ -98,6 +98,8 @@ function readStateFiles(py: PyodideAPI, prefix = '', files: StateFiles = new Map
 // One file of a function's deployment package, as the emulator read it out of the zip
 export type CodeEntry = [path: string, contents: Uint8Array, mode: number];
 
+export type AwsCredentials = { accessKeyId: string; secretAccessKey: string; sessionToken?: string };
+
 // The function's configuration as the emulator holds it: the API's own names, with its
 // defaults already applied
 export type FunctionConfig = {
@@ -122,6 +124,8 @@ export type Invocation = {
   event: string;
   // Present only when the host answered needsCode(CodeSha256) with true
   code?: CodeEntry[];
+  // The function's execution role, as a session of it
+  credentials: AwsCredentials;
 };
 
 // A function error as Lambda's Invoke answers it

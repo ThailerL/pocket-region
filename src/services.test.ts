@@ -44,7 +44,7 @@ import { AssumeRoleCommand, STSClient } from '@aws-sdk/client-sts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Region } from './core.ts';
 import { requestHandler } from './request-handler.ts';
-import { bodies, clientConfig, createQueue, execute, finished, startExecution } from './test-clients.ts';
+import { allow, bodies, clientConfig, createQueue, execute, finished, startExecution } from './test-clients.ts';
 import { createTestRegion } from './test-region.ts';
 
 let region: Region;
@@ -255,9 +255,6 @@ describe('services through the SDK', () => {
       .toEqual([expect.objectContaining({ source: 'shop', 'detail-type': 'order placed', detail: { total: 250 } })]);
   });
 });
-
-const allow = (Action: string, Resource = '*') =>
-  JSON.stringify({ Version: '2012-10-17', Statement: [{ Effect: 'Allow', Action, Resource }] });
 
 type Keys = { AccessKeyId?: string; SecretAccessKey?: string; SessionToken?: string };
 

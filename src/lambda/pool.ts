@@ -1,6 +1,7 @@
 import { awsEnvironment } from '../client-config.ts';
 import {
   unref,
+  type AwsCredentials,
   type FunctionConfig,
   type Invocation,
   type InvocationOutcome,
@@ -102,7 +103,7 @@ export function parseError(text: string): LambdaError {
 }
 
 // Lambda's environment as a handler sees it; a host adds what only it can name
-const environmentVariables = (config: FunctionConfig, logStream: string, endpoint: string) => ({
+const environmentVariables = (config: FunctionConfig, credentials: AwsCredentials, logStream: string, endpoint: string) => ({
   AWS_LAMBDA_FUNCTION_NAME: config.FunctionName,
   AWS_LAMBDA_FUNCTION_VERSION: config.Version,
   AWS_LAMBDA_FUNCTION_MEMORY_SIZE: String(config.MemorySize),
@@ -110,7 +111,7 @@ const environmentVariables = (config: FunctionConfig, logStream: string, endpoin
   AWS_LAMBDA_LOG_STREAM_NAME: logStream,
   AWS_EXECUTION_ENV: `AWS_Lambda_${config.Runtime}`,
   _HANDLER: config.Handler,
-  ...awsEnvironment({ region: 'us-east-1', credentials: { accessKeyId: 'test', secretAccessKey: 'test' } }),
+  ...awsEnvironment(credentials),
   AWS_ENDPOINT_URL: endpoint,
   ...config.Environment?.Variables,
 });
@@ -147,12 +148,13 @@ export class FunctionPool {
     }
     let uncovered = this.pending.length - this.count('starting');
     while (uncovered > 0) {
-      this.spawn(this.pending[0]!.invocation.config);
+      this.spawn(this.pending[0]!.invocation);
       uncovered--;
     }
   }
 
-  private spawn(config: FunctionConfig) {
+  // A pool holds one function revision, so any pending invocation names the same environment
+  private spawn({ config, credentials }: Invocation) {
     const id = environmentId();
     // Every event arrives after env is assigned
     const env: Environment = {
@@ -162,7 +164,7 @@ export class FunctionPool {
       log: [],
       spawnedAt: performance.now(),
       initTimer: unref(setTimeout(() => this.reap(env, 'never asked for work'), INIT_TIMEOUT_MS)),
-      sandbox: this.settings.spawn(environmentVariables(config, id, this.settings.endpoint), {
+      sandbox: this.settings.spawn(environmentVariables(config, credentials, id, this.settings.endpoint), {
         ready: () => this.ready(env),
         responded: (requestId, result) => this.complete(this.owned(env, requestId), { result }),
         failed: (requestId, error) => this.complete(this.owned(env, requestId), { error }),
