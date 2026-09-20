@@ -80,12 +80,12 @@ if (installedVersion !== PYODIDE_VERSION) {
 }
 
 // Pyodide compiles every module it imports from source on each boot and never caches the
-// bytecode, so an unchecked-hash pyc beside each source it touched takes that off the boot.
-// Only what the boot, a first request and a first reset import, to keep the payload down; a
-// service's other lazy imports compile once on its first request. The pycs are tied to the
-// pinned CPython, and the installer
-// keeping them is measured, not documented: after a Pyodide bump, a boot over 0.6 s means
-// they are ignored
+// bytecode, so each module the boot, a first request and a first reset touch ships as an
+// unchecked-hash pyc in place of its source: off the boot, and 1.4 MB off the payload. What
+// a service imports lazily keeps its source and compiles on that service's first request.
+// The pycs are tied to the pinned CPython and nothing checks that, so after a Pyodide bump a
+// boot over 0.6 s means they are being ignored. A traceback keeps its file and line, not the
+// source line's text.
 const PRECOMPILE = `
 import importlib.util, os, sys, zipfile
 from importlib._bootstrap_external import _code_to_hash_pyc
@@ -94,24 +94,25 @@ SITE = next(p for p in sys.path if p.endswith("site-packages")) + "/"
 STDLIB = next(p for p in sys.path if p.endswith(".zip")) + "/"
 used = {m.__file__ for m in list(sys.modules.values()) if getattr(m, "__file__", None)}
 
-def precompile(source, target, root, cache_path):
+def precompile(source, target, root):
     count = 0
     with zipfile.ZipFile(source) as src, zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as dst:
         for info in src.infolist():
             data = src.read(info)
-            dst.writestr(info, data)
             if info.filename.endswith(".py") and root + info.filename in used:
                 code = compile(data, root + info.filename, "exec", dont_inherit=True)
                 pyc = _code_to_hash_pyc(code, importlib.util.source_hash(data), checked=False)
-                dst.writestr(cache_path(info.filename), pyc)
+                # where the source was, since __pycache__ is read only when the source exists
+                dst.writestr(info.filename[:-3] + ".pyc", pyc)
                 count += 1
+            else:
+                dst.writestr(info, data)
     return count
 
 count = 0
 for name in os.listdir("/in/wheels"):
-    count += precompile(f"/in/wheels/{name}", f"/out/wheels/{name}", SITE, importlib.util.cache_from_source)
-# zipimport takes a pyc beside its source, with no __pycache__ directory
-count += precompile("/in/stdlib.zip", "/out/stdlib.zip", STDLIB, lambda name: name[:-3] + ".pyc")
+    count += precompile(f"/in/wheels/{name}", f"/out/wheels/{name}", SITE)
+count += precompile("/in/stdlib.zip", "/out/stdlib.zip", STDLIB)
 count
 `;
 
