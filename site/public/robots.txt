@@ -1,0 +1,6 @@
+# allow crawling everything by default
+User-agent: *
+Disallow:
+
+# Starlight's bundled sitemap integration writes this index, not a plain sitemap.xml
+Sitemap: https://pocket-region.dev/sitemap-index.xml
