@@ -34,6 +34,13 @@ describe('directoryStore locking', () => {
     await store.close?.();
   });
 
+  // A container's region is often pid 1 on every start, so its own pid is no proof of life
+  it('takes over a lock left by an earlier process with this pid', async () => {
+    const store = directoryStore(await lockedDir({ pid: process.pid, hostname: hostname() }));
+    expect((await store.load()).size).toBe(0);
+    await store.close?.();
+  });
+
   it('refuses a lock a live process holds, and one from another host', async () => {
     const live = directoryStore(await lockedDir({ pid: process.ppid, hostname: hostname() }));
     await expect(live.load()).rejects.toThrow(`process ${process.ppid}`);

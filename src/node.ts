@@ -35,7 +35,10 @@ const filesUnder = (dir: string) =>
     .filter((entry) => entry.isFile() && !isLockFile(dir, entry))
     .map((entry) => path.join(entry.parentPath, entry.name));
 
-type LockOwner = { pid: number; hostname: string };
+// The token tells this process from an earlier one that was given the same pid
+type LockOwner = { pid: number; hostname: string; token: string };
+
+const PROCESS_TOKEN = randomUUID();
 
 const errorCode = (error: unknown) => (error as NodeJS.ErrnoException).code;
 
@@ -66,16 +69,21 @@ const ownerOf = (lock: string): LockOwner | undefined => {
   }
 };
 
+const isLive = (held: LockOwner, owner: LockOwner) =>
+  held.hostname !== owner.hostname ||
+  held.token === owner.token ||
+  (held.pid !== owner.pid && isAlive(held.pid));
+
 // Written whole, then linked into place: a link fails atomically on EEXIST
 function lockDirectory(dir: string): () => void {
   const lock = path.join(dir, LOCK_FILE);
-  const owner: LockOwner = { pid: process.pid, hostname: os.hostname() };
+  const owner: LockOwner = { pid: process.pid, hostname: os.hostname(), token: PROCESS_TOKEN };
   const pending = `${lock}-${randomUUID()}`;
   fs.writeFileSync(pending, JSON.stringify(owner));
   try {
     if (!linked(pending, lock)) {
       const held = ownerOf(lock);
-      if (held !== undefined && (held.hostname !== owner.hostname || isAlive(held.pid))) {
+      if (held !== undefined && isLive(held, owner)) {
         throw new Error(`${dir} is in use by another region (process ${held.pid} on ${held.hostname})`);
       }
       fs.rmSync(lock, { force: true });
