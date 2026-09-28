@@ -109,6 +109,8 @@ function processSandbox({ taskRoot, runtimeScript }: Package, pythonRuntime?: ()
           LAMBDA_TASK_ROOT: taskRoot,
         },
       });
+      // Which process this environment is, for a host that tells its connections apart
+      if (child.pid !== undefined) events.spawned?.(child.pid);
       forwardLines(child.stdout, events.output);
       forwardLines(child.stderr, events.output);
       child.on('error', (error) => {

@@ -147,6 +147,7 @@ handler writes as `text`, including the `START`, `END`, and `REPORT` lines. The 
 | `kind` | `phase` | Fields |
 | --- | --- | --- |
 | `environment` | `started`, `stopped` | `reason` when stopped |
+| `environment` | `spawned` | `pid` of the environment's process (Node host only) |
 | `invocation` | `started` | `requestId`, `event` (JSON text), `coldStart` |
 | `invocation` | `completed` | `requestId`, `durationMs`, `initMs` (first invocation only), `failed` |
 

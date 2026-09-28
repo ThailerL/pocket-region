@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { CreateFunctionCommand, InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import { describe, expect, it } from 'vitest';
+import type { LambdaEvent } from '../core.ts';
 import { createRegion } from '../node.ts';
 import { requestHandler } from '../request-handler.ts';
 import { serve } from '../server.ts';
@@ -31,6 +32,27 @@ describe('Lambda in Node', () => {
     expect(JSON.parse(new TextDecoder().decode(Payload))).toEqual({ created: 200 });
     await shared.stop();
     await server.close();
+  }, 30_000);
+
+  it("reports the pid of each environment's process", async () => {
+    const observed: LambdaEvent[] = [];
+    const region = await createRegion({ port: await freePort(), lambda: { onEvent: (event) => observed.push(event) } });
+    const lambda = new LambdaClient(clientConfig({ requestHandler: requestHandler(region) }));
+    await lambda.send(
+      new CreateFunctionCommand({
+        FunctionName: 'whoami',
+        Runtime: 'nodejs22.x',
+        Handler: 'index.handler',
+        Role: 'arn:aws:iam::000000000000:role/lambda',
+        Code: { ZipFile: zipOf('index.mjs', 'export const handler = async () => ({ pid: process.pid });') },
+      }),
+    );
+    const { Payload } = await lambda.send(new InvokeCommand({ FunctionName: 'whoami' }));
+    const { pid } = JSON.parse(new TextDecoder().decode(Payload));
+    const started = observed.find((event) => event.kind === 'environment' && event.phase === 'started');
+    const spawned = observed.find((event) => event.kind === 'environment' && event.phase === 'spawned');
+    expect(spawned).toEqual({ kind: 'environment', functionName: 'whoami', environment: started?.environment, phase: 'spawned', pid });
+    await region.stop();
   }, 30_000);
 
   // In a process of its own, where nothing but the region can keep Node running

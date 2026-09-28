@@ -39,6 +39,8 @@ export type SandboxEvents = {
   // The environment is gone, with the runtime's own init error when it reported one
   exited(reason: string, initError?: LambdaError): void;
   output(line: string): void;
+  // A sandbox that runs as its own process, once it has one
+  spawned?(pid: number): void;
 };
 
 export type SandboxFactory = (env: Record<string, string>, events: SandboxEvents) => Sandbox;
@@ -170,6 +172,8 @@ export class FunctionPool {
         failed: (requestId, error) => this.complete(this.owned(env, requestId), { error }),
         exited: (reason, initError) => this.exited(env, reason, initError),
         output: (line) => this.output(env, line),
+        spawned: (pid) =>
+          this.emit({ kind: 'environment', functionName: env.functionName, environment: id, phase: 'spawned', pid }),
       }),
     };
     this.environments.set(id, env);

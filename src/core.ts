@@ -155,6 +155,7 @@ export type LambdaOutput = LambdaEnvironment & { text: string };
 export type LambdaEvent = LambdaEnvironment &
   (
     | { kind: 'environment'; phase: 'started' | 'stopped'; reason?: string }
+    | { kind: 'environment'; phase: 'spawned'; pid: number }
     | { kind: 'invocation'; requestId: string; phase: 'started'; event: string; coldStart: boolean }
     | { kind: 'invocation'; requestId: string; phase: 'completed'; durationMs: number; initMs?: number; failed: boolean }
   );

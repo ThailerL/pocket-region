@@ -186,7 +186,10 @@ describe('Lambda', () => {
     await createFunction('observed');
     await invoke('observed', { first: 1 });
     await invoke('observed', {});
-    const [started, cold, coldDone, warm, warmDone, ...rest] = eventsOf('observed');
+    // Only the Node host has a process to report, so its spawned event is checked in Node's own tests
+    const [started, cold, coldDone, warm, warmDone, ...rest] = eventsOf('observed').filter(
+      (event) => event.kind !== 'environment' || event.phase !== 'spawned',
+    );
     expect(rest).toEqual([]);
     expect(started).toEqual({ kind: 'environment', functionName: 'observed', environment: expect.any(String), phase: 'started' });
     const environment = (started as { environment: string }).environment;
