@@ -35,8 +35,18 @@ export function createLambdaHost<Package>(
       const { Runtime, CodeSha256, FunctionName, RevisionId } = config;
       // MiniStack sends only these two here, and refuses provided.* in python/lambda.py
       const family: RuntimeFamily = Runtime.startsWith('python') ? 'python' : 'nodejs';
-      if (code && !packed.has(CodeSha256)) packed.set(CodeSha256, packaging.pack(CodeSha256, code));
-      const pkg = await packed.get(CodeSha256);
+      if (code && !packed.has(CodeSha256)) {
+        const packing = packaging.pack(CodeSha256, code);
+        packed.set(CodeSha256, packing);
+        // Forgotten, so needsCode asks MiniStack for the code again
+        packing.catch(() => packed.delete(CodeSha256));
+      }
+      let pkg: Package | undefined;
+      try {
+        pkg = await packed.get(CodeSha256);
+      } catch (error) {
+        return failure(hostError(`Could not unpack the function's code: ${(error as Error).message}`));
+      }
       if (pkg === undefined) {
         return failure(hostError('The function has no code'));
       }
