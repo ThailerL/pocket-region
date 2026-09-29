@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { rolldown } from 'rolldown';
+import { REGION_PYTHON } from './region-python.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
 const SRC = path.join(ROOT, 'src');
@@ -21,10 +22,6 @@ function write(target, from, body) {
 
 const stringConstant = (name, value) => `export const ${name}: string = ${JSON.stringify(value)};\n`;
 const readPython = (file) => fs.readFileSync(path.join(PYTHON, file), 'utf8');
-
-// Executed in this order into one namespace: threads.py must land before helpers.py imports
-// the emulator, and lambda.py patches the emulator's service
-const REGION_PYTHON = ['threads.py', 'helpers.py', 'lambda.py'];
 
 const missing = fs.readdirSync(path.join(PYTHON, 'region')).filter((file) => file.endsWith('.py') && !REGION_PYTHON.includes(file));
 if (missing.length > 0) {

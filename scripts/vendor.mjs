@@ -21,6 +21,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadPyodide } from 'pyodide';
+import { REGION_PYTHON } from './region-python.mjs';
 
 const require = createRequire(import.meta.url);
 const PYODIDE_VERSION = require('../package.json').dependencies.pyodide;
@@ -129,7 +130,11 @@ async function precompile(wheels) {
 	py.globals.set('STATE_ROOT', '/state');
 	py.globals.set('REGION_PORT', 4566);
 	py.globals.set('ENFORCE_IAM', false);
-	for (const file of ['threads.py', 'helpers.py']) {
+	py.globals.set('LAMBDA_EXECUTOR', null);
+	py.globals.set('REGION_SLEEP', (seconds) =>
+		new Promise((resolve) => setTimeout(resolve, seconds * 1000).unref()),
+	);
+	for (const file of REGION_PYTHON) {
 		await py.runPythonAsync(fs.readFileSync(path.join(ROOT, 'python', 'region', file), 'utf8'));
 	}
 	await py.runPythonAsync('await lifespan("startup")');
