@@ -25,7 +25,7 @@ import { loadPyodide } from 'pyodide';
 const require = createRequire(import.meta.url);
 const PYODIDE_VERSION = require('../package.json').dependencies.pyodide;
 const PYODIDE_DIRECTORY = path.dirname(require.resolve('pyodide/package.json'));
-const EMULATOR_SPEC = 'ministack==1.5.13';
+const EMULATOR_SPEC = 'ministack==1.5.18';
 const EMULATOR_NAME = EMULATOR_SPEC.split('==')[0];
 const PYTHON_RUNTIME_SPEC = 'boto3==1.43.97';
 const PYODIDE_CDN = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`;
