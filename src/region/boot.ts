@@ -1,5 +1,5 @@
 import type { BrowserRegionOptions } from '../browser.ts';
-import { requireJspi, type Region, type VendorManifest } from '../core.ts';
+import { emulatorVersion, requireJspi, type Region, type VendorManifest } from '../core.ts';
 import { defaultAssetsBaseUrl, pyodideIndexUrl, regionResolve } from '../import-map.ts';
 import { importing, siblingUrl, startWorker } from '../start-worker.ts';
 import type { BootAssets } from './protocol.ts';
@@ -29,6 +29,7 @@ async function locateAssets(options: BrowserRegionOptions): Promise<BootAssets> 
     pyodideVersion: manifest.pyodideVersion,
     stdLib: new URL(manifest.stdlib, base).href,
     wheels: manifest.wheels.map((file) => new URL(file, base).href),
+    emulatorVersion: emulatorVersion(manifest),
     pythonRuntime: manifest.pythonRuntime.map(({ url }) => url),
   };
 }

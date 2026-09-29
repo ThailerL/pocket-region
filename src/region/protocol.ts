@@ -8,7 +8,14 @@ export type RegionCall = { method: 'dispatch'; request: RegionRequest } | { meth
 export type StoreCall = { method: 'load' } | { method: 'replace'; files: StateFiles } | { method: 'close' };
 
 // pythonRuntime is the wheel URLs a Python function's environment preinstalls
-export type BootAssets = { indexURL: string; pyodideVersion: string; stdLib: string; wheels: string[]; pythonRuntime: string[] };
+export type BootAssets = {
+  indexURL: string;
+  pyodideVersion: string;
+  stdLib: string;
+  wheels: string[];
+  emulatorVersion: string;
+  pythonRuntime: string[];
+};
 
 // Only what the page listens to is posted
 export type Listening = { output: boolean; lambdaOutput: boolean; lambdaEvents: boolean };

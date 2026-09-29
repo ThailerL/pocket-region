@@ -119,10 +119,10 @@ await region.stop();   // saves too, then shuts down
 ```
 
 The next region created with the same store starts from that state. The files are MiniStack's
-own per-service format. If a service can't read its file at boot, the file is renamed
-`<service>.json.refused` and the service starts empty, rather than being saved over. A Pocket
-Region release that updates MiniStack can also start a service empty, because MiniStack stamps a
-format version on each file.
+own per-service format, plus `saved-by.json`, which names the Pocket Region and MiniStack versions
+that saved them. A newer Pocket Region loads a region an older one saved. An older one refuses it:
+`createRegion` rejects, naming both versions, and leaves the store untouched, since an older
+MiniStack would drop what it can't read and save over it.
 
 ### `stop()`
 

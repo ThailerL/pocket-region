@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { loadPyodide } from 'pyodide';
 import {
   bootRegion,
+  emulatorVersion,
   lockedLoad,
   type Region,
   type RegionSettings,
@@ -137,6 +138,7 @@ export function createRegion(options: NodeRegionOptions = {}): Promise<Region> {
       packageCacheDir: assetsDir,
       stdLib: path.join(assetsDir, manifest.stdlib),
       wheels: manifest.wheels.map((file) => path.join(assetsDir, file)),
+      emulatorVersion: emulatorVersion(manifest),
     },
     options,
     (region) =>

@@ -1,11 +1,12 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { emulatorVersion, type VendorManifest } from './core.ts';
 import { createRegion, directoryStore, type StateStore } from './node.ts';
-import { jsonApi, s3 } from './testing/clients.ts';
+import { s3 } from './testing/clients.ts';
 
 const decoder = new TextDecoder();
 
@@ -90,32 +91,31 @@ describe('createRegion', () => {
     await rm(stateDir, { recursive: true, force: true });
   }, 60_000);
 
-  it('keeps a state file it cannot read instead of saving over it', async () => {
-    const stateDir = await mkdtemp(path.join(tmpdir(), 'pocket-region-refused-'));
-    // Stamped by a release this build does not understand, which it refuses to load
-    const file = path.join(stateDir, 'state', 'sqs.json');
-    await mkdir(path.dirname(file), { recursive: true });
-    await writeFile(
-      file,
-      JSON.stringify({ __ministack_format__: 99, payload: { queues: 'from-the-future' } }),
-    );
+  it('loads a region an older MiniStack saved and refuses one a newer MiniStack saved', async () => {
+    const stateDir = await mkdtemp(path.join(tmpdir(), 'pocket-region-saved-by-'));
+    const stamp = path.join(stateDir, 'saved-by.json');
+    const first = await createRegion({ store: directoryStore(stateDir) });
+    await s3('PUT', '/kept', undefined, first);
+    await first.stop();
+    const manifest: VendorManifest = JSON.parse(await readFile(new URL('../vendor/meta.json', import.meta.url), 'utf8'));
+    expect(JSON.parse(await readFile(stamp, 'utf8')).ministack).toBe(emulatorVersion(manifest));
 
-    const output: string[] = [];
-    const second = await createRegion({ store: directoryStore(stateDir), onOutput: ({ text }) => output.push(text) });
-    expect(output.join('\n')).toContain('sqs.json was not loaded');
-    const lookup = await jsonApi(
-      'sqs',
-      'AmazonSQS.GetQueueUrl',
-      { QueueName: 'from-the-future' },
-      second,
-    );
-    expect(lookup.status).toBe(400);
-    await second.save();
-    await second.stop();
+    await writeFile(stamp, JSON.stringify({ pocketRegion: '0.1.0', ministack: '1.0.0' }));
+    const older = await createRegion({ store: directoryStore(stateDir) });
+    expect((await s3('HEAD', '/kept', undefined, older)).status).toBe(200);
+    await older.stop();
 
-    const kept = await readFile(`${file}.refused`, 'utf8');
-    expect(JSON.parse(kept).__ministack_format__).toBe(99);
-    expect(kept).toContain('from-the-future');
+    await writeFile(stamp, JSON.stringify({ pocketRegion: '99.0.0', ministack: '99.0.0' }));
+    const before = await readdir(stateDir, { recursive: true });
+    await expect(createRegion({ store: directoryStore(stateDir) })).rejects.toThrow(
+      'saved by Pocket Region 99.0.0 (MiniStack 99.0.0)',
+    );
+    expect(await readdir(stateDir, { recursive: true })).toEqual(before);
+    expect(JSON.parse(await readFile(stamp, 'utf8')).ministack).toBe('99.0.0');
+    // The refusal released the store
+    const next = directoryStore(stateDir);
+    expect((await next.load()).size).toBeGreaterThan(0);
+    await next.close?.();
     await rm(stateDir, { recursive: true, force: true });
   }, 60_000);
 });

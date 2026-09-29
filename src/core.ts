@@ -1,5 +1,6 @@
 import type { loadPyodide, PyodideAPI } from 'pyodide';
 import { PYTHON_SOURCES } from './python.generated.ts';
+import { PACKAGE_VERSION } from './version.generated.ts';
 
 export type OutputStream = 'stdout' | 'stderr';
 export type RegionOutput = { text: string; stream: OutputStream };
@@ -40,6 +41,7 @@ export type RegionAssets = {
   packageCacheDir?: string;
   stdLib: string;
   wheels: string[];
+  emulatorVersion: string;
 };
 
 // Every saved file, keyed by its path under the state root, such as state/sqs.json
@@ -72,6 +74,23 @@ export function lockedLoad(acquire: () => Promise<() => void | Promise<void>>, r
       release = undefined;
     },
   };
+}
+
+// Written at every boot, so each save names the release that made it
+const SAVED_BY = 'saved-by.json';
+type SavedBy = { pocketRegion: string; ministack: string };
+
+// An older MiniStack drops what it can't read and saves over it, so only upgrades load
+function refuseNewerSave(files: StateFiles, running: SavedBy) {
+  const stamp = files.get(SAVED_BY);
+  if (stamp === undefined) return;
+  const saved: SavedBy = JSON.parse(new TextDecoder().decode(stamp));
+  if (saved.ministack.localeCompare(running.ministack, undefined, { numeric: true }) > 0) {
+    throw new Error(
+      `this region was saved by Pocket Region ${saved.pocketRegion} (MiniStack ${saved.ministack}), newer than ` +
+        `this Pocket Region ${running.pocketRegion} (MiniStack ${running.ministack}). Upgrade Pocket Region to load it`,
+    );
+  }
 }
 
 // Python file IO stays in MEMFS: under Vivari, writes through a node mount are corrupt
@@ -178,7 +197,16 @@ export type LambdaHostFactory = (region: RegionHostOptions) => LambdaExecutor;
 export type PythonWheel = { file: string; url: string; sha256: string };
 
 // What scripts/vendor.mjs writes beside the wheels
-export type VendorManifest = { wheels: string[]; stdlib: string; pyodideVersion: string; pythonRuntimeSpec: string; pythonRuntime: PythonWheel[] };
+export type VendorManifest = {
+  wheels: string[];
+  stdlib: string;
+  pyodideVersion: string;
+  emulatorSpec: string;
+  pythonRuntimeSpec: string;
+  pythonRuntime: PythonWheel[];
+};
+
+export const emulatorVersion = ({ emulatorSpec }: VendorManifest) => emulatorSpec.split('==')[1];
 
 // The settings a page posts to its region's worker, so plain data only
 export type RegionConfig = {
@@ -240,9 +268,12 @@ export async function bootRegion(
 ): Promise<Region> {
   requireJspi();
   const { store } = settings;
-  // Before Pyodide loads, so a store in use fails fast
-  const files = await store?.load();
+  // Before Pyodide loads, so a store in use or a newer save fails fast
+  const saved = (await store?.load()) ?? new Map();
   try {
+    const running: SavedBy = { pocketRegion: PACKAGE_VERSION, ministack: assets.emulatorVersion };
+    refuseNewerSave(saved, running);
+    const files: StateFiles = new Map([...saved, [SAVED_BY, new TextEncoder().encode(JSON.stringify(running))]]);
     return await startRegion(assets, settings, files, lambda);
   } catch (error) {
     await store?.close?.();
@@ -253,7 +284,7 @@ export async function bootRegion(
 async function startRegion(
   assets: RegionAssets,
   settings: RegionSettings,
-  files: StateFiles | undefined,
+  files: StateFiles,
   lambda?: LambdaHostFactory,
 ): Promise<Region> {
   const { store } = settings;
@@ -305,7 +336,7 @@ async function startRegion(
     }),
   );
   // Before the emulator imports, since each service reads its own state file then
-  if (files !== undefined) writeStateFiles(py, files);
+  writeStateFiles(py, files);
   // One shared namespace, in the generated order
   for (const source of PYTHON_SOURCES) {
     await py.runPythonAsync(source);

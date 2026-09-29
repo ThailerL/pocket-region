@@ -1,7 +1,6 @@
 # The emulator and the plumbing to call it. Python owns no socket under Pyodide, so the
 # ASGI app is driven directly: every "request" is an in-process function call.
 import asyncio
-import glob
 import os
 import tempfile
 from urllib.parse import unquote
@@ -28,30 +27,6 @@ os.environ.update(
     # Read once, as ministack.app imports
     AUTH="true" if ENFORCE_IAM else "false",
 )
-
-from ministack.core.persistence import load_state
-
-
-def _move_aside(path):
-    # Never overwrite an earlier quarantine: that is the loss this exists to prevent
-    kept = path + ".refused"
-    index = 2
-    while os.path.exists(kept):
-        kept = f"{path}.refused-{index}"
-        index += 1
-    os.rename(path, kept)
-    print(f"state file {os.path.basename(path)} was not loaded; kept as {os.path.basename(kept)}")
-
-
-# A refused file leaves that service empty and the next save writes the emptiness over it. Runs
-# before lifespan startup restores, and needs the PERSIST_STATE set above
-def _quarantine_refused_state():
-    for path in sorted(glob.glob(f"{STATE_DIR}/*.json")):
-        if load_state(os.path.basename(path)[: -len(".json")]) is None:
-            _move_aside(path)
-
-
-_quarantine_refused_state()
 
 from ministack.app import app, _build_persistence_save_dict
 from ministack.core.persistence import save_all
