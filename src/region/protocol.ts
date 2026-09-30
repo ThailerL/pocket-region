@@ -23,8 +23,8 @@ export type Listening = { output: boolean; lambdaOutput: boolean; lambdaEvents: 
 // The URL each bare specifier loads from, asked of the booting side through resolve
 export type ResolveAll = (specifiers: string[]) => Promise<Record<string, string>>;
 
-// Assets is what the booting side hands a host: located URLs from a page
-export type ToRegionWorker<Assets = BootAssets> =
+// Assets is what the booting side hands a host: located URLs from a page, options from Node
+export type ToRegionWorker<Assets> =
   | { type: 'boot'; assets: Assets; config: RegionConfig; hasStore: boolean; listening: Listening }
   | ({ type: 'call'; id: number } & RegionCall)
   | { type: 'stored'; id: number; files?: StateFiles; error?: WireError }

@@ -1,5 +1,3 @@
-import { spawn } from 'node:child_process';
-import { once } from 'node:events';
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -7,20 +5,62 @@ import { describe, expect, it } from 'vitest';
 import { emulatorVersion, type VendorManifest } from './core.ts';
 import { createRegion, directoryStore, type StateStore } from './node.ts';
 import { s3 } from './testing/clients.ts';
+import { regionPort } from './testing/region.ts';
+import { runNode } from './testing/support.ts';
 
 const decoder = new TextDecoder();
 
+// A module beside this one, as a child script imports it
+const imported = (file: string) => JSON.stringify(new URL(file, import.meta.url).href);
+
 describe('createRegion', () => {
   it('lets Node exit once stopped', async () => {
-    const module = JSON.stringify(new URL('./node.ts', import.meta.url).href);
-    const child = spawn(
-      process.execPath,
-      ['--input-type=module', '-e', `import { createRegion } from ${module}; await (await createRegion()).stop();`],
-      { stdio: 'ignore', signal: AbortSignal.timeout(20_000) },
-    );
-    const [code] = await once(child, 'exit');
-    expect(code).toBe(0);
+    const script = `import { createRegion } from ${imported('./node.ts')}; await (await createRegion()).stop();`;
+    expect(await runNode(script, 20_000)).toEqual({ code: 0, stderr: '' });
   }, 30_000);
+
+  it('lets Node exit with a region never stopped', async () => {
+    const script = `import { createRegion } from ${imported('./node.ts')};
+      await (await createRegion()).dispatch({ method: 'GET', path: '/', headers: {} });`;
+    expect(await runNode(script, 20_000)).toEqual({ code: 0, stderr: '' });
+  }, 30_000);
+
+  // An idle environment's child process once held Node until it was stopped 60 s later
+  it('lets Node exit after an invocation, with its environment still idle', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'pocket-region-idle-'));
+    const done = path.join(directory, 'done.txt');
+    const handler = `export const handler = async ({ file }) => {
+      (await import('node:fs')).writeFileSync(file, 'done');
+    };`;
+    const script = `
+      import { CreateFunctionCommand, InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
+      import { createRegion } from ${imported('./node.ts')};
+      import { clientConfig } from ${imported('./client-config.ts')};
+      import { zipOf } from ${imported('./testing/clients.ts')};
+      const lambda = new LambdaClient(clientConfig(await createRegion({ port: ${await regionPort()} })));
+      await lambda.send(new CreateFunctionCommand({
+        FunctionName: 'idle', Runtime: 'nodejs22.x', Handler: 'index.handler', Role: 'arn:aws:iam::000000000000:role/lambda',
+        Code: { ZipFile: zipOf('index.mjs', ${JSON.stringify(handler)}) },
+      }));
+      await lambda.send(new InvokeCommand({ FunctionName: 'idle', Payload: JSON.stringify({ file: ${JSON.stringify(done)} }) }));
+    `;
+    expect(await runNode(script, 30_000)).toEqual({ code: 0, stderr: '' });
+    expect(await readFile(done, 'utf8')).toBe('done');
+    await rm(directory, { recursive: true, force: true });
+  }, 40_000);
+
+  it('keeps the calling thread answering timers while the region works', async () => {
+    const region = await createRegion();
+    await s3('PUT', '/busy', undefined, region);
+    const body = new Uint8Array(32 * 1024 * 1024).fill(1);
+    let ticks = 0;
+    const timer = setInterval(() => ticks++, 1);
+    await s3('PUT', '/busy/large', body, region);
+    clearInterval(timer);
+    await region.stop();
+    // On the calling thread, Python held the timer for the whole put: 2 or 3 ticks
+    expect(ticks).toBeGreaterThan(10);
+  }, 60_000);
 
   it('leaves saved state on disk until the next save', async () => {
     const stateDir = await mkdtemp(path.join(tmpdir(), 'pocket-region-reset-'));

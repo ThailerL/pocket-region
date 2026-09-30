@@ -1,9 +1,9 @@
 import type { BrowserRegionOptions } from '../browser.ts';
 import { emulatorVersion, requireJspi, type Region, type VendorManifest } from '../core.ts';
 import { defaultAssetsBaseUrl, pyodideIndexUrl, regionResolve } from '../import-map.ts';
-import { importing, siblingUrl, startWorker } from '../start-worker.ts';
+import { importing, onFailure, siblingUrl, startWorker } from '../start-worker.ts';
 import type { BootAssets } from './protocol.ts';
-import { regionOver, type RegionBoot } from './proxy.ts';
+import { linkRegion, regionOver, type RegionBoot } from './proxy.ts';
 
 export type RegionBooting = { region: Promise<Region> } & RegionBoot;
 
@@ -13,7 +13,9 @@ export function bootRegion(options: BrowserRegionOptions = {}): RegionBooting {
   // Loads while meta.json is fetched
   const worker = startWorker(importing(siblingUrl('region/worker')), 'pocket-region');
   const boot: RegionBoot = { assets: locateAssets(options), resolve: regionResolve(options) };
-  return { region: regionOver(worker, options, boot), ...boot };
+  const watch = (fail: (error: Error) => void) => onFailure(worker, "the region's worker", fail);
+  const region = regionOver(worker, options, { ...boot, watch }).then((booted) => linkRegion(booted, worker, boot));
+  return { region, ...boot };
 }
 
 async function locateAssets(options: BrowserRegionOptions): Promise<BootAssets> {

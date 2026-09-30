@@ -115,6 +115,10 @@ A failed `Event` invocation is retried twice by default, or up to the function's
 When retries run out, the event goes to the `OnFailure` destination or the `DeadLetterConfig`
 target. SQS targets are tested, SNS targets aren't.
 
+In Node, an asynchronous invocation runs only while something keeps Node running. A script that
+ends right after an `Event` invocation may exit before the handler runs. See
+[the region](/docs/region/).
+
 An EventBridge rule that targets a function runs it once, as MiniStack does, with no retries.
 
 ## Event source mappings

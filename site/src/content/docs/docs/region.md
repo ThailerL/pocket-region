@@ -14,9 +14,15 @@ import { createRegion } from 'pocket-region/browser';  // a page
 createRegion(options?: BrowserRegionOptions): Promise<Region>
 ```
 
-In Node, a region boots in about half a second.
+In Node, a region boots in a little over half a second.
 In a browser, a first visit downloads about 10.5 MB, and after that a region boots in about half a
 second.
+
+In Node, the region runs in a worker thread, so a slow request never holds your timers or your
+test runner's timeouts. It keeps Node running only while it boots or answers a call: a region you
+never stop still lets Node exit, and so does a script that ends right after an asynchronous
+invocation, before the handler has run. The thread loads `dist/region/node-worker.js` from beside
+`dist/index.js`, so a bundle of the package has to keep that file next to it.
 
 In a page, the region runs in a Web Worker, so nothing the emulator does stalls the page, and the
 `Region` you get back posts each call to it. The worker starts from a `blob:` URL that imports

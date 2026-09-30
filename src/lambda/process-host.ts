@@ -30,15 +30,6 @@ function processSandbox({ taskRoot, runtimeScript }: Package, pythonRuntime?: ()
     let initError: LambdaError | undefined;
     let killed = false;
 
-    // Starting or busy environments keep Node running, so every invocation is answered; idle
-    // ones must not
-    const hold = (held: boolean) => {
-      for (const handle of [server, child]) {
-        if (held) handle?.ref();
-        else handle?.unref();
-      }
-    };
-
     const exited = (reason: string) => {
       server.close();
       events.exited(reason, initError);
@@ -65,7 +56,6 @@ function processSandbox({ taskRoot, runtimeScript }: Package, pythonRuntime?: ()
         req.on('close', () => {
           if (waiting === res) waiting = undefined;
         });
-        hold(false);
         events.ready();
         return;
       }
@@ -124,7 +114,6 @@ function processSandbox({ taskRoot, runtimeScript }: Package, pythonRuntime?: ()
       invoke({ requestId, config, event }: Invocation, deadline: number) {
         const res = waiting!;
         waiting = undefined;
-        hold(true);
         res.writeHead(200, {
           'content-type': 'application/json',
           'lambda-runtime-aws-request-id': requestId,
@@ -135,8 +124,6 @@ function processSandbox({ taskRoot, runtimeScript }: Package, pythonRuntime?: ()
       },
       kill() {
         killed = true;
-        // An idle child is unref'd, and Node would exit before its exit is seen
-        hold(true);
         child?.kill();
       },
     };
@@ -194,9 +181,7 @@ export function createProcessHost({ port, dispatch, lambda, python }: RegionHost
 
   async function serveRegion() {
     try {
-      const server = await serve({ dispatch, port });
-      server.unref();
-      return server;
+      return await serve({ dispatch, port });
     } catch (error) {
       // A port already taken is the caller's own serve(region), which answers just as well
       if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw error;

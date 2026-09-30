@@ -9,10 +9,11 @@ import {
   SQSClient,
 } from '@aws-sdk/client-sqs';
 import { expect, it } from 'vitest';
-import { collectGarbage } from './core.ts';
+import { bootRegion, collectGarbage } from './core.ts';
+import { nodeHost } from './region/node-host.ts';
 import { requestHandler } from './request-handler.ts';
 import { clientConfig, createQueue, zipOf } from './testing/clients.ts';
-import { createTestRegion, regionPort } from './testing/region.ts';
+import { regionPort } from './testing/region.ts';
 
 const ROUNDS = 200;
 
@@ -23,7 +24,9 @@ const HANDLER = `export const handler = async (event) => {
 
 // Automatic collection is off, so whatever a request leaves in cycles stays until collectGarbage
 it('leaves little for the garbage collector across S3, SQS, DynamoDB, and Lambda', async () => {
-  const region = await createTestRegion({ port: await regionPort() });
+  // On this thread, since collectGarbage reaches into the region's own Pyodide
+  const { assets, lambda: host } = nodeHost({}, async () => ({}));
+  const region = await bootRegion(assets, { port: await regionPort() }, host);
   try {
     const config = clientConfig({ requestHandler: requestHandler(region) });
     const s3 = new S3Client({ ...config, forcePathStyle: true });

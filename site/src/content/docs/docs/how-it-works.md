@@ -4,8 +4,9 @@ description: MiniStack under Pyodide, dispatch in place of a socket, and Lambda 
 ---
 
 [MiniStack](https://ministack.org/) is a Python AWS emulator. Pocket Region runs it under
-[Pyodide](https://github.com/pyodide/pyodide), CPython compiled to WebAssembly, in the same
-JavaScript process as your code: Node's main thread, or a page's.
+[Pyodide](https://github.com/pyodide/pyodide), CPython compiled to WebAssembly, in a worker
+beside your code: a worker thread in Node, a Web Worker in a page. Each call crosses to it as a
+message, so the emulator's work never holds your own event loop.
 
 ## No socket
 

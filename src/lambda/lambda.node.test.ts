@@ -1,5 +1,3 @@
-import { spawn } from 'node:child_process';
-import { once } from 'node:events';
 import { CreateFunctionCommand, InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import { describe, expect, it } from 'vitest';
 import type { LambdaEvent } from '../core.ts';
@@ -7,7 +5,7 @@ import { createRegion } from '../node.ts';
 import { requestHandler } from '../request-handler.ts';
 import { serve } from '../server.ts';
 import { authorization, clientConfig, zipOf } from '../testing/clients.ts';
-import { freePort } from '../testing/support.ts';
+import { freePort, runNode } from '../testing/support.ts';
 
 describe('Lambda in Node', () => {
   // The host serves the region itself, but a caller may already have
@@ -68,15 +66,7 @@ describe('Lambda in Node', () => {
       if (!invoked.includes(${JSON.stringify(expected)})) throw new Error('unexpected ' + invoked);
       await region.stop();
     `;
-    const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
-      stdio: ['ignore', 'ignore', 'pipe'],
-      signal: AbortSignal.timeout(30_000),
-    });
-    let stderr = '';
-    child.stderr.on('data', (chunk) => (stderr += chunk));
-    const [exitCode] = await once(child, 'exit');
-    expect(stderr).toBe('');
-    expect(exitCode).toBe(0);
+    expect(await runNode(script, 30_000)).toEqual({ code: 0, stderr: '' });
   }
 
   it('lets Node exit once a region that ran a function is stopped', async () => {

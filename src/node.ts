@@ -1,28 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
-import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { loadPyodide } from 'pyodide';
-import {
-  bootRegion,
-  emulatorVersion,
-  lockedLoad,
-  type Region,
-  type RegionSettings,
-  type StateStore,
-  type VendorManifest,
-} from './core.ts';
-import { createProcessHost } from './lambda/process-host.ts';
+import { MessageChannel, Worker } from 'node:worker_threads';
+import { lockedLoad, requireJspi, type Region, type RegionSettings, type StateStore } from './core.ts';
+import type { NodeAssets } from './region/node-host.ts';
+import type { FromRegionWorker } from './region/protocol.ts';
+import { regionOver, type RegionPort } from './region/proxy.ts';
+import { siblingUrl } from './start-worker.ts';
 
 export * from './public.ts';
 
-export type NodeRegionOptions = RegionSettings & {
-  // Only for hosts where Pyodide cannot locate itself from import.meta.url
-  indexURL?: string;
-  assetsDir?: string;
-};
+export type NodeRegionOptions = RegionSettings & NodeAssets;
 
 const LOCK_FILE = '.lock';
 
@@ -121,30 +110,40 @@ export function directoryStore(dir: string): StateStore {
   };
 }
 
-// The pyodide package, which a Python function's environment boots its own interpreter from
-const pyodideDirectory = () => path.dirname(createRequire(import.meta.url).resolve('pyodide/package.json'));
+// A worker inherits Node's flags, and Node refuses --input-type for one started from a file
+const workerFlags = () => process.execArgv.filter((flag, index, flags) => !flag.startsWith('--input-type') && flags[index - 1] !== '--input-type');
 
-// Where the wheels a Python environment preinstalls are kept once fetched, across processes
-const cacheDirectory = () => path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), 'pocket-region');
-
-export function createRegion(options: NodeRegionOptions = {}): Promise<Region> {
-  const assetsDir = options.assetsDir ?? fileURLToPath(new URL('../vendor', import.meta.url));
-  const manifest: VendorManifest = JSON.parse(fs.readFileSync(path.join(assetsDir, 'meta.json'), 'utf8'));
-
-  return bootRegion(
-    {
-      loadPyodide,
-      indexURL: options.indexURL,
-      packageCacheDir: assetsDir,
-      stdLib: path.join(assetsDir, manifest.stdlib),
-      wheels: manifest.wheels.map((file) => path.join(assetsDir, file)),
-      emulatorVersion: emulatorVersion(manifest),
+// The region runs in a worker thread, so Python never holds this thread's event loop
+export async function createRegion({ indexURL, assetsDir, ...settings }: NodeRegionOptions = {}): Promise<Region> {
+  requireJspi();
+  const { port1, port2 } = new MessageChannel();
+  const worker = new Worker(new URL(siblingUrl('region/node-worker')), {
+    name: 'pocket-region',
+    execArgv: workerFlags(),
+    workerData: { port: port2 },
+    transferList: [port2],
+  });
+  let terminated = false;
+  const port: RegionPort<NodeAssets> = {
+    // Only a page's runner connects, the one message this side transfers anything with
+    postMessage: (message) => port1.postMessage(message),
+    set onmessage(handler: ((event: MessageEvent<FromRegionWorker>) => void) | null) {
+      // Node delivers MessageEvents, which its typings call Events
+      port1.addEventListener('message', (event) => handler?.(event as MessageEvent<FromRegionWorker>));
+      // Liveness is the worker's, held by keepAlive
+      port1.unref();
     },
-    options,
-    (region) =>
-      createProcessHost({
-        ...region,
-        python: { indexURL: options.indexURL ?? pyodideDirectory(), wheels: manifest.pythonRuntime, cacheDir: cacheDirectory() },
-      }),
-  );
+    terminate() {
+      terminated = true;
+      void worker.terminate();
+    },
+  };
+  return regionOver(port, settings, {
+    assets: Promise.resolve({ indexURL, assetsDir }),
+    watch(fail) {
+      worker.on('error', (error) => fail(new Error(`the region's worker failed: ${error.message}`, { cause: error })));
+      worker.on('exit', (code) => terminated || fail(new Error(`the region's worker exited with code ${code}`)));
+    },
+    keepAlive: (alive) => (alive ? worker.ref() : worker.unref()),
+  });
 }

@@ -24,12 +24,12 @@ export const allow = (Action: string, Resource = '*') =>
 export const authorization = (service: string) =>
   `AWS4-HMAC-SHA256 Credential=test/20260101/us-east-1/${service}/aws4_request, SignedHeaders=host, Signature=test`;
 
-export function s3(method: string, key: string, body: string | undefined, target: Region) {
+export function s3(method: string, key: string, body: string | Uint8Array | undefined, target: Region) {
   return target.dispatch({
     method,
     path: key,
     headers: { host: 'localhost:4566', authorization: authorization('s3') },
-    body: body === undefined ? undefined : encoder.encode(body),
+    body: typeof body === 'string' ? encoder.encode(body) : body,
   });
 }
 
