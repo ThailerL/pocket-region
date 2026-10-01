@@ -1,7 +1,7 @@
 {
   "name": "pocket-region",
   "version": "0.10.0",
-  "description": "AWS services like S3, DynamoDB, and Lambda inside Node or a browser tab, reached with the ordinary AWS SDK",
+  "description": "AWS services like S3, DynamoDB, and Lambda inside a browser tab or Node, reached with the ordinary AWS SDK",
   "keywords": [
     "aws",
     "localstack",
@@ -11,7 +11,10 @@
     "lambda",
     "emulator",
     "testing",
+    "mock",
     "browser",
+    "playground",
+    "webassembly",
     "pyodide",
     "aws-sdk"
   ],

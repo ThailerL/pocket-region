@@ -2,7 +2,7 @@
 import { Code } from 'astro:components';
 import Base from '../layouts/Base.astro';
 
-const example = `import { clientConfig, createRegion } from 'pocket-region/node';
+const example = `import { clientConfig, createRegion } from 'pocket-region/browser';
 
 const region = await createRegion();
 const s3 = new S3Client(clientConfig(region));
@@ -11,7 +11,7 @@ await s3.send(new PutObjectCommand({ Bucket: 'photos', Key: 'cat.txt', Body: 'me
 const narrowExample = `import {
   clientConfig,
   createRegion,
-} from 'pocket-region/node';
+} from 'pocket-region/browser';
 
 const region = await createRegion();
 const s3 = new S3Client(clientConfig(region));
@@ -25,24 +25,24 @@ const codeThemes = { light: 'github-light', dark: 'github-dark' } as const;
 
 const features = [
   {
-    title: 'No server, no container',
-    body: 'Requests reach the emulator in your process as function calls, with no container to start. In Node a region is ready in about half a second.',
-  },
-  {
     title: 'In a browser tab',
-    body: 'The same region runs in a page, with nothing behind it. A first visit downloads about 10.5 MB.',
+    body: 'A whole region runs in a page, in a Web Worker, with no backend behind it. The page loads it from jsDelivr, and a first visit downloads about 10.5 MB.',
   },
   {
-    title: 'Lambda',
-    body: 'Create functions from a zip and invoke them. Handlers run in child processes or Web Workers, with their timeouts and reserved concurrency, and their own SDK calls reach the region.',
-  },
-  {
-    title: 'A clean region per test',
-    body: 'Boot one region per test file and reset it to empty in about a millisecond, so every test starts clean.',
+    title: 'Run buttons for your docs',
+    body: 'Put a Run button on the AWS examples in your own docs. <a href="/docs/runner/"><code>createRunner</code></a> runs code written for real AWS, JavaScript or Python, against a region in the reader’s tab.',
   },
   {
     title: 'The <code>aws</code> CLI in your page',
     body: 'Run <code>aws</code> commands against a region and render the output in your page. Commands copied from AWS’s documentation run unchanged.',
+  },
+  {
+    title: 'In your Node tests',
+    body: 'The region lives in your test process and keeps real state, with no container to start. It boots in about half a second and resets to empty in about a millisecond, so every test starts clean.',
+  },
+  {
+    title: 'Lambda',
+    body: 'Create functions from a zip and invoke them. Handlers run in child processes or Web Workers, with their timeouts and reserved concurrency, and their own SDK calls reach the region.',
   },
   {
     title: 'Built on MiniStack',
@@ -52,21 +52,20 @@ const features = [
 ---
 
 <Base
-  title="Pocket Region: AWS services in Node or the browser"
-  description="AWS services like S3, DynamoDB, and Lambda inside Node or a browser tab, reached with the ordinary AWS SDK."
+  title="Pocket Region: AWS services in the browser or Node"
+  description="AWS services like S3, DynamoDB, and Lambda inside a browser tab or Node, reached with the ordinary AWS SDK."
 >
   <main>
     <header class="hero">
       <h1>Pocket Region</h1>
       <p class="tagline">
-        AWS services like S3, DynamoDB, and Lambda inside your Node process or a browser tab, called with the
+        AWS services like S3, DynamoDB, and Lambda inside a browser tab or your Node process, called with the
         ordinary AWS SDK. No container and no server.
       </p>
       <div class="actions">
         <a class="button primary" href="/demo">Try it in this tab</a>
         <a class="button" href="/docs/">Read the docs</a>
       </div>
-      <code class="install">npm install pocket-region</code>
     </header>
 
     <section>
@@ -128,14 +127,6 @@ const features = [
     background: var(--accent-fill);
     color: var(--on-accent-fill);
     border-color: var(--accent-fill);
-  }
-
-  .install {
-    display: inline-block;
-    margin-top: 0.75rem;
-    padding: 0.5rem 0.75rem;
-    border: 1px dashed var(--line);
-    border-radius: 0.4rem;
   }
 
   section :global(.astro-code) {

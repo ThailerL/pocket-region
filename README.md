@@ -1,9 +1,13 @@
 # Pocket Region
 
-Pocket Region runs AWS services like S3, DynamoDB, and Lambda inside your Node process or a
-browser tab, and you call them with the ordinary AWS SDK. Your SDK calls reach the emulator as
+Pocket Region runs AWS services like S3, DynamoDB, and Lambda inside a browser tab or your Node
+process, and you call them with the ordinary AWS SDK. Your SDK calls reach the emulator as
 function calls, without a socket, so there's no container to start and no server to reach.
-Lambda handlers, Node or Python, run in child processes or Web Workers.
+Lambda handlers, Node or Python, run in Web Workers or child processes.
+
+Try the [demo](https://pocket-region.dev/demo) in your tab, or read the docs at
+[pocket-region.dev/docs](https://pocket-region.dev/docs/), where you can edit and run the
+examples.
 
 ```js
 import { clientConfig, createRegion } from 'pocket-region/node';
@@ -23,16 +27,17 @@ It needs WebAssembly JSPI: Node 24.20 or later, or a browser that supports it.
 The AWS APIs come from [MiniStack](https://ministack.org/), a Python AWS emulator that runs
 here under [Pyodide](https://github.com/pyodide/pyodide).
 
-In Node, a region is ready in about half a second. Resetting a region to empty takes about a millisecond for a typical test, so
-every test can start clean without booting a new one.
-
-Read the docs at [pocket-region.dev/docs](https://pocket-region.dev/docs/), where you can edit
-and run the examples in your browser tab, or try the [demo](https://pocket-region.dev/demo).
+In Node, the region lives in your test process and keeps real state, so a test can put an object
+and read it back. It's ready in about half a second, and resetting it to empty takes about a
+millisecond for a typical test, so every test can start clean without booting a new one.
 
 ## Features
 
-- **[Node and the browser](https://pocket-region.dev/docs/):** the same region runs in a Node
-  process or a page, which loads the emulator from jsDelivr with no files to copy.
+- **[The browser and Node](https://pocket-region.dev/docs/):** the same region runs in a page,
+  which loads the emulator from jsDelivr with no files to copy, or in a Node process.
+- **[Examples in your docs](https://pocket-region.dev/docs/runner/):** add a Run button to
+  code examples written for real AWS. `createRunner` runs them in the reader's tab without any
+  Pocket Region setup in the example.
 - **[Services](https://pocket-region.dev/docs/services/):** CloudWatch Logs, DynamoDB,
   EventBridge, Kinesis, KMS, S3, Secrets Manager, SNS, SQS, and SSM Parameter Store behave as
   they do in MiniStack, with a runnable example for each. Others, such as RDS and ECS, answer as
@@ -44,10 +49,7 @@ and run the examples in your browser tab, or try the [demo](https://pocket-regio
 - **[Clients](https://pocket-region.dev/docs/clients/):** `requestHandler` for AWS SDK clients,
   and `serve` for anything that needs an endpoint.
 - **[The `aws` CLI](https://pocket-region.dev/docs/cli/):** `awsCli` runs `aws` commands and
-  returns their output, for tests or an AWS console in your own page.
-- **[Examples in your docs](https://pocket-region.dev/docs/runner/):** add a Run button to
-  code examples written for real AWS. `createRunner` runs them in the reader's tab without any
-  Pocket Region setup in the example.
+  returns their output, for an AWS console in your own page or for tests.
 
 ## In a real app
 
