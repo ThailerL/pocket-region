@@ -189,16 +189,22 @@ export function createProcessHost({ port, dispatch, lambda, python }: RegionHost
     }
   }
 
+  // A workspace that could not be made is tried again by the next pack
   const workspace = () =>
-    (root ??= mkdtemp(path.join(tmpdir(), 'pocket-region-lambda-')).then(async (directory) => {
-      const nodeModules = await nearestNodeModules();
-      await Promise.all([
-        writeFile(path.join(directory, 'runtime.mjs'), PROCESS_RUNTIME_SOURCE),
-        // A handler's bare imports reach the project's packages, as Lambda's reach its SDK
-        nodeModules && symlink(nodeModules, path.join(directory, 'node_modules'), 'junction'),
-      ]);
-      return directory;
-    }));
+    (root ??= mkdtemp(path.join(tmpdir(), 'pocket-region-lambda-'))
+      .then(async (directory) => {
+        const nodeModules = await nearestNodeModules();
+        await Promise.all([
+          writeFile(path.join(directory, 'runtime.mjs'), PROCESS_RUNTIME_SOURCE),
+          // A handler's bare imports reach the project's packages, as Lambda's reach its SDK
+          nodeModules && symlink(nodeModules, path.join(directory, 'node_modules'), 'junction'),
+        ]);
+        return directory;
+      })
+      .catch((error) => {
+        root = undefined;
+        throw error;
+      }));
 
   // Once per host, on the first Python environment; a failed fetch is tried again by the next one
   const pythonRuntime = () =>

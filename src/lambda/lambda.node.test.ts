@@ -1,5 +1,8 @@
 import { CreateFunctionCommand, InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
-import { describe, expect, it } from 'vitest';
+import { mkdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
 import type { LambdaEvent } from '../core.ts';
 import { createRegion } from '../node.ts';
 import { requestHandler } from '../request-handler.ts';
@@ -51,6 +54,42 @@ describe('Lambda in Node', () => {
     const spawned = observed.find((event) => event.kind === 'environment' && event.phase === 'spawned');
     expect(spawned).toEqual({ kind: 'environment', functionName: 'whoami', environment: started?.environment, phase: 'spawned', pid });
     await region.stop();
+  }, 30_000);
+
+  // The region's thread copies the environment as it starts
+  async function failedWorkspace() {
+    const missing = path.join(tmpdir(), `pocket-region-missing-${process.pid}`);
+    vi.stubEnv('TMPDIR', missing);
+    const region = await createRegion({ port: await freePort() }).finally(() => vi.unstubAllEnvs());
+    const lambda = new LambdaClient(clientConfig({ requestHandler: requestHandler(region) }));
+    await lambda.send(
+      new CreateFunctionCommand({
+        FunctionName: 'one',
+        Runtime: 'nodejs22.x',
+        Handler: 'index.handler',
+        Role: 'arn:aws:iam::000000000000:role/lambda',
+        Code: { ZipFile: zipOf('index.mjs', 'export const handler = async () => 1;') },
+      }),
+    );
+    const invoke = async () => new TextDecoder().decode((await lambda.send(new InvokeCommand({ FunctionName: 'one' }))).Payload);
+    expect(await invoke()).toContain("Could not unpack the function's code");
+    return { region, invoke, missing };
+  }
+
+  it('stops after its workspace could not be made', async () => {
+    const { region } = await failedWorkspace();
+    await region.stop();
+  }, 30_000);
+
+  it('makes its workspace on the next pack after it could not be made', async () => {
+    const { region, invoke, missing } = await failedWorkspace();
+    try {
+      await mkdir(missing);
+      expect(await invoke()).toBe('1');
+      await region.stop();
+    } finally {
+      await rm(missing, { recursive: true, force: true });
+    }
   }, 30_000);
 
   // In a process of its own, where nothing but the region can keep Node running
