@@ -114,6 +114,7 @@ type RegionRequest = {
   path: string;                       // including the query string
   headers: Record<string, string>;
   body?: Uint8Array;
+  remote?: { address: string; port: number };
 };
 
 type RegionResponse = {
@@ -158,3 +159,7 @@ const guarded = {
 
 const server = await serve(guarded);
 ```
+
+Under `serve`, a request also carries `remote`, the address and port its caller connected from,
+so a wrapper can tell one caller from another. Requests from `requestHandler` and `awsCli` have
+no connection and leave it out.

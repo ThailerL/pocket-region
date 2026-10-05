@@ -10,6 +10,8 @@ export type RegionRequest = {
   path: string;
   headers: Record<string, string>;
   body?: Uint8Array;
+  // The far end of the socket it arrived on, when it arrived on one
+  remote?: { address: string; port: number };
 };
 
 export type RegionResponse = {

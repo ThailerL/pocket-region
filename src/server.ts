@@ -34,6 +34,8 @@ export function serve(
   const { host = DEFAULT_HOST, maxBodyBytes = DEFAULT_MAX_BODY_BYTES } = options;
 
   const server = http.createServer(async (request, response) => {
+    // Read before the body: a socket that has since closed no longer says who it was
+    const { remoteAddress: address, remotePort: port } = request.socket;
     const declared = Number(request.headers['content-length']);
     const tooLarge = (size: number) => {
       fail(response, 413, `request body is larger than ${maxBodyBytes} bytes`);
@@ -62,6 +64,7 @@ export function serve(
         path: request.url ?? '/',
         headers,
         body: Buffer.concat(chunks),
+        remote: address && port ? { address, port } : undefined,
       });
       response.writeHead(answer.status, answer.headers);
       response.end(answer.body);

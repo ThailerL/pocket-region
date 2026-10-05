@@ -1,3 +1,4 @@
+import http from 'node:http';
 import {
   CreateBucketCommand,
   GetObjectCommand,
@@ -69,6 +70,24 @@ describe('serve', () => {
     });
     expect(response.status).toBe(413);
     await small.close();
+  });
+
+  it('tells the dispatcher which socket a request arrived on', async () => {
+    const remotes: unknown[] = [];
+    const recording = await serve(
+      {
+        dispatch: async ({ remote }) => {
+          remotes.push(remote);
+          return { status: 204, headers: {}, body: new Uint8Array() };
+        },
+      },
+      { port: 0 },
+    );
+    const port = await new Promise((resolve) => {
+      http.get(recording.url, (response) => resolve(response.socket.localPort));
+    });
+    await recording.close();
+    expect(remotes).toEqual([{ address: '127.0.0.1', port }]);
   });
 
   it('answers on the port the region mints its queue URLs with', () => {
