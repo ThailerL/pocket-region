@@ -3,7 +3,8 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { importMap } from '../site/src/import-map.mjs';
 import type { Region } from './core.ts';
 import { createRegion } from './node.ts';
-import { AsyncFunction, IMPORT, rewriteImports } from './runner/imports.ts';
+import { rewriteImports } from './runner/imports.ts';
+import { importSnippet, moduleOf } from './runner/stack.ts';
 import { runnablesOf } from './testing/docs.ts';
 import { withRegion } from './with-region.ts';
 
@@ -40,7 +41,8 @@ async function run(code: string) {
     const module = (await loadModule()) as object;
     return region ? withRegion(module, region) : module;
   };
-  await new AsyncFunction(IMPORT, 'console', body)(load, console);
+  const snippet = await importSnippet(`data:text/javascript,${encodeURIComponent(moduleOf(body))}`);
+  await snippet(load, console);
   return lines;
 }
 

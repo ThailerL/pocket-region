@@ -1,8 +1,6 @@
 // The parameter a rewritten snippet imports through
 export const IMPORT = '__pocketRegionImport';
 
-export const AsyncFunction = (async () => {}).constructor as new (...args: string[]) => (...args: unknown[]) => Promise<void>;
-
 const STATIC =
   /^[ \t]*import\s+(?:([\w$]+)\s*,?\s*)?(?:\*\s*as\s+([\w$]+)|\{([^}]*)\})?\s*(?:from\s*)?(['"])([^'"]+)\4[ \t]*;?/gm;
 const DYNAMIC = /\bimport\s*\(\s*(['"])([^'"]+)\1\s*\)/g;

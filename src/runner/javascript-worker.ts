@@ -4,9 +4,10 @@ import { promiseCache } from '../promise-cache.ts';
 import { pendingCalls } from '../region/protocol.ts';
 import { withRegion } from '../with-region.ts';
 import { createConsole, format } from './console.ts';
-import { AsyncFunction, IMPORT, rewriteImports } from './imports.ts';
+import { rewriteImports } from './imports.ts';
 import { post, serveRuns, type RunMessage } from './serve.ts';
-import { lineIn, snippetLine } from './stack.ts';
+import type { JavaScriptOutput } from './protocol.ts';
+import { importSnippet, lineIn, moduleOf } from './stack.ts';
 import { stripTypes } from './strip.ts';
 
 const resolutions = pendingCalls<string>();
@@ -34,8 +35,8 @@ async function polyfillDom() {
 }
 
 // Where in the snippet it was thrown, when its stack still says
-function located(error: unknown) {
-  if (typeof error === 'object' && error !== null) Object.assign(error, { line: lineIn((error as Error).stack) });
+function located(error: unknown, url: string) {
+  if (typeof error === 'object' && error !== null) Object.assign(error, { line: lineIn((error as Error).stack, url) });
   return error;
 }
 
@@ -48,24 +49,24 @@ function copyable(value: unknown) {
   }
 }
 
-const console = createConsole((made) => {
-  const output = { ...made, line: snippetLine() };
+function send(made: JavaScriptOutput, line?: number) {
+  const output = { ...made, line };
   try {
     post({ type: 'output', output });
   } catch {
     post({ type: 'output', output: { ...output, values: output.values.map(copyable) } });
   }
-});
+}
 
 // A library that drops a rejection can leave the run hanging, so the reader at least sees why
-self.addEventListener('unhandledrejection', (event) => console.error('Uncaught (in promise)', event.reason));
+self.addEventListener('unhandledrejection', (event) => createConsole(send).error('Uncaught (in promise)', event.reason));
 
 const isPocketRegion = (specifier: string) => specifier.split('/')[0] === 'pocket-region';
 
 async function run({ code, fresh }: RunMessage, attached: Promise<Region>) {
   if (fresh) clearGlobals();
   const stripped = stripTypes(code);
-  if (/^[ \t]*export\s/m.test(stripped)) throw new SyntaxError('a snippet runs as a script body, so it cannot export');
+  if (/^[ \t]*export\s/m.test(stripped)) throw new SyntaxError('a snippet runs as a function body, so it cannot export');
   const { code: body, specifiers } = rewriteImports(stripped);
   const refused = specifiers.find(isPocketRegion);
   if (refused) throw new Error(`a snippet can't import ${refused}: it runs against the runner's region`);
@@ -75,10 +76,15 @@ async function run({ code, fresh }: RunMessage, attached: Promise<Region>) {
   const [, region] = await Promise.all([polyfillDom(), attached]);
 
   const importer = async (specifier: string) => withRegion(await loading.get(specifier)!, region);
+  const url = URL.createObjectURL(new Blob([moduleOf(body)], { type: 'text/javascript' }));
+  const console = createConsole((made) => send(made, lineIn(new Error().stack, url)));
   try {
-    await new AsyncFunction(IMPORT, 'console', body)(importer, console);
+    const snippet = await importSnippet(url);
+    await snippet(importer, console);
   } catch (error) {
-    throw located(error);
+    throw located(error, url);
+  } finally {
+    URL.revokeObjectURL(url);
   }
 }
 

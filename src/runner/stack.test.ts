@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { AsyncFunction } from './imports.ts';
-import { snippetLine } from './stack.ts';
+import { importSnippet, lineIn, moduleOf } from './stack.ts';
 
-describe('snippetLine', () => {
+describe('lineIn', () => {
   it('names the line of the snippet a call came from, through a library, and none from outside one', async () => {
+    // Node imports no Blob URL, which is what the runner loads a snippet from
+    const url = `data:text/javascript,${encodeURIComponent(moduleOf('console.log();\n\nfor (const i of [1]) {\n  console.relay();\n}\nawait Promise.resolve();\nconsole.log();'))}`;
     const lines: (number | undefined)[] = [];
-    const console = { log: () => lines.push(snippetLine()) };
-    const library = { warn: (target: typeof console) => target.log() };
-    await new AsyncFunction('__import', 'console', 'lib', 'console.log();\n\nfor (const i of [1]) {\n  lib.warn(console);\n}\nawait Promise.resolve();\nconsole.log();')(undefined, console, library);
+    const log = () => lines.push(lineIn(new Error().stack, url));
+    const snippet = await importSnippet(url);
+    await snippet(async () => ({}), { log, relay: () => log() });
     expect(lines).toEqual([1, 4, 7]);
-    expect(snippetLine()).toBeUndefined();
+    expect(lineIn(new Error().stack, url)).toBeUndefined();
   });
 });

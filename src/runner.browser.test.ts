@@ -158,6 +158,11 @@ if (attempt === 1) throw new Error('no table');`;
     expect(result).toMatchObject({ ok: false, error: expect.objectContaining({ name: 'RangeError', message: 'broken', line: 2 }) });
   });
 
+  it('runs a snippet as strict code, as a module is', async () => {
+    const { result } = await run('undeclared = 1;');
+    expect(result).toMatchObject({ ok: false, error: expect.objectContaining({ name: 'ReferenceError', line: 1 }) });
+  });
+
   it('clears what a snippet left on the global object before a fresh run, and keeps it while the region keeps its state', async () => {
     await run('globalThis.leak = 1;');
     expect((await run('console.log(typeof leak);')).text).toEqual(['undefined']);

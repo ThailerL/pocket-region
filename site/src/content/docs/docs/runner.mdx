@@ -200,8 +200,9 @@ code without one where it's false.
 A snippet can be TypeScript. The runner removes the types before running it, without type
 checking, and leaves plain JavaScript as it is.
 
-A JavaScript snippet runs as the body of an async function, so top-level `await` works. It can
-import with `import … from '…'` at the start of a line and `import('…')` with a literal
-specifier, but it can't `export`. A Python snippet runs as a module, with top-level `await`
-allowed, in a fresh namespace each run. Either runs in a Web Worker, so it can't reach the page
-or its DOM, and a snippet that loops forever freezes nothing but itself.
+A JavaScript snippet runs as the body of an async function in a module of its own, so top-level
+`await` works and the code is strict, as a module's is. It can import with `import … from '…'`
+at the start of a line and `import('…')` with a literal specifier, but it can't `export`. A
+Python snippet runs as a module, with top-level `await` allowed, in a fresh namespace each run.
+Either runs in a Web Worker, so it can't reach the page or its DOM, and a snippet that loops
+forever freezes nothing but itself.
