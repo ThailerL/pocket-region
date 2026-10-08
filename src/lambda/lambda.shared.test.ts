@@ -256,8 +256,8 @@ export const handler = async (event) => {
     expect(thrown.status).toBe(200);
     expect(thrown.error).toBe('Unhandled');
     expect(thrown.payload).toEqual({ errorType: 'Error', errorMessage: 'handler failed', stackTrace: expect.any(Array) });
-    // V8 starts a stack with the message and Firefox doesn't, but both name the throwing function
-    expect(thrown.payload.stackTrace).toContainEqual(expect.stringContaining('handler'));
+    // WebKit leaves an arrow function's frame unnamed, so the line it threw on is what every engine gives
+    expect(thrown.payload.stackTrace).toContainEqual(expect.stringMatching(/:6:\d+\)?$/));
   });
 
   it("returns the handler's log with LogType Tail", async () => {
