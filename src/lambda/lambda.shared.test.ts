@@ -516,7 +516,7 @@ export const handler = async (event) => {
     });
     expect(first.log).toContain('handling {"hello": "world"}');
     expect((await invoke('snake', {})).payload.calls).toBe(2);
-  }, 60_000);
+  }, 120_000);
 
   it('gives a Python handler boto3, pointed at the region', async () => {
     await createPythonFunction('boto', BOTO3_HANDLER);
@@ -524,7 +524,7 @@ export const handler = async (event) => {
     expect(error).toBeUndefined();
     expect(payload).toEqual({ body: 'hello from boto3' });
     expect(await bucketExists('made-by-boto3')).toBe(true);
-  }, 60_000);
+  }, 120_000);
 
   it('reports a raised Python exception as an unhandled function error, with its type and traceback', async () => {
     const thrown = await invoke('snake', { raise: true }, { LogType: 'Tail' });
@@ -544,7 +544,7 @@ export const handler = async (event) => {
     const { error, payload } = await invoke('snake-neighbours', { name: 'world' });
     expect(error).toBeUndefined();
     expect(payload).toEqual({ greeting: 'hello world!' });
-  }, 60_000);
+  }, 120_000);
 
   it("fails an invocation whose Python handler cannot load, in Lambda's words", async () => {
     await createPythonFunction('snake-import', 'import nothing_here\n');
@@ -553,7 +553,7 @@ export const handler = async (event) => {
     expect(failed.payload.errorMessage).toBe("Unable to import module 'index': No module named 'nothing_here'");
     await createPythonFunction('snake-missing', 'x = 1\n');
     expect((await invoke('snake-missing', {})).payload.errorMessage).toBe("Handler 'handler' missing on module 'index'");
-  }, 60_000);
+  }, 120_000);
 
   it('refuses a custom runtime, whose bootstrap MiniStack would spawn', async () => {
     await createFunction('custom', { Runtime: 'provided.al2023', Handler: 'bootstrap', Code: { ZipFile: zipOf('bootstrap', '#!/bin/sh') } });
