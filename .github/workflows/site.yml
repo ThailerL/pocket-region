@@ -31,7 +31,7 @@ jobs:
       - run: npm run check
       - run: npm run vendor
       - run: npm run build
-      - run: npx playwright install --with-deps chromium firefox
+      - run: npx playwright install --with-deps chromium firefox webkit
       # Before the tests: they import site/src/runnable/session.ts, whose tsconfig extends Astro's
       - run: npm ci --prefix site
       # Pyodide cold starts compete for the runner's 4 cores
