@@ -4,7 +4,6 @@ import importlib.util
 import io
 import json
 import sys
-import uuid
 import zipfile
 
 from js import Object
@@ -36,10 +35,10 @@ def _credentials(config):
     return credentials
 
 
-def _invocation(func, event):
+def _invocation(func, event, request_id):
     config = func.get("config") or func
     invocation = {
-        "requestId": str(uuid.uuid4()),
+        "requestId": request_id,
         "config": config,
         "event": json.dumps(event),
         "credentials": _credentials(config),
@@ -53,8 +52,8 @@ def _invocation(func, event):
 # Reaches into ministack's private names and record shape: re-run the Lambda tests on a bump
 def _patch_lambda(lambda_svc):
     # ministack's executor for python and nodejs, so its slot, request id, and log framing stay its own
-    def execute_function_warm(func, event):
-        outcome = suspend(LAMBDA_EXECUTOR.execute(_invocation(func, event))).to_py()
+    def execute_function_warm(func, event, request_id):
+        outcome = suspend(LAMBDA_EXECUTOR.execute(_invocation(func, event, request_id))).to_py()
         if "error" not in outcome:
             return {"body": json.loads(outcome["result"]), "log": outcome["log"]}
         # The runtime's own payload, as Lambda answers it: this executor replaces MiniStack's, so nothing upstream shapes it

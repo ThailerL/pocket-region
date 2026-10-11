@@ -17,7 +17,7 @@ exports[`runnable docs examples > index.mdx example 1 prints what it did 1`] = `
 
 exports[`runnable docs examples > lambda.mdx example 1 prints what it did 1`] = `
 [
-  "hello, world",
+  ""hello, world"",
 ]
 `;
 

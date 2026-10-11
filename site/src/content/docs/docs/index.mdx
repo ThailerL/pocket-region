@@ -50,7 +50,7 @@ await region.stop();
 handler that turns the client's requests into calls on the region, as one config. The SDK refuses
 to build a request without a region and credentials, but any values do and nothing is dialed.
 
-A first visit downloads about 10.5 MB: 6.8 MB of wheels and the Python standard library, already
+A first visit downloads about 10.8 MB: 7.1 MB of wheels and the Python standard library, already
 compressed, and 3.7 MB of Pyodide from jsDelivr, unless you pass `indexURL`.
 Everything else works as it does in Node, except that Lambda handlers run in Web Workers and
 there is no `save` or `serve`.
