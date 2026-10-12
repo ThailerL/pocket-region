@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createRegion, indexedDbStore, requestHandler, type RegionOutput, type StateFiles, type StateStore } from './browser.ts';
 import { fromCdn } from './import-map.ts';
 import { clientConfig, s3, zipOf } from './testing/clients.ts';
-import { assetsBaseUrl, createTestRegion } from './testing/region.browser.ts';
+import { assetsBaseUrl, createTestRegion, failWheelOnce } from './testing/region.browser.ts';
 import { describeStore } from './testing/stores.ts';
 
 const decoder = new TextDecoder();
@@ -70,6 +70,28 @@ describe('a region in a worker', () => {
     expect(JSON.parse(decoder.decode(Payload))).toEqual({ greeting: 'from the page' });
     await region.stop();
   }, 60_000);
+
+  it('fails a Python function whose wheel could not be loaded, and loads it again for the next invocation', async () => {
+    const wheel = await failWheelOnce();
+    const region = await createTestRegion();
+    const lambda = new LambdaClient(clientConfig({ requestHandler: requestHandler(region) }));
+    await lambda.send(
+      new CreateFunctionCommand({
+        FunctionName: 'snake',
+        Runtime: 'python3.13',
+        Handler: 'index.handler',
+        Role: 'arn:aws:iam::000000000000:role/lambda',
+        Code: { ZipFile: zipOf('index.py', 'def handler(event, context):\n    return "loaded"\n') },
+      }),
+    );
+    const failed = await lambda.send(new InvokeCommand({ FunctionName: 'snake' }));
+    expect(failed.FunctionError).toBe('Unhandled');
+    expect(JSON.parse(decoder.decode(failed.Payload))).toMatchObject({ errorMessage: `Could not load ${wheel}` });
+    const { FunctionError, Payload } = await lambda.send(new InvokeCommand({ FunctionName: 'snake' }));
+    expect(FunctionError).toBeUndefined();
+    expect(JSON.parse(decoder.decode(Payload))).toBe('loaded');
+    await region.stop();
+  }, 120_000);
 });
 
 describeStore('indexedDbStore', async (name) => indexedDbStore(`pocket-region-${name}-${crypto.randomUUID()}`));

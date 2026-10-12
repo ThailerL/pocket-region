@@ -1,5 +1,6 @@
 // What both runtimes do with a handler, bundled into each: nothing here may need Node or a DOM
 import type { LambdaError } from '../core.ts';
+import { requireWheels } from '../wheels.ts';
 import type { Invoker, PythonRuntime } from './pool.ts';
 import type { PyodideInterface } from 'pyodide';
 
@@ -71,6 +72,7 @@ export async function loadPythonHandler(
   const py = await loadPyodide({ indexURL, env: { ...env, LAMBDA_TASK_ROOT: TASK_ROOT }, stdout: console.log, stderr: console.error });
   install(py);
   await py.loadPackage(wheels, { messageCallback() {} });
+  requireWheels(py, wheels);
   py.runPython(source);
   const failure: LambdaError | undefined = await py.globals.get('load')(env._HANDLER || 'lambda_function.lambda_handler');
   return failure ? { error: failure } : py.globals.get('invoke');
