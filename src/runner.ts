@@ -61,7 +61,8 @@ export function createRunner(options: RunnerOptions = {}): Runner {
   let prepared = false;
   // A setup that failed partway leaves the region to be emptied before it runs again
   let spoiled = false;
-  const workers = new Map<Language, Worker>();
+  // unanswered counts the runs posted to the worker that it has yet to answer
+  const workers = new Map<Language, { worker: Worker; unanswered: number }>();
   let active: Language | undefined;
   let current: RunOptions | undefined;
   const runs = pendingCalls<void>();
@@ -89,10 +90,14 @@ export function createRunner(options: RunnerOptions = {}): Runner {
     return { region: held, fresh: !prepared };
   }
 
+  const end = (language: Language) => {
+    workers.get(language)?.worker.terminate();
+    workers.delete(language);
+  };
+
   // Ends whatever that language's worker is running, however stuck; its next run starts a fresh one
   const abort = (error: Error, language = active) => {
-    workers.get(language!)?.terminate();
-    workers.delete(language!);
+    end(language!);
     runs.fail(error);
   };
 
@@ -106,30 +111,33 @@ export function createRunner(options: RunnerOptions = {}): Runner {
       },
       // A worker never booted would hold every later run
       (error) => {
-        if (workers.get('python') === worker) abort(error, 'python');
+        if (workers.get('python')?.worker === worker) abort(error, 'python');
       },
     );
 
   function workerFor(language: Language) {
     const running = workers.get(language);
     if (running) return running;
-    const started = startWorker(importing(siblingUrl(`runner/${language}-worker`)), `pocket-region-${language}-runner`);
-    onFailure(started, "the runner's worker", (error) => abort(error, language));
-    started.onmessage = ({ data }: MessageEvent<FromRunnerWorker>) => {
+    const worker = startWorker(importing(siblingUrl(`runner/${language}-worker`)), `pocket-region-${language}-runner`);
+    const started = { worker, unanswered: 0 };
+    onFailure(worker, "the runner's worker", (error) => abort(error, language));
+    worker.onmessage = ({ data }: MessageEvent<FromRunnerWorker>) => {
       switch (data.type) {
         case 'resolve':
-          answer(async () => boot().resolve(data.specifier), (url, error) => started.postMessage({ type: 'resolved', id: data.id, url, error }));
+          answer(async () => boot().resolve(data.specifier), (url, error) => worker.postMessage({ type: 'resolved', id: data.id, url, error }));
           return;
         case 'output':
           return current?.onOutput?.(data.output);
         case 'done':
-          return runs.settle(data.id);
+          runs.settle(data.id);
+          break;
         case 'failed':
-          return runs.settle(data.id, undefined, data.error);
+          runs.settle(data.id, undefined, data.error);
       }
+      if (--started.unanswered === 0 && data.retire) end(language);
     };
     workers.set(language, started);
-    if (language === 'python') bootPython(started);
+    if (language === 'python') bootPython(worker);
     return started;
   }
 
@@ -145,10 +153,11 @@ export function createRunner(options: RunnerOptions = {}): Runner {
   // The code's imports start loading now; it runs once attach sends its region
   function post({ language, code }: Snippet, fresh: boolean, echo?: boolean) {
     const target = workerFor((active = language));
+    target.unanswered++;
     let id = 0;
-    const finished = runs.start((started) => target.postMessage({ type: 'run', id: (id = started), code, fresh, echo } satisfies ToRunnerWorker));
+    const finished = runs.start((started) => target.worker.postMessage({ type: 'run', id: (id = started), code, fresh, echo } satisfies ToRunnerWorker));
     finished.catch(() => {});
-    return { finished, attach: (region: Promise<Region>) => attach(target, id, region) };
+    return { finished, attach: (region: Promise<Region>) => attach(target.worker, id, region) };
   }
 
   async function complete(run: ReturnType<typeof post>, region: Promise<Region>, phase: RunnerPhase, onStatus: (status: RunnerStatus) => void) {

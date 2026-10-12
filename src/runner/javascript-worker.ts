@@ -5,7 +5,7 @@ import { pendingCalls } from '../region/protocol.ts';
 import { withRegion } from '../with-region.ts';
 import { createConsole, format } from './console.ts';
 import { rewriteImports } from './imports.ts';
-import { post, serveRuns, type RunMessage } from './serve.ts';
+import { post, retire, serveRuns, type RunMessage } from './serve.ts';
 import type { JavaScriptOutput } from './protocol.ts';
 import { importSnippet, lineIn, moduleOf } from './stack.ts';
 import { stripTypes } from './strip.ts';
@@ -13,9 +13,13 @@ import { stripTypes } from './strip.ts';
 const resolutions = pendingCalls<string>();
 const modules = promiseCache<object>();
 const load = (specifier: string) =>
-  modules(specifier, () =>
-    resolutions.start((id) => post({ type: 'resolve', id, specifier })).then((url) => import(/* @vite-ignore */ url)),
-  );
+  modules(specifier, async () => {
+    const url = await resolutions.start((id) => post({ type: 'resolve', id, specifier }));
+    const imported: Promise<object> = import(/* @vite-ignore */ url);
+    // Chromium and WebKit keep a module's failed load for the worker's life
+    imported.catch(retire);
+    return imported;
+  });
 
 // What the worker itself put on the global object; a fresh run removes what snippets added since,
 // as a Python run starts its namespace over

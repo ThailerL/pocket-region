@@ -28,5 +28,6 @@ export type ToRunnerWorker =
 export type FromRunnerWorker =
   | { type: 'resolve'; id: number; specifier: string }
   | { type: 'output'; output: RunnerOutput }
-  | { type: 'done'; id: number }
-  | { type: 'failed'; id: number; error: WireError };
+  // retire: the worker should run nothing more, so the page ends it once its runs are answered
+  | { type: 'done'; id: number; retire: boolean }
+  | { type: 'failed'; id: number; error: WireError; retire: boolean };

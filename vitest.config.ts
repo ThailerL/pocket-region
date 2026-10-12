@@ -12,6 +12,27 @@ const workerRunnerStub = (): Plugin => ({
   },
 });
 
+// A URL under /fails-once/<anything>/ answers 503 the first time, then as the path after it would
+const failsOnce = (): Plugin => {
+  const asked = new Set<string>();
+  return {
+    name: 'pocket-region:fails-once',
+    configureServer({ middlewares }) {
+      middlewares.use((req, res, next) => {
+        const path = /^\/fails-once\/[^/]+(\/.*)$/.exec(req.url ?? '')?.[1];
+        if (path === undefined) return next();
+        if (asked.has(req.url!)) {
+          req.url = path;
+          return next();
+        }
+        asked.add(req.url!);
+        res.statusCode = 503;
+        res.end();
+      });
+    },
+  };
+};
+
 export default defineConfig({
   test: {
     projects: [
@@ -25,7 +46,7 @@ export default defineConfig({
         },
       },
       {
-        plugins: [workerRunnerStub()],
+        plugins: [workerRunnerStub(), failsOnce()],
         resolve: {
           alias: [
             {

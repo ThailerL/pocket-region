@@ -11,6 +11,12 @@ type Waiting = { resolve: (port: MessagePort) => void; reject: (error: Error) =>
 const port = workerEndpoint<FromRunnerWorker, ToRunnerWorker>();
 export const post = (message: FromRunnerWorker) => port.postMessage(message);
 
+// Said with every answer from then on, since a run beside the one that found out may still finish
+let retiring = false;
+export const retire = () => {
+  retiring = true;
+};
+
 // A run either throws or hands back a failure already in wire form
 export function serveRuns(run: (data: RunMessage, region: Promise<Region>) => Promise<WireError | undefined | void>, other: (data: Other) => void = () => {}) {
   const regions = new Map<number, Waiting>();
@@ -23,15 +29,10 @@ export function serveRuns(run: (data: RunMessage, region: Promise<Region>) => Pr
       }
       case 'run': {
         const regionPort = new Promise<MessagePort>((resolve, reject) => regions.set(data.id, { resolve, reject }));
-        try {
-          const failure = await run(data, regionPort.then((connected) => regionOver(connected, {})));
-          post(failure ? { type: 'failed', id: data.id, error: failure } : { type: 'done', id: data.id });
-        } catch (error) {
-          post({ type: 'failed', id: data.id, error: toWire(error) });
-        } finally {
-          // Also a run that failed before its port arrived
-          regionPort.then((connected) => connected.close(), () => {});
-        }
+        const failure = await run(data, regionPort.then((connected) => regionOver(connected, {}))).catch(toWire);
+        post(failure ? { type: 'failed', id: data.id, error: failure, retire: retiring } : { type: 'done', id: data.id, retire: retiring });
+        // Also a run that failed before its port arrived
+        regionPort.then((connected) => connected.close(), () => {});
         return;
       }
       default:

@@ -1,8 +1,7 @@
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { createRunner, type JavaScriptOutput, type Language, type PythonOutput, regionSupported, type RunnerOutput, type RunnerPhase } from './browser.ts';
-import type { VendorManifest } from './core.ts';
 import { s3 } from './testing/clients.ts';
-import { assetsBaseUrl, createTestRegion, indexURL } from './testing/region.browser.ts';
+import { assetsBaseUrl, createTestRegion, failingOnce, failWheelOnce, indexURL, vendorManifest } from './testing/region.browser.ts';
 
 // A snippet's worker imports by URL, so its modules come from jsDelivr at the site's versions
 const versions: Record<string, string> = {
@@ -263,6 +262,20 @@ console.log(\`\${out.Buckets!.length} \${Unit.Bucket}s\` satisfies string);`);
     expect((await run('console.log(typeof document, typeof window);')).text).toEqual(['undefined undefined']);
   }, 60_000);
 
+  it('fails a run whose import could not be loaded, not the setup before it, and loads it again for the next', async () => {
+    // Behind a module that loads, since WebKit keeps only a dependency's failure for the worker's life
+    const parent = `data:text/javascript,${encodeURIComponent(`export * from ${JSON.stringify(failingOnce('/node_modules/fflate/esm/browser.js'))};`)}`;
+    const code = `import { strToU8 } from ${JSON.stringify(parent)};\nconsole.log(strToU8('a').length);`;
+    const prepared = createRunner({ boot, reset: 'never', setup: "console.log('set up');" });
+    const first = await run(code, prepared);
+    expect(first.result).toMatchObject({ ok: false, error: expect.objectContaining({ message: expect.not.stringContaining('setup failed') }) });
+    expect(first.statuses).toEqual(['booting', 'setting-up', 'running']);
+    const second = await run(code, prepared);
+    expect(second.statuses).toEqual(['running']);
+    expect(second.text).toEqual(['1']);
+    await prepared.stop();
+  }, 60_000);
+
   it('stops a run that never ends, and runs again after', async () => {
     const stuck = runner.run('for (;;) {}');
     await new Promise((resolve) => setTimeout(resolve, 200));
@@ -298,8 +311,7 @@ describe('createRunner with Python', () => {
   }, 120_000);
 
   it("runs the boto3 a region's Python functions get, from a region it was handed", async () => {
-    const manifest: VendorManifest = await (await fetch(`${assetsBaseUrl}/meta.json`)).json();
-    const pinned = manifest.pythonRuntimeSpec.split('==')[1];
+    const pinned = (await vendorManifest()).pythonRuntimeSpec.split('==')[1];
     const made = await createTestRegion();
     const against = createRunner({ region: made });
     expect((await python('import boto3\nprint(boto3.__version__)', against)).text).toEqual([pinned]);
@@ -308,8 +320,7 @@ describe('createRunner with Python', () => {
   }, 120_000);
 
   it("installs python.packages beside the region's boto3, which stays at its pinned version", async () => {
-    const manifest: VendorManifest = await (await fetch(`${assetsBaseUrl}/meta.json`)).json();
-    const botocore = manifest.pythonRuntime.find(({ file }) => file.startsWith('botocore-'))!.file.split('-')[1];
+    const botocore = (await vendorManifest()).pythonRuntime.find(({ file }) => file.startsWith('botocore-'))!.file.split('-')[1];
     const withPackages = createRunner({ boot, python: { packages: ['pynamodb==6.1.0'] } });
     const { result, text } = await python('import botocore, pynamodb\nprint(pynamodb.__version__, botocore.__version__)', withPackages);
     expect(result.ok).toBe(true);
@@ -370,6 +381,14 @@ s3.get_object(Bucket='alpha', Key='missing')`,
     // Setup prepares the region, not the snippet's names
     expect((await python('print(name)', prepared)).result).toMatchObject({ ok: false, error: expect.objectContaining({ name: 'NameError' }) });
     await prepared.stop();
+  }, 120_000);
+
+  it('fails a Python run whose wheel could not be loaded, and loads it again for the next', async () => {
+    const wheel = await failWheelOnce();
+    const flaky = createRunner({ boot });
+    expect((await python('import boto3', flaky)).result).toMatchObject({ ok: false, error: expect.objectContaining({ message: `Could not load ${wheel}` }) });
+    expect((await python('import boto3', flaky)).result.ok).toBe(true);
+    await flaky.stop();
   }, 120_000);
 
   it('stops a Python run that never ends, and runs again after', async () => {

@@ -2,9 +2,10 @@
 import type { PyodideInterface } from 'pyodide';
 import type { Dispatch, OutputStream, Region } from '../core.ts';
 import type { WireError } from '../region/protocol.ts';
+import { requireWheels } from '../wheels.ts';
 import type { PythonBoot } from './protocol.ts';
 import { SNIPPET_PYTHON } from './python.generated.ts';
-import { post, serveRuns, type RunMessage } from './serve.ts';
+import { post, retire, serveRuns, type RunMessage } from './serve.ts';
 
 type Run = (source: string, echo: boolean, fresh: boolean) => Promise<WireError | undefined>;
 
@@ -26,6 +27,7 @@ async function boot({ indexURL, pyodideVersion, pythonRuntime, packages, environ
     packages: installing ? [...pythonRuntime, 'micropip'] : pythonRuntime,
     ...(installing && { packageBaseUrl: `https://cdn.jsdelivr.net/pyodide/v${pyodideVersion}/full/` }),
   });
+  requireWheels(py, pythonRuntime);
   if (installing) {
     // After the pinned wheels, so what they satisfy stays at the region's versions
     const micropip = py.pyimport('micropip');
@@ -42,6 +44,7 @@ async function boot({ indexURL, pyodideVersion, pythonRuntime, packages, environ
 // The first run can arrive first: the page posts boot once it has the region's assets
 let booted: (python: PythonBoot) => void;
 const booting = new Promise<PythonBoot>((resolve) => (booted = resolve)).then(boot);
+booting.catch(retire);
 
 async function run({ code, fresh, echo = false }: RunMessage, attached: Promise<Region>) {
   // Pyodide and the wheels load while the region boots on the page
