@@ -63,7 +63,6 @@ export function createRunner(options: RunnerOptions = {}): Runner {
   let spoiled = false;
   // unanswered counts the runs posted to the worker that it has yet to answer
   const workers = new Map<Language, { worker: Worker; unanswered: number }>();
-  let active: Language | undefined;
   let current: RunOptions | undefined;
   const runs = pendingCalls<void>();
   // One snippet at a time: they share the region
@@ -95,9 +94,9 @@ export function createRunner(options: RunnerOptions = {}): Runner {
     workers.delete(language);
   };
 
-  // Ends whatever that language's worker is running, however stuck; its next run starts a fresh one
-  const abort = (error: Error, language = active) => {
-    end(language!);
+  // Ends that language's worker and fails the pending runs; its next run starts a fresh one
+  const abort = (error: Error, language: Language) => {
+    end(language);
     runs.fail(error);
   };
 
@@ -152,7 +151,7 @@ export function createRunner(options: RunnerOptions = {}): Runner {
 
   // The code's imports start loading now; it runs once attach sends its region
   function post({ language, code }: Snippet, fresh: boolean, echo?: boolean) {
-    const target = workerFor((active = language));
+    const target = workerFor(language);
     target.unanswered++;
     let id = 0;
     const finished = runs.start((started) => target.worker.postMessage({ type: 'run', id: (id = started), code, fresh, echo } satisfies ToRunnerWorker));
@@ -219,9 +218,10 @@ export function createRunner(options: RunnerOptions = {}): Runner {
       queue = result;
       return result;
     },
-    // The runner's own region goes with the worker, and a later run boots again
+    // The runner's own region goes with the workers, and a later run boots again
     async stop() {
-      abort(new Error('stopped'));
+      for (const language of workers.keys()) end(language);
+      runs.fail(new Error('stopped'));
       await queue;
       const booted = own;
       own = undefined;

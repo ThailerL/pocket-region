@@ -391,6 +391,18 @@ s3.get_object(Bucket='alpha', Key='missing')`,
     await flaky.stop();
   }, 120_000);
 
+  it('stops with nothing left of either language, whichever ran last', async () => {
+    const made = await createTestRegion({ resolve });
+    const against = createRunner({ region: made });
+    expect((await python('x = 1', against)).result.ok).toBe(true);
+    expect((await run('globalThis.y = 1;', against)).result.ok).toBe(true);
+    await against.stop();
+    expect((await python('print(x)', against)).result).toMatchObject({ ok: false, error: expect.objectContaining({ name: 'NameError' }) });
+    expect((await run('console.log(typeof y);', against)).text).toEqual(['undefined']);
+    await against.stop();
+    await made.stop();
+  }, 120_000);
+
   it('stops a Python run that never ends, and runs again after', async () => {
     const stuck = runner.run('while True: pass', { language: 'python' });
     await new Promise((resolve) => setTimeout(resolve, 200));

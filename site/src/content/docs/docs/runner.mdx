@@ -195,7 +195,8 @@ code without one where it's false.
     interpreter and packages during whichever phase comes first.
 - **`stop()`** ends the current run at once, however stuck it is: its result is `ok: false` with
   an error saying `stopped`. The region the runner booted itself stops with it, and a later run
-  boots again. A region you passed in is left alone.
+  boots again. A region you passed in is left alone, but a run after `stop()` starts without an
+  earlier Python run's names or what a JavaScript run put on `globalThis`.
 
 A snippet can be TypeScript. The runner removes the types before running it, without type
 checking, and leaves plain JavaScript as it is.
