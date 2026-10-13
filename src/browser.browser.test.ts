@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createRegion, indexedDbStore, requestHandler, type RegionOutput, type StateFiles, type StateStore } from './browser.ts';
 import { fromCdn } from './import-map.ts';
 import { clientConfig, s3, zipOf } from './testing/clients.ts';
-import { assetsBaseUrl, createTestRegion, failWheelOnce } from './testing/region.browser.ts';
+import { assetsBaseUrl, createTestRegion, failRegionWheelOnce, failWheelOnce } from './testing/region.browser.ts';
 import { describeStore } from './testing/stores.ts';
 
 const decoder = new TextDecoder();
@@ -26,6 +26,11 @@ describe('createRegion in a page', () => {
       fetch.mockRestore();
     }
   });
+
+  it('refuses to boot without a wheel MiniStack starts without', async () => {
+    const wheel = await failRegionWheelOnce('jsonata_python-');
+    await expect(createTestRegion()).rejects.toThrow(`Could not load ${wheel}`);
+  }, 60_000);
 });
 
 describe('a region in a worker', () => {

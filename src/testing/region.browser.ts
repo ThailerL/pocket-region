@@ -22,5 +22,15 @@ export async function failWheelOnce() {
   return wheel.file;
 }
 
+// The same for one of the region's own wheels
+export async function failRegionWheelOnce(prefix: string) {
+  const manifest = await vendorManifest();
+  const index = manifest.wheels.findIndex((file) => file.startsWith(prefix));
+  const file = manifest.wheels[index]!;
+  manifest.wheels[index] = failingOnce(`${assetsBaseUrl}/${file}`);
+  vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(Response.json(manifest));
+  return file;
+}
+
 // Nothing listens in a page, so the default port collides with nothing
 export const regionPort = async (): Promise<number | undefined> => undefined;

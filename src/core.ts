@@ -1,6 +1,7 @@
 import type { loadPyodide, PyodideAPI } from 'pyodide';
 import { PYTHON_SOURCES } from './python.generated.ts';
 import { PACKAGE_VERSION } from './version.generated.ts';
+import { requireWheels } from './wheels.ts';
 
 export type OutputStream = 'stdout' | 'stderr';
 export type RegionOutput = { text: string; stream: OutputStream };
@@ -304,6 +305,7 @@ async function startRegion(
   py.setStdout({ batched: stdout });
   py.setStderr({ batched: stderr });
   await py.loadPackage(assets.wheels, { messageCallback: stdout, errorCallback: stderr });
+  requireWheels(py, assets.wheels);
 
   const port = settings.port ?? DEFAULT_PORT;
   // Bound once the sources have run; nothing dispatches before boot resolves
