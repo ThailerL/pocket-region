@@ -59,6 +59,9 @@ export function pendingCalls<T>() {
   const pending = new Map<number, Settled<T>>();
   let next = 0;
   return {
+    get size() {
+      return pending.size;
+    },
     start: (send: (id: number) => void) =>
       new Promise<T>((resolve, reject) => {
         const id = next++;

@@ -391,6 +391,14 @@ s3.get_object(Bucket='alpha', Key='missing')`,
     await flaky.stop();
   }, 120_000);
 
+  it("fails only its own runs when one language's worker breaks", async () => {
+    const mixed = createRunner({ boot });
+    // Thrown in the JavaScript worker while the Python run after it is still booting
+    expect((await run("setTimeout(() => { throw new Error('late'); }, 200);", mixed)).result.ok).toBe(true);
+    expect((await python("print('unharmed')", mixed)).text).toEqual(['unharmed']);
+    await mixed.stop();
+  }, 120_000);
+
   it('stops with nothing left of either language, whichever ran last', async () => {
     const made = await createTestRegion({ resolve });
     const against = createRunner({ region: made });

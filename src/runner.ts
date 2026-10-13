@@ -61,10 +61,8 @@ export function createRunner(options: RunnerOptions = {}): Runner {
   let prepared = false;
   // A setup that failed partway leaves the region to be emptied before it runs again
   let spoiled = false;
-  // unanswered counts the runs posted to the worker that it has yet to answer
-  const workers = new Map<Language, { worker: Worker; unanswered: number }>();
+  const workers = new Map<Language, { worker: Worker; runs: ReturnType<typeof pendingCalls<void>> }>();
   let current: RunOptions | undefined;
-  const runs = pendingCalls<void>();
   // One snippet at a time: they share the region
   let queue: Promise<unknown> = Promise.resolve();
 
@@ -94,10 +92,10 @@ export function createRunner(options: RunnerOptions = {}): Runner {
     workers.delete(language);
   };
 
-  // Ends that language's worker and fails the pending runs; its next run starts a fresh one
+  // Ends that language's worker and fails the runs it has yet to answer; its next run starts a fresh one
   const abort = (error: Error, language: Language) => {
+    workers.get(language)?.runs.fail(error);
     end(language);
-    runs.fail(error);
   };
 
   // A snippet's Pyodide and boto3 are the ones the region's Python functions get
@@ -118,7 +116,7 @@ export function createRunner(options: RunnerOptions = {}): Runner {
     const running = workers.get(language);
     if (running) return running;
     const worker = startWorker(importing(siblingUrl(`runner/${language}-worker`)), `pocket-region-${language}-runner`);
-    const started = { worker, unanswered: 0 };
+    const started = { worker, runs: pendingCalls<void>() };
     onFailure(worker, "the runner's worker", (error) => abort(error, language));
     worker.onmessage = ({ data }: MessageEvent<FromRunnerWorker>) => {
       switch (data.type) {
@@ -128,12 +126,12 @@ export function createRunner(options: RunnerOptions = {}): Runner {
         case 'output':
           return current?.onOutput?.(data.output);
         case 'done':
-          runs.settle(data.id);
+          started.runs.settle(data.id);
           break;
         case 'failed':
-          runs.settle(data.id, undefined, data.error);
+          started.runs.settle(data.id, undefined, data.error);
       }
-      if (--started.unanswered === 0 && data.retire) end(language);
+      if (started.runs.size === 0 && data.retire) end(language);
     };
     workers.set(language, started);
     if (language === 'python') bootPython(worker);
@@ -151,12 +149,11 @@ export function createRunner(options: RunnerOptions = {}): Runner {
 
   // The code's imports start loading now; it runs once attach sends its region
   function post({ language, code }: Snippet, fresh: boolean, echo?: boolean) {
-    const target = workerFor(language);
-    target.unanswered++;
+    const { worker, runs } = workerFor(language);
     let id = 0;
-    const finished = runs.start((started) => target.worker.postMessage({ type: 'run', id: (id = started), code, fresh, echo } satisfies ToRunnerWorker));
+    const finished = runs.start((started) => worker.postMessage({ type: 'run', id: (id = started), code, fresh, echo } satisfies ToRunnerWorker));
     finished.catch(() => {});
-    return { finished, attach: (region: Promise<Region>) => attach(target.worker, id, region) };
+    return { finished, attach: (region: Promise<Region>) => attach(worker, id, region) };
   }
 
   async function complete(run: ReturnType<typeof post>, region: Promise<Region>, phase: RunnerPhase, onStatus: (status: RunnerStatus) => void) {
@@ -220,8 +217,7 @@ export function createRunner(options: RunnerOptions = {}): Runner {
     },
     // The runner's own region goes with the workers, and a later run boots again
     async stop() {
-      for (const language of workers.keys()) end(language);
-      runs.fail(new Error('stopped'));
+      for (const language of workers.keys()) abort(new Error('stopped'), language);
       await queue;
       const booted = own;
       own = undefined;
