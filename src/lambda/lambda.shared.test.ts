@@ -1,7 +1,6 @@
 import {
   CreateEventSourceMappingCommand,
   CreateFunctionCommand,
-  GetEventSourceMappingCommand,
   InvokeCommand,
   LambdaClient,
   PutFunctionConcurrencyCommand,
@@ -128,15 +127,12 @@ async function invoke(FunctionName: string, event: object, extra: object = {}, c
 // A queue mapped to the consumer function, holding one message
 async function mapQueue(QueueName: string, MessageBody: string) {
   const { QueueUrl, QueueArn } = await createQueue(sqs, QueueName, { VisibilityTimeout: '30' });
-  const { UUID } = await lambda.send(
+  await lambda.send(
     new CreateEventSourceMappingCommand({ FunctionName: 'consumer', EventSourceArn: QueueArn, BatchSize: 1 }),
   );
   await sqs.send(new SendMessageCommand({ QueueUrl, MessageBody }));
-  return { UUID: UUID!, QueueUrl };
+  return QueueUrl;
 }
-
-const lastProcessingResult = (UUID: string) =>
-  lambda.send(new GetEventSourceMappingCommand({ UUID })).then((mapping) => mapping.LastProcessingResult);
 
 async function nextMessage(QueueUrl: string) {
   let found: unknown;
@@ -354,12 +350,13 @@ export const handler = async (event) => {
       mapQueue('refunds', 'made-before-failing fail'),
     ]);
 
-    await expect.poll(() => lastProcessingResult(ok.UUID), { timeout: 10_000 }).toBe('OK - 1 records');
-    await expect.poll(() => lastProcessingResult(failed.UUID), { timeout: 10_000 }).toBe('FAILED');
+    await expect.poll(() => messagesLeft(ok), { timeout: 10_000 }).toBe(0);
+    await expect
+      .poll(() => invocationsOf('consumer', 'completed'), { timeout: 10_000 })
+      .toContainEqual(expect.objectContaining({ failed: true }));
     await expect(s3.send(new HeadBucketCommand({ Bucket: 'made-by-mapping' }))).resolves.toBeDefined();
     await expect(s3.send(new HeadBucketCommand({ Bucket: 'made-before-failing' }))).resolves.toBeDefined();
-    expect(await messagesLeft(ok.QueueUrl)).toBe(0);
-    expect(await messagesLeft(failed.QueueUrl)).toBe(1);
+    expect(await messagesLeft(failed)).toBe(1);
   }, 30_000);
 
   it('runs mapped batches concurrently, up to the reserved concurrency', async () => {
@@ -398,7 +395,7 @@ export const handler = async (event) => {
     const { QueueUrl, QueueArn } = await createQueue(sqs, 'partly-failing', { VisibilityTimeout: '30' });
     await sqs.send(new SendMessageCommand({ QueueUrl, MessageBody: 'ok' }));
     await sqs.send(new SendMessageCommand({ QueueUrl, MessageBody: 'fail' }));
-    const { UUID } = await lambda.send(
+    await lambda.send(
       new CreateEventSourceMappingCommand({
         FunctionName: 'partial',
         EventSourceArn: QueueArn,
@@ -407,8 +404,8 @@ export const handler = async (event) => {
       }),
     );
 
-    await expect.poll(() => lastProcessingResult(UUID!), { timeout: 10_000 }).toBe('OK - 1 records, 1 partial failures');
-    expect(await messagesLeft(QueueUrl)).toBe(1);
+    await expect.poll(() => invocationsOf('partial', 'completed'), { timeout: 10_000 }).toHaveLength(1);
+    await expect.poll(() => messagesLeft(QueueUrl), { timeout: 10_000 }).toBe(1);
   }, 30_000);
 
   it('runs the function an EventBridge rule targets', async () => {

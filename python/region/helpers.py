@@ -2,7 +2,9 @@
 # ASGI app is driven directly: every "request" is an in-process function call.
 import asyncio
 import os
+import sys
 import tempfile
+import types
 from urllib.parse import unquote
 
 from js import Object
@@ -28,8 +30,20 @@ os.environ.update(
     AUTH="true" if ENFORCE_IAM else "false",
 )
 
+# hypercorn.typing imports Event from here only to annotate, and Pyodide has no _multiprocessing
+_synchronize = types.ModuleType("multiprocessing.synchronize")
+_synchronize.Event = type("Event", (), {})
+sys.modules["multiprocessing.synchronize"] = _synchronize
+
 from ministack.app import app, _build_persistence_save_dict
 from ministack.core.persistence import save_all
+
+# Without botocore, which the vendored tree leaves out, MiniStack's loader answers [] where callers expect {}
+if ENFORCE_IAM:
+    from ministack.core import iam_actions
+
+    _load_botocore_model = iam_actions._load_botocore_model
+    iam_actions._load_botocore_model = lambda service: _load_botocore_model(service) or {}
 
 # _build_persistence_save_dict is private to ministack, but it is the same call its own
 # lifespan shutdown makes; a patch release could move it
