@@ -54,9 +54,10 @@ function interceptFetch(endpoint: string) {
     const request = new Request(input, init);
     const id = nextId++;
     const headers = Object.fromEntries(request.headers);
-    // A forbidden header, which Request drops, and what the emulator routes on
+    // Forbidden headers, which Request drops: the host the emulator routes on, and a length the SDK signed
     headers.host = url.host;
     const body = new Uint8Array(await request.arrayBuffer());
+    if (request.body !== null) headers['content-length'] = String(body.byteLength);
     const reply = await new Promise<FetchReply>((resolve) => {
       fetches.set(id, resolve);
       port.postMessage({ type: 'fetch', id, method: request.method, path: url.pathname + url.search, headers, body });
